@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"github.com/joho/godotenv"
 	//s "noema/server"
+	"bufio"
 	"context"
 	"google.golang.org/genai"
 	"log"
+	"os"
 )
 
 func initVariables() {
@@ -16,7 +18,7 @@ func initVariables() {
 	}
 }
 
-func makeQuery(s string) {
+func makeQuery(s string, model string) {
 	ctx := context.Background()
 	client, err := genai.NewClient(ctx, nil)
 	if err != nil {
@@ -24,7 +26,7 @@ func makeQuery(s string) {
 	}
 	result, err := client.Models.GenerateContent(
 		ctx,
-		"gemini-3-flash-preview",
+		model,
 		genai.Text(s),
 		nil,
 	)
@@ -37,9 +39,12 @@ func makeQuery(s string) {
 
 func main() {
 	initVariables()
-	var userin string
-	for {
-		fmt.Scanln(&userin)
-		makeQuery(userin)
-	}
+	modelName := "gemini-3-flash-preview" // Use a Gemini 3 model name
+	//for {
+	fmt.Println("Enter Query")
+	reader := bufio.NewReader(os.Stdin)
+	userin, _ := reader.ReadString('\n')
+
+	makeQuery(userin, modelName)
+	//}
 }
