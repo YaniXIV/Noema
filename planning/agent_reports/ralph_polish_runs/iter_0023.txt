@@ -7,7 +7,7 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3c91-3c86-7e81-b337-ffabc77d8aa4
+session id: 019c3eda-307e-7f81-b35f-5e3f6bc08570
 --------
 user
 You are an autonomous coding agent polishing the Noema repository.
@@ -18,8 +18,9 @@ Hard rules:
 - Keep changes small: max 3 files per iteration.
 - No cosmetic-only edits.
 - No new dependencies unless absolutely necessary.
+- keep all the same ui functionality, the end user should be able to do the same stuff but the experiance and design should be better.
 
-Goal: continuously improve production quality.
+Goal: continuously improve production quality. continuously improve front end quality and polish.
 
 Iteration:
 1) Run: cd backend && go test ./...
@@ -29,7 +30,7 @@ Iteration:
 Pick the highest-value improvement:
 A) Reliability/correctness: validation, error handling, run persistence, verify robustness
 B) Tests: add/strengthen tests for the change you made
-C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+C) upgrading the user interface so that it looks better.
 D) Maintainability: reduce duplication with tiny refactors
 E) UX: wizard/results/verify clarity (small, safe changes)
 F) Docs: README/DEPLOYMENT polish
@@ -41,572 +42,4375 @@ Finish with:
 mcp startup: no servers
 
 thinking
-**Confirming skills not required**
-
-The user clarified that skill-creator/installer isn't needed now; instead, tests must be run using exec as per AGENTS.md instructions.
+**Preparing to run tests**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 96ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 200ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
 ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
 
 thinking
-**Planning targeted reliability improvement**
+**Planning targeted UI polish**
 
-I'm searching the repo with ripgrep for TODOs to identify a meaningful reliability-related change affecting at most three files.
+Tests are passing; now I'll explore the frontend to identify a meaningful UI improvement involving up to three files with no new dependencies.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "TODO|FIXME|panic|unsafe|error" -g"*.go"' in /Users/yani/Noema/backend succeeded in 52ms:
-internal/evaluate/prompt.go:func marshalSampledDataset(ds Dataset) ([]byte, error) {
-internal/evaluate/parse.go:func parseSpec(form *multipart.Form) (Spec, error) {
-internal/evaluate/parse.go:func validateSpec(spec Spec) error {
-internal/evaluate/parse.go:func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.FileHeader, error) {
-internal/evaluate/parse.go:func validateDatasetJSON(fh *multipart.FileHeader, imageFiles []*multipart.FileHeader) error {
-internal/evaluate/output.go:func parseEvalOutput(raw string) (EvalOutput, error) {
-internal/evaluate/output.go:func validateEvalOutput(out EvalOutput, enabled map[string]ConstraintRule) error {
-internal/evaluate/handler_test.go:		t.Fatalf("enabledConstraints error: %v", err)
-internal/evaluate/handler_test.go:		t.Fatalf("parseEvalOutputOptional error: %v", err)
-internal/evaluate/handler_test.go:		t.Fatalf("enabledConstraints error: %v", err)
-internal/evaluate/handler_test.go:		t.Fatalf("parseEvalOutputOptional error: %v", err)
-internal/evaluate/handler_test.go:		t.Fatalf("enabledConstraints error: %v", err)
-internal/evaluate/handler_test.go:		t.Fatalf("expected validation error for unknown constraint")
-internal/evaluate/handler_test.go:		t.Fatalf("expected error for image_ref without images")
-internal/evaluate/handler_test.go:		t.Fatalf("unexpected error: %v", err)
-internal/evaluate/handler_test.go:		t.Fatalf("expected error for duplicate dataset ids")
-internal/evaluate/handler_test.go:		t.Fatalf("expected error for unknown dataset fields")
-internal/evaluate/handler_test.go:		t.Fatalf("expected error for empty dataset file")
-internal/evaluate/handler_test.go:		t.Fatalf("expected error for multiple dataset files")
-internal/evaluate/handler_test.go:		t.Fatalf("expected error for duplicate image filenames")
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
+cmd
+data
+go.mod
+go.sum
+internal
+main
+web
 
 thinking
-**Reviewing storage update logic**
+**Identifying frontend context**
 
-I'm checking the evaluate storage updateRunsIndex function to assess its reliability and identify needed improvements. Next, I'll analyze its implementation to decide the best approach.
+The frontend is likely implemented as a web application using list components or views.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"crypto/rand"
-	"encoding/json"
-	"fmt"
-	"io"
-	"math/big"
-	"mime/multipart"
-	"os"
-	"path/filepath"
-	"strconv"
-	"sync/atomic"
-	"time"
-)
-
-var runIDCounter uint64
-
-func genRunID() string {
-	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web' in /Users/yani/Noema/backend succeeded in 52ms:
+static
+templates
 
 thinking
-**Considering data integrity and error handling**
-
-I'm noting that saveUpload lacks fsync, which may impact data integrity, and file permissions or partial writes might need handling. Also, updateRunsIndex could return a corrupted error even if saveJSON succeeds, so I'll check how this error is treated downstream.
+**Identifying need to improve templates**
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package evaluate
-
-import (
-	"encoding/json"
-	"log"
-	"mime/multipart"
-	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
-	"time"
-
-	"noema/internal/config"
-	"noema/internal/zk"
-
-	"github.com/gin-gonic/gin"
-)
-
-// EvaluateResponse is the JSON response for POST /api/evaluate.
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "html|template" web/templates' in /Users/yani/Noema/backend succeeded in 52ms:
+web/templates/verify_results.html:2:<!DOCTYPE html>
+web/templates/verify_results.html:3:<html lang="en">
+web/templates/verify_results.html:11:  {{template "header_public" .}}
+web/templates/verify_results.html:14:    {{template "orb" .}}
+web/templates/verify_results.html:66:</html>
+web/templates/upload.html:2:<!DOCTYPE html>
+web/templates/upload.html:3:<html lang="en">
+web/templates/upload.html:11:  {{template "header_upload" .}}
+web/templates/upload.html:14:    {{template "orb" .}}
+web/templates/upload.html:45:</html>
+web/templates/app_results.html:2:<!DOCTYPE html>
+web/templates/app_results.html:3:<html lang="en">
+web/templates/app_results.html:11:  {{template "header_app" .}}
+web/templates/app_results.html:14:    {{template "orb" .}}
+web/templates/app_results.html:68:</html>
+web/templates/verify.html:2:<!DOCTYPE html>
+web/templates/verify.html:3:<html lang="en">
+web/templates/verify.html:11:  {{template "header_public" .}}
+web/templates/verify.html:14:    {{template "orb" .}}
+web/templates/verify.html:50:</html>
 
 thinking
-**Noting partial write risk**
+**Identifying CSS area for improvement**
 
-UpdateRunsIndex returns an error even if rename succeeds, which logs but doesn't block flow; considering improving saveUpload to use a temp file plus rename to prevent partial writes if copy errors occur.
+Noted potential need to improve CSS in the web/static.list directory for styling or layout fixes.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "css" web/static' in /Users/yani/Noema/backend succeeded in 52ms:
+web/static/styles.css:1:@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap');
 
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io"
-	"mime/multipart"
-)
+thinking
+**Opening styles file**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap');
 
-type Dataset struct {
-	Items []DatasetItem `json:"items"`
+:root {
+  --bg: #05060a;
+  --bg-card: rgba(9, 12, 18, 0.9);
+  --text: #f4f6fb;
+  --text-muted: #9aa3b2;
+  --accent: #45d4ff;
+  --accent-strong: #2c7bff;
+  --accent-glow: rgba(69, 212, 255, 0.35);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(69, 212, 255, 0.4);
+  --error: #f87171;
+  --success: #22c55e;
+  --warning: #fbbf24;
+  --shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
 }
 
-type DatasetItem struct {
-	ID       string         `json:"id"`
-	Text     string         `json:"text"`
-	Metadata map[string]any `json:"metadata,omitempty"`
-	ImageRef string         `json:"image_ref,omitempty"`
+*,
+*::before,
+
+thinking
+**Planning UI improvements**
+
+The current CSS is large and could be optimized; focusing on improving form usability and searching for more UI enhancement opportunities next.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+  margin-bottom: 0.75rem;
 }
 
-thinking
-**Checking upload size limits**
+.text-muted { color: var(--text-muted); }
 
-I'm considering adding size limits based on the spec and will verify how parseUploads currently handles this.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
+.form { display: flex; flex-direction: column; gap: 1rem; }
 
-import (
-	"encoding/json"
-	"fmt"
-	"io"
-	"mime/multipart"
-	"strings"
-
-	"noema/internal/config"
-)
-
-func parseSpec(form *multipart.Form) (Spec, error) {
-	specStrs := form.Value["spec"]
-	if len(specStrs) == 0 || specStrs[0] == "" {
-		return Spec{}, fmt.Errorf("missing field: spec")
-	}
-	var spec Spec
-	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
-	dec.DisallowUnknownFields()
-
-thinking
-**Considering validation and reliability improvements**
-
-I'm noting potential enhancements: making error messages in reading datasets more specific, ensuring file writes use proper permissions and fsync for reliability, and adding validation to enforce unique constraint IDs in enabled constraints. Next, I'll check the policy for validation scope.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/policy.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package evaluate
-
-import "fmt"
-
-type ConstraintRule struct {
-	ID                 string
-	AllowedMaxSeverity int
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
 }
 
-func enabledConstraints(spec Spec) (map[string]ConstraintRule, error) {
-	out := make(map[string]ConstraintRule)
-	for _, c := range spec.Constraints {
-		if !c.Enabled {
-			continue
-		}
-		if _, exists := out[c.ID]; exists {
-			return nil, fmt.Errorf("duplicate constraint id: %s", c.ID)
-		}
-		out[c.ID] = ConstraintRule{ID: c.ID, AllowedMaxSeverity: c.AllowedMaxSeverity}
-	}
-
-thinking
-**Reviewing constraint handling in evaluation output**
-
-I'm examining the evaluation output handling to check if missing enabled constraints are treated as failures, focusing on parseEvalOutput and validateEvalOutput in internal/evaluate/output.go.
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-bottom: 1.2rem;
+}
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/output.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-)
-
-type EvalConstraintResult struct {
-	ID        string `json:"id"`
-	Severity  int    `json:"severity"`
-	Rationale string `json:"rationale"`
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '520,1040p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.3);
 }
 
-type EvalOutput struct {
-	SchemaVersion int                    `json:"schema_version"`
-	Constraints   []EvalConstraintResult `json:"constraints"`
-	MaxSeverity   int                    `json:"max_severity"`
-	Confidence    *float64               `json:"confidence,omitempty"`
+.upload-file {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
 }
 
-thinking
-**Planning atomic save improvement**
-
-I identified that saveUpload currently risks leaving partial files on copy failure; switching to a temp file plus rename would ensure atomic writes and better reliability. Next, I'll check existing tests around saveUpload and consider adding targeted tests without exceeding file limits.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"mime/multipart"
-	"net/textproto"
-	"os"
-	"path/filepath"
-	"sort"
-	"testing"
-	"time"
-)
-
-type formFile struct {
-	field       string
-	filename    string
-	contentType string
-	content     []byte
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '260,620p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
-
-func TestParseUploads_RejectsDuplicateImageNames(t *testing.T) {
-	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"img.png"}]}`
-	form := buildMultipartForm(t, []formFile{
-		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
-		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
-	})
-	if _, _, err := parseUploads(form); err == nil {
-		t.Fatalf("expected error for duplicate image filenames")
-	}
+.upload-file-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
-	spec := Spec{
-		SchemaVersion: 1,
-		Constraints: []Constraint{
-			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
-			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
-		},
-
-thinking
-**Assessing saveUpload test challenges**
-
-Testing saveUpload's error handling is tricky due to difficulty simulating io.Copy failures; forcing os.Create errors via read-only temp directories could test error paths but not partial writes or atomicity directly.
+.upload-file-size {
+  font-size: 0.82rem;
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/gemini_eval.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1040,1560p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+  color: var(--text-muted);
+  border-color: rgba(255, 255, 255, 0.14);
+}
 
-import (
-	"context"
-	"log"
-	"mime/multipart"
-	"time"
+.results-constraint-meta {
+  margin-top: 0.35rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
 
-	"noema/internal/config"
-	"noema/internal/gemini"
-)
+.results-constraint-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.35);
+  font-size: 0.75rem;
 
-const geminiEvalTimeout = 45 * time.Second
+thinking
+**Considering usability improvements for upload area**
 
-func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
-	if form != nil && len(form.Value["eval_output"]) > 0 && form.Value["eval_output"][0] != "" {
-		raw := form.Value["eval_output"][0]
-		out, err := parseEvalOutput(raw)
-		if err != nil {
-			return EvalOutput{}, err
+I'm exploring adding a live file list to the upload area to enhance usability without changing existing functionality or UI experience, starting by checking JavaScript in the static files.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/static' in /Users/yani/Noema/backend succeeded in 52ms:
+app.js
+constraints.js
+results.js
+styles.css
+upload.js
+verify.js
+wizard.js
+
+thinking
+**Considering subtle UX improvements**
+
+I'm identifying the relevant template to add a subtle loading skeleton or improve the empty state with a small change affecting at most three files.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/templates/upload.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "upload"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Upload</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_upload" .}}
+
+  <main class="main">
+    {{template "orb" .}}
+    <div class="card">
+      <h1 class="card-title">Upload</h1>
+      <form id="upload-form" action="/upload" method="post" enctype="multipart/form-data">
+        <label class="upload-zone" for="file-input" id="drop-zone">
+          <input type="file" name="file" id="file-input" accept="*" data-max-bytes="{{.MaxBytes}}" data-max-bytes-label="{{.MaxBytesLabel}}" aria-describedby="upload-hint upload-client-error">
+          <span id="zone-text">Drag and drop a file here, or click to choose</span>
+
+thinking
+**Exploring upload.js for enhancements**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/static/upload.js" in /Users/yani/Noema/backend succeeded in 51ms:
+(function() {
+  var input = document.getElementById('file-input');
+  var zone = document.getElementById('drop-zone');
+  var zoneText = document.getElementById('zone-text');
+  var submitBtn = document.getElementById('submit-btn');
+  var details = document.getElementById('upload-details');
+  var fileName = document.getElementById('upload-file-name');
+  var fileSize = document.getElementById('upload-file-size');
+  var clearBtn = document.getElementById('clear-file');
+  var clientError = document.getElementById('upload-client-error');
+  var maxBytes = parseInt(input.dataset.maxBytes || '', 10);
+  var maxBytesLabel = input.dataset.maxBytesLabel || '';
+
+  function formatBytes(bytes) {
+    if (!bytes && bytes !== 0) return '';
+    if (bytes < 1024) return bytes + ' B';
+    var kb = bytes / 1024;
+    if (kb < 1024) return kb.toFixed(1) + ' KB';
+    var mb = kb / 1024;
+    if (mb < 1024) return mb.toFixed(1) + ' MB';
+
+thinking
+**Considering UI improvements and inspecting results.js**
+
+I'm evaluating potential UI polish like file type warnings, upload progress, or a "copy run id" button for better UX, and next I'll inspect the verify/results JavaScript for relevant enhancements.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/static/results.js" in /Users/yani/Noema/backend succeeded in 51ms:
+(function() {
+  var runId = document.body.getAttribute('data-run-id') || document.getElementById('results-run-id').textContent.replace('Run ID: ', '').trim();
+  var key = 'noema_run_' + runId;
+  var data;
+  try {
+    var raw = localStorage.getItem(key);
+    data = raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    data = null;
+  }
+
+  function copyText(text, button) {
+    if (!text) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function() {
+        if (button) showCopied(button);
+      });
+    } else {
+      var temp = document.createElement('textarea');
+      temp.value = text;
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '200,400p' web/static/results.js" in /Users/yani/Noema/backend succeeded in 51ms:
+    var inputs = (data.proof && (data.proof.public_inputs_b64 || data.proof.public_inputs)) || (data.public_output && data.public_output.public_inputs) || '';
+    if (!inputs) {
+      copyInputs.textContent = 'No inputs';
+      copyInputs.disabled = true;
+    } else {
+      copyInputs.addEventListener('click', function() {
+        copyText(typeof inputs === 'string' ? inputs : JSON.stringify(inputs, null, 2), copyInputs);
+      });
+    }
+  }
+})();
+
+thinking
+**Reviewing verification page**
+
+I'm checking verify.js to identify potential improvements in the verification page beyond the polished UI.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/static/verify.js" in /Users/yani/Noema/backend succeeded in 51ms:
+(function() {
+  var STORAGE_KEY = 'noema_recent_runs';
+  var MAX_RECENT = 20;
+  var listEl = document.getElementById('verify-list');
+  var emptyEl = document.getElementById('verify-empty');
+  var emptyTitleEl = emptyEl ? emptyEl.querySelector('.empty-state-title') : null;
+  var emptyTextEl = emptyEl ? emptyEl.querySelector('.empty-state-text') : null;
+  var emptyTitleDefault = emptyTitleEl ? emptyTitleEl.textContent : '';
+  var emptyTextDefault = emptyTextEl ? emptyTextEl.textContent : '';
+  var filterInput = document.getElementById('verify-filter');
+  var countEl = document.getElementById('verify-count');
+  var progressEl = document.getElementById('verify-progress');
+  var verifyAllBtn = document.getElementById('verify-all');
+  var clearBtn = document.getElementById('verify-clear');
+
+  function loadRecentRuns() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      var runs = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(runs)) return [];
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '200,400p' web/static/verify.js" in /Users/yani/Noema/backend succeeded in 52ms:
+
+    var copyProof = document.createElement('button');
+    copyProof.type = 'button';
+    copyProof.className = 'btn btn-ghost btn-sm';
+    copyProof.textContent = 'Copy proof';
+
+    var copyInputs = document.createElement('button');
+    copyInputs.type = 'button';
+    copyInputs.className = 'btn btn-ghost btn-sm';
+    copyInputs.textContent = 'Copy public inputs';
+
+    var proofText = data && data.proof && data.proof.proof_b64 ? data.proof.proof_b64 : '';
+    var inputsText = data && data.proof && data.proof.public_inputs_b64 ? data.proof.public_inputs_b64 : '';
+
+    if (!proofText) copyProof.disabled = true;
+    if (!inputsText) copyInputs.disabled = true;
+
+    copyProof.addEventListener('click', function() {
+      copyToClipboard(proofText, function(ok) {
+        copyProof.textContent = ok ? 'Copied' : 'Copy proof';
+
+thinking
+**Planning UX improvements**
+
+I'm considering functional UX upgrades like adding paste support for uploads, drag-and-drop overlays, file size/type warnings with previews, and enhancing error handling or form inputs to improve the results page and upload experience.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' web/templates/app_new.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "app_new"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — New Evaluation</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_app" .}}
+
+  <main class="main main-wizard">
+    {{template "orb" .}}
+    <div class="wizard-card card">
+      <h1 class="card-title">New Evaluation</h1>
+      <div class="stepper" role="tablist">
+        <button type="button" class="stepper-step active" data-step="1" aria-selected="true">Dataset</button>
+        <span class="stepper-sep"></span>
+        <button type="button" class="stepper-step" data-step="2">Policy</button>
+
+thinking
+**Considering wizard progress indicator**
+
+Noting the potential to improve the wizard UI by adding a progress indicator or displaying dataset validation state, planning to check wizard.js for relevant implementation details.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' web/static/wizard.js" in /Users/yani/Noema/backend succeeded in 51ms:
+(function() {
+  var PRESET_CONSTRAINTS = window.NOEMA_PRESET_CONSTRAINTS || [];
+  var currentStep = 1;
+  var maxStep = 3;
+  var customConstraintCount = 0;
+  var maxCustomConstraints = 5;
+  var datasetSource = 'file';
+  var MAX_DATASET_BYTES = 50 * 1024 * 1024;
+  var MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+  var MAX_IMAGE_COUNT = 10;
+
+  function stepEl(n) { return document.querySelector('.stepper-step[data-step="' + n + '"]'); }
+  function paneEl(n) { return document.getElementById('pane-' + n); }
+
+  function titleCase(str) {
+    return str
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, function(m) { return m.toUpperCase(); });
+  }
+
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '260,520p' web/static/wizard.js" in /Users/yani/Noema/backend succeeded in 51ms:
+
+    var list = document.getElementById('custom-constraints-list');
+    list.appendChild(div);
+
+    div.querySelectorAll('.custom-title, .custom-desc, .custom-enabled').forEach(function(el) {
+      el.addEventListener('input', function() { validateCustomConstraint(div); });
+      el.addEventListener('change', function() { validateCustomConstraint(div); updateConstraintsCount(); });
+    });
+
+    div.querySelector('.remove-custom').addEventListener('click', function() {
+      div.remove();
+      customConstraintCount--;
+      updateCustomLimitHint();
+      updateConstraintsCount();
+    });
+
+    validateCustomConstraint(div);
+    updateConstraintsCount();
+  }
+
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '520,1040p' web/static/wizard.js" in /Users/yani/Noema/backend succeeded in 52ms:
+        } catch (err) {}
+        window.location.href = '/app/results/' + encodeURIComponent(runId);
+      })
+      .catch(function(err) {
+        document.getElementById('submit-error').textContent = err.message || 'Evaluation failed.';
+        document.getElementById('submit-error').style.display = 'block';
+        document.getElementById('running-state').style.display = 'none';
+        if (runBtn) runBtn.disabled = false;
+        document.getElementById('wizard-next').disabled = false;
+      });
+  });
+
+  buildConstraintsList();
+  setDatasetSource('file');
+  updateCustomLimitHint();
+  updateImagesStatus();
+})();
 
 
 thinking
-**Planning atomic write for uploads**
+**Planning frontend dataset validation improvements**
 
-I'm designing atomic file writes by creating a temp file in the target directory using CreateTemp, then chmod 0644, syncing, closing, and renaming it to the final path. Next, I'll implement this with careful error handling and cleanup, followed by adding tests to verify behavior during copy errors.
+Considering enhancing dataset validation feedback by showing explicit status in the review summary and adding live JSON error details on paste. Also exploring improved file upload UX like showing file type and size info with warnings but without blocking uploads.
 thinking
-**Deciding test scope for atomic upload**
+**Planning dynamic wizard navigation enabling**
 
-Testing cleanup on partial-copy errors is impractical due to multipart.FileHeader constraints, so I'll implement the atomic save change without tests and add a simple test verifying that saveUpload writes content correctly instead.
+Deciding to disable the wizard's Next button dynamically on steps 1 and 2 until dataset and custom constraints are valid, improving UX by preventing premature progression and reducing error states, all implemented within one frontend file with minimal UI changes.
+
+thinking
+**Preparing smaller patch edits**
+
+Patch application failed due to context mismatch, so I'll reapply changes in smaller, targeted patches focusing on areas around the remove-custom functionality.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "remove-custom" -n web/static/wizard.js' in /Users/yani/Noema/backend succeeded in 51ms:
+256:          '<button type="button" class="btn btn-ghost btn-sm remove-custom">Remove</button>' +
+269:    div.querySelector('.remove-custom').addEventListener('click', function() {
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '248,290p' web/static/wizard.js" in /Users/yani/Noema/backend succeeded in 52ms:
+        '<input type="text" class="input custom-title" placeholder="Title" maxlength="80">' +
+        '<textarea class="input textarea custom-desc" rows="2" placeholder="Description" maxlength="240"></textarea>' +
+        '<div class="custom-constraint-actions">' +
+          '<div class="custom-constraint-meta">' +
+            '<label class="label">Allowed max severity</label>' +
+            '<select class="custom-severity severity-select"><option value="0">Limited</option><option value="1">Moderate</option><option value="2">Severe</option></select>' +
+            '<label class="checkbox-label"><input type="checkbox" class="custom-enabled" checked> Enabled</label>' +
+          '</div>' +
+          '<button type="button" class="btn btn-ghost btn-sm remove-custom">Remove</button>' +
+        '</div>' +
+        '<div class="custom-constraint-error" style="display:none;">Title and description are required.</div>' +
+      '</div>';
+
+    var list = document.getElementById('custom-constraints-list');
+    list.appendChild(div);
+
+    div.querySelectorAll('.custom-title, .custom-desc, .custom-enabled').forEach(function(el) {
+      el.addEventListener('input', function() { validateCustomConstraint(div); });
+      el.addEventListener('change', function() { validateCustomConstraint(div); updateConstraintsCount(); });
+    });
+
+thinking
+**Adding helper functions after formatBytes**
 file update
-M /Users/yani/Noema/backend/internal/evaluate/storage.go
-@@ -54,11 +54,34 @@
- 	defer src.Close()
--	out, err := os.Create(dst)
-+	dir := filepath.Dir(dst)
-+	base := filepath.Base(dst)
-+	tmp, err := os.CreateTemp(dir, base+".tmp-*")
- 	if err != nil {
--		return fmt.Errorf("create %s: %w", dst, err)
-+		return fmt.Errorf("create temp for %s: %w", dst, err)
- 	}
--	defer out.Close()
--	_, err = io.Copy(out, src)
--	if err != nil {
-+	tmpName := tmp.Name()
-+	cleanup := true
-+	defer func() {
-+		if cleanup {
-+			_ = os.Remove(tmpName)
-+		}
-+	}()
-+	if err := tmp.Chmod(0644); err != nil {
-+		_ = tmp.Close()
-+		return fmt.Errorf("chmod temp for %s: %w", dst, err)
-+	}
-+	if _, err := io.Copy(tmp, src); err != nil {
-+		_ = tmp.Close()
- 		return fmt.Errorf("copy to %s: %w", dst, err)
- 	}
-+	if err := tmp.Sync(); err != nil {
-+		_ = tmp.Close()
-+		return fmt.Errorf("sync %s: %w", dst, err)
-+	}
-+	if err := tmp.Close(); err != nil {
-+		return fmt.Errorf("close %s: %w", dst, err)
-+	}
-+	if err := os.Rename(tmpName, dst); err != nil {
-+		return fmt.Errorf("rename %s: %w", dst, err)
-+	}
-+	cleanup = false
- 	return nil
-apply_patch(auto_approved=true) exited 0 in 31ms:
+M /Users/yani/Noema/backend/web/static/wizard.js
+@@ -34,2 +34,28 @@
+ 
++  function isStep1Ready() {
++    return !!getDatasetFile() && updateImagesStatus();
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+apply_patch(auto_approved=true) exited 0 in 32ms:
 Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/storage.go
+M /Users/yani/Noema/backend/web/static/wizard.js
 file update:
-diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
-index e85a0702209ca351eff8a5238f4cc1b73fbe6822..86cc53272dc561f9692f36a8b8722ddc27fe3754
---- a/backend/internal/evaluate/storage.go
-+++ b/backend/internal/evaluate/storage.go
-@@ -52,15 +52,38 @@
- 		return fmt.Errorf("open upload: %w", err)
- 	}
- 	defer src.Close()
--	out, err := os.Create(dst)
-+	dir := filepath.Dir(dst)
-+	base := filepath.Base(dst)
-+	tmp, err := os.CreateTemp(dir, base+".tmp-*")
- 	if err != nil {
--		return fmt.Errorf("create %s: %w", dst, err)
-+		return fmt.Errorf("create temp for %s: %w", dst, err)
- 	}
--	defer out.Close()
--	_, err = io.Copy(out, src)
--	if err != nil {
-+	tmpName := tmp.Name()
-+	cleanup := true
-+	defer func() {
-+		if cleanup {
-+			_ = os.Remove(tmpName)
-+		}
-+	}()
-+	if err := tmp.Chmod(0644); err != nil {
-+		_ = tmp.Close()
-+		return fmt.Errorf("chmod temp for %s: %w", dst, err)
-+	}
-+	if _, err := io.Copy(tmp, src); err != nil {
-+		_ = tmp.Close()
- 		return fmt.Errorf("copy to %s: %w", dst, err)
- 	}
-+	if err := tmp.Sync(); err != nil {
-+		_ = tmp.Close()
-+		return fmt.Errorf("sync %s: %w", dst, err)
-+	}
-+	if err := tmp.Close(); err != nil {
-+		return fmt.Errorf("close %s: %w", dst, err)
-+	}
-+	if err := os.Rename(tmpName, dst); err != nil {
-+		return fmt.Errorf("rename %s: %w", dst, err)
-+	}
-+	cleanup = false
- 	return nil
- }
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..8a00431315d1ae60da5a17fb9fe64be0b80b9198
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,32 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
+ 
++  function isStep1Ready() {
++    return !!getDatasetFile() && updateImagesStatus();
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..8a00431315d1ae60da5a17fb9fe64be0b80b9198
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,32 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
+ 
++  function isStep1Ready() {
++    return !!getDatasetFile() && updateImagesStatus();
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+
+
+thinking
+**Updating step display to sync navigation state**
+file update
+M /Users/yani/Noema/backend/web/static/wizard.js
+@@ -77,2 +77,3 @@
+     document.getElementById('wizard-next').textContent = nextLabel;
++    updateWizardNavState();
+   }
+apply_patch(auto_approved=true) exited 0 in 42ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/web/static/wizard.js
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..e17a99961b579f111cff9c5c0bb74b9e81101b18
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,32 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
+ 
++  function isStep1Ready() {
++    return !!getDatasetFile() && updateImagesStatus();
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -49,6 +75,7 @@
+     if (step === maxStep - 1) nextLabel = 'Review';
+     if (step === maxStep) nextLabel = 'Run evaluation';
+     document.getElementById('wizard-next').textContent = nextLabel;
++    updateWizardNavState();
+   }
+ 
+   function setDatasetSource(source) {
+
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..e17a99961b579f111cff9c5c0bb74b9e81101b18
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,32 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
+ 
++  function isStep1Ready() {
++    return !!getDatasetFile() && updateImagesStatus();
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -49,6 +75,7 @@
+     if (step === maxStep - 1) nextLabel = 'Review';
+     if (step === maxStep) nextLabel = 'Run evaluation';
+     document.getElementById('wizard-next').textContent = nextLabel;
++    updateWizardNavState();
+   }
+ 
+   function setDatasetSource(source) {
+
+
+thinking
+**Planning wizard state update**
+
+I'm preparing to ensure updateWizardNavState is called before every return in updateDatasetStatus by adding calls at early returns and once at the end for completeness. I'll patch carefully to avoid missing any return paths.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "function updateDatasetStatus" -n -C 2 web/static/wizard.js' in /Users/yani/Noema/backend succeeded in 52ms:
+94-  }
+95-
+96:  function updateDatasetStatus() {
+97-    var statusEl = document.getElementById('dataset-status');
+98-    var previewEl = document.getElementById('dataset-preview');
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..e17a99961b579f111cff9c5c0bb74b9e81101b18
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,32 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
+ 
++  function isStep1Ready() {
++    return !!getDatasetFile() && updateImagesStatus();
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -49,6 +75,7 @@
+     if (step === maxStep - 1) nextLabel = 'Review';
+     if (step === maxStep) nextLabel = 'Run evaluation';
+     document.getElementById('wizard-next').textContent = nextLabel;
++    updateWizardNavState();
+   }
+ 
+   function setDatasetSource(source) {
+
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '96,170p' web/static/wizard.js" in /Users/yani/Noema/backend succeeded in 52ms:
+  function updateDatasetStatus() {
+    var statusEl = document.getElementById('dataset-status');
+    var previewEl = document.getElementById('dataset-preview');
+    statusEl.classList.remove('is-valid', 'is-invalid');
+
+    if (datasetSource === 'file') {
+      var fileInput = document.getElementById('dataset-file');
+      if (fileInput.files && fileInput.files.length > 0) {
+        var file = fileInput.files[0];
+        if (file.size > MAX_DATASET_BYTES) {
+          statusEl.textContent = 'File too large. Max size is 50MB.';
+          statusEl.classList.add('is-invalid');
+        } else {
+          statusEl.textContent = 'Selected file: ' + file.name + ' (' + formatBytes(file.size) + ')';
+          statusEl.classList.add('is-valid');
+        }
+      } else {
+        statusEl.textContent = 'Select a JSON file to continue.';
+      }
+      previewEl.hidden = true;
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..e17a99961b579f111cff9c5c0bb74b9e81101b18
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,32 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
+ 
++  function isStep1Ready() {
++    return !!getDatasetFile() && updateImagesStatus();
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -49,6 +75,7 @@
+     if (step === maxStep - 1) nextLabel = 'Review';
+     if (step === maxStep) nextLabel = 'Run evaluation';
+     document.getElementById('wizard-next').textContent = nextLabel;
++    updateWizardNavState();
+   }
+ 
+   function setDatasetSource(source) {
+
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '170,240p' web/static/wizard.js" in /Users/yani/Noema/backend succeeded in 52ms:
+      statusEl.classList.add('is-invalid');
+      return false;
+    }
+
+    var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
+    statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
+    statusEl.classList.add('is-valid');
+    return true;
+  }
+
+  function parseJsonSafe(text) {
+    try {
+      var data = JSON.parse(text);
+      return { valid: true, data: data, error: null };
+    } catch (err) {
+      return { valid: false, data: null, error: err.message || 'Parse error' };
+    }
+  }
+
+  function buildConstraintsList() {
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..e17a99961b579f111cff9c5c0bb74b9e81101b18
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,32 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
+ 
++  function isStep1Ready() {
++    return !!getDatasetFile() && updateImagesStatus();
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -49,6 +75,7 @@
+     if (step === maxStep - 1) nextLabel = 'Review';
+     if (step === maxStep) nextLabel = 'Run evaluation';
+     document.getElementById('wizard-next').textContent = nextLabel;
++    updateWizardNavState();
+   }
+ 
+   function setDatasetSource(source) {
+
+
+thinking
+**Patching updateDatasetStatus to trigger updates**
+file update
+M /Users/yani/Noema/backend/web/static/wizard.js
+@@ -115,2 +115,3 @@
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+@@ -122,2 +123,3 @@
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+@@ -129,2 +131,3 @@
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+@@ -137,2 +140,3 @@
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+@@ -146,2 +150,3 @@
+     previewEl.hidden = false;
++    updateWizardNavState();
+   }
+apply_patch(auto_approved=true) exited 0 in 40ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/web/static/wizard.js
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..c033f121dbfe3bc8a3a3367e74cb92e234d5a30a
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,32 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
+ 
++  function isStep1Ready() {
++    return !!getDatasetFile() && updateImagesStatus();
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -49,6 +75,7 @@
+     if (step === maxStep - 1) nextLabel = 'Review';
+     if (step === maxStep) nextLabel = 'Run evaluation';
+     document.getElementById('wizard-next').textContent = nextLabel;
++    updateWizardNavState();
+   }
+ 
+   function setDatasetSource(source) {
+@@ -86,6 +113,7 @@
+         statusEl.textContent = 'Select a JSON file to continue.';
+       }
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -93,6 +121,7 @@
+     if (!paste) {
+       statusEl.textContent = 'Paste JSON to continue.';
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -100,6 +129,7 @@
+       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -108,6 +138,7 @@
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -117,6 +148,7 @@
+     if (preview.length > 700) preview = preview.slice(0, 700) + '\n…';
+     previewEl.textContent = preview;
+     previewEl.hidden = false;
++    updateWizardNavState();
+   }
+ 
+   function updateImagesStatus() {
+
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..c033f121dbfe3bc8a3a3367e74cb92e234d5a30a
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,32 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
+ 
++  function isStep1Ready() {
++    return !!getDatasetFile() && updateImagesStatus();
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -49,6 +75,7 @@
+     if (step === maxStep - 1) nextLabel = 'Review';
+     if (step === maxStep) nextLabel = 'Run evaluation';
+     document.getElementById('wizard-next').textContent = nextLabel;
++    updateWizardNavState();
+   }
+ 
+   function setDatasetSource(source) {
+@@ -86,6 +113,7 @@
+         statusEl.textContent = 'Select a JSON file to continue.';
+       }
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -93,6 +121,7 @@
+     if (!paste) {
+       statusEl.textContent = 'Paste JSON to continue.';
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -100,6 +129,7 @@
+       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -108,6 +138,7 @@
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -117,6 +148,7 @@
+     if (preview.length > 700) preview = preview.slice(0, 700) + '\n…';
+     previewEl.textContent = preview;
+     previewEl.hidden = false;
++    updateWizardNavState();
+   }
+ 
+   function updateImagesStatus() {
+
+
+thinking
+**Updating image status with wizard navigation**
+
+I'm updating the image status function to call the wizard navigation state updater on all returns except when the status element isn't found, avoiding unnecessary calls there.
+file update
+M /Users/yani/Noema/backend/web/static/wizard.js
+@@ -162,2 +162,3 @@
+       statusEl.textContent = 'No images selected.';
++      updateWizardNavState();
+       return true;
+@@ -168,2 +169,3 @@
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+@@ -175,2 +177,3 @@
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+@@ -181,2 +184,3 @@
+     statusEl.classList.add('is-valid');
++    updateWizardNavState();
+     return true;
+apply_patch(auto_approved=true) exited 0 in 40ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/web/static/wizard.js
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..d625374f1519925328d592d41b6b815c11c13f9d
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,32 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
+ 
++  function isStep1Ready() {
++    return !!getDatasetFile() && updateImagesStatus();
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -49,6 +75,7 @@
+     if (step === maxStep - 1) nextLabel = 'Review';
+     if (step === maxStep) nextLabel = 'Run evaluation';
+     document.getElementById('wizard-next').textContent = nextLabel;
++    updateWizardNavState();
+   }
+ 
+   function setDatasetSource(source) {
+@@ -86,6 +113,7 @@
+         statusEl.textContent = 'Select a JSON file to continue.';
+       }
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -93,6 +121,7 @@
+     if (!paste) {
+       statusEl.textContent = 'Paste JSON to continue.';
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -100,6 +129,7 @@
+       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -108,6 +138,7 @@
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -117,6 +148,7 @@
+     if (preview.length > 700) preview = preview.slice(0, 700) + '\n…';
+     previewEl.textContent = preview;
+     previewEl.hidden = false;
++    updateWizardNavState();
+   }
+ 
+   function updateImagesStatus() {
+@@ -128,12 +160,14 @@
+     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
+     if (files.length === 0) {
+       statusEl.textContent = 'No images selected.';
++      updateWizardNavState();
+       return true;
+     }
+ 
+     if (files.length > MAX_IMAGE_COUNT) {
+       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+@@ -141,12 +175,14 @@
+     if (oversized) {
+       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+     var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
+     statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
+     statusEl.classList.add('is-valid');
++    updateWizardNavState();
+     return true;
+   }
  
 
 file update:
-diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
-index e85a0702209ca351eff8a5238f4cc1b73fbe6822..86cc53272dc561f9692f36a8b8722ddc27fe3754
---- a/backend/internal/evaluate/storage.go
-+++ b/backend/internal/evaluate/storage.go
-@@ -52,15 +52,38 @@
- 		return fmt.Errorf("open upload: %w", err)
- 	}
- 	defer src.Close()
--	out, err := os.Create(dst)
-+	dir := filepath.Dir(dst)
-+	base := filepath.Base(dst)
-+	tmp, err := os.CreateTemp(dir, base+".tmp-*")
- 	if err != nil {
--		return fmt.Errorf("create %s: %w", dst, err)
-+		return fmt.Errorf("create temp for %s: %w", dst, err)
- 	}
--	defer out.Close()
--	_, err = io.Copy(out, src)
--	if err != nil {
-+	tmpName := tmp.Name()
-+	cleanup := true
-+	defer func() {
-+		if cleanup {
-+			_ = os.Remove(tmpName)
-+		}
-+	}()
-+	if err := tmp.Chmod(0644); err != nil {
-+		_ = tmp.Close()
-+		return fmt.Errorf("chmod temp for %s: %w", dst, err)
-+	}
-+	if _, err := io.Copy(tmp, src); err != nil {
-+		_ = tmp.Close()
- 		return fmt.Errorf("copy to %s: %w", dst, err)
- 	}
-+	if err := tmp.Sync(); err != nil {
-+		_ = tmp.Close()
-+		return fmt.Errorf("sync %s: %w", dst, err)
-+	}
-+	if err := tmp.Close(); err != nil {
-+		return fmt.Errorf("close %s: %w", dst, err)
-+	}
-+	if err := os.Rename(tmpName, dst); err != nil {
-+		return fmt.Errorf("rename %s: %w", dst, err)
-+	}
-+	cleanup = false
- 	return nil
- }
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..d625374f1519925328d592d41b6b815c11c13f9d
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,32 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
+ 
++  function isStep1Ready() {
++    return !!getDatasetFile() && updateImagesStatus();
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -49,6 +75,7 @@
+     if (step === maxStep - 1) nextLabel = 'Review';
+     if (step === maxStep) nextLabel = 'Run evaluation';
+     document.getElementById('wizard-next').textContent = nextLabel;
++    updateWizardNavState();
+   }
+ 
+   function setDatasetSource(source) {
+@@ -86,6 +113,7 @@
+         statusEl.textContent = 'Select a JSON file to continue.';
+       }
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -93,6 +121,7 @@
+     if (!paste) {
+       statusEl.textContent = 'Paste JSON to continue.';
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -100,6 +129,7 @@
+       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -108,6 +138,7 @@
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -117,6 +148,7 @@
+     if (preview.length > 700) preview = preview.slice(0, 700) + '\n…';
+     previewEl.textContent = preview;
+     previewEl.hidden = false;
++    updateWizardNavState();
+   }
+ 
+   function updateImagesStatus() {
+@@ -128,12 +160,14 @@
+     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
+     if (files.length === 0) {
+       statusEl.textContent = 'No images selected.';
++      updateWizardNavState();
+       return true;
+     }
+ 
+     if (files.length > MAX_IMAGE_COUNT) {
+       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+@@ -141,12 +175,14 @@
+     if (oversized) {
+       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+     var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
+     statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
+     statusEl.classList.add('is-valid');
++    updateWizardNavState();
+     return true;
+   }
  
 
 
 thinking
-**Adjusting cleanup flag post-rename**
+**Updating limit hint to trigger wizard nav update**
+file update
+M /Users/yani/Noema/backend/web/static/wizard.js
+@@ -324,2 +324,3 @@
+     }
++    updateWizardNavState();
+   }
+apply_patch(auto_approved=true) exited 0 in 33ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/web/static/wizard.js
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..058559c7e37f4578afee7c3c8c150f53cdd52263
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,32 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
+ 
++  function isStep1Ready() {
++    return !!getDatasetFile() && updateImagesStatus();
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -49,6 +75,7 @@
+     if (step === maxStep - 1) nextLabel = 'Review';
+     if (step === maxStep) nextLabel = 'Run evaluation';
+     document.getElementById('wizard-next').textContent = nextLabel;
++    updateWizardNavState();
+   }
+ 
+   function setDatasetSource(source) {
+@@ -86,6 +113,7 @@
+         statusEl.textContent = 'Select a JSON file to continue.';
+       }
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -93,6 +121,7 @@
+     if (!paste) {
+       statusEl.textContent = 'Paste JSON to continue.';
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -100,6 +129,7 @@
+       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -108,6 +138,7 @@
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -117,6 +148,7 @@
+     if (preview.length > 700) preview = preview.slice(0, 700) + '\n…';
+     previewEl.textContent = preview;
+     previewEl.hidden = false;
++    updateWizardNavState();
+   }
+ 
+   function updateImagesStatus() {
+@@ -128,12 +160,14 @@
+     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
+     if (files.length === 0) {
+       statusEl.textContent = 'No images selected.';
++      updateWizardNavState();
+       return true;
+     }
+ 
+     if (files.length > MAX_IMAGE_COUNT) {
+       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+@@ -141,12 +175,14 @@
+     if (oversized) {
+       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+     var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
+     statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
+     statusEl.classList.add('is-valid');
++    updateWizardNavState();
+     return true;
+   }
+ 
+@@ -286,6 +322,7 @@
+     } else {
+       hint.textContent = 'Add up to five custom constraints.';
+     }
++    updateWizardNavState();
+   }
+ 
+   function validateCustomConstraint(item) {
 
-I'm ensuring the cleanup flag is set to false only after a successful rename to avoid removing the temp file, and verifying this behavior by running the Go tests.
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..058559c7e37f4578afee7c3c8c150f53cdd52263
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,32 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
+ 
++  function isStep1Ready() {
++    return !!getDatasetFile() && updateImagesStatus();
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -49,6 +75,7 @@
+     if (step === maxStep - 1) nextLabel = 'Review';
+     if (step === maxStep) nextLabel = 'Run evaluation';
+     document.getElementById('wizard-next').textContent = nextLabel;
++    updateWizardNavState();
+   }
+ 
+   function setDatasetSource(source) {
+@@ -86,6 +113,7 @@
+         statusEl.textContent = 'Select a JSON file to continue.';
+       }
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -93,6 +121,7 @@
+     if (!paste) {
+       statusEl.textContent = 'Paste JSON to continue.';
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -100,6 +129,7 @@
+       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -108,6 +138,7 @@
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -117,6 +148,7 @@
+     if (preview.length > 700) preview = preview.slice(0, 700) + '\n…';
+     previewEl.textContent = preview;
+     previewEl.hidden = false;
++    updateWizardNavState();
+   }
+ 
+   function updateImagesStatus() {
+@@ -128,12 +160,14 @@
+     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
+     if (files.length === 0) {
+       statusEl.textContent = 'No images selected.';
++      updateWizardNavState();
+       return true;
+     }
+ 
+     if (files.length > MAX_IMAGE_COUNT) {
+       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+@@ -141,12 +175,14 @@
+     if (oversized) {
+       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+     var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
+     statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
+     statusEl.classList.add('is-valid');
++    updateWizardNavState();
+     return true;
+   }
+ 
+@@ -286,6 +322,7 @@
+     } else {
+       hint.textContent = 'Add up to five custom constraints.';
+     }
++    updateWizardNavState();
+   }
+ 
+   function validateCustomConstraint(item) {
+
+
+thinking
+**Updating validation to trigger navigation state update**
+file update
+M /Users/yani/Noema/backend/web/static/wizard.js
+@@ -337,2 +337,3 @@
+       item.querySelector('.custom-desc').classList.remove('is-invalid');
++      updateWizardNavState();
+       return true;
+@@ -344,2 +345,3 @@
+     item.querySelector('.custom-desc').classList.toggle('is-invalid', !valid && desc.length === 0);
++    updateWizardNavState();
+     return valid;
+apply_patch(auto_approved=true) exited 0 in 34ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/web/static/wizard.js
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..05b94198bc7a3932a3a10986b6589224bb8720b8
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,32 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
+ 
++  function isStep1Ready() {
++    return !!getDatasetFile() && updateImagesStatus();
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -49,6 +75,7 @@
+     if (step === maxStep - 1) nextLabel = 'Review';
+     if (step === maxStep) nextLabel = 'Run evaluation';
+     document.getElementById('wizard-next').textContent = nextLabel;
++    updateWizardNavState();
+   }
+ 
+   function setDatasetSource(source) {
+@@ -86,6 +113,7 @@
+         statusEl.textContent = 'Select a JSON file to continue.';
+       }
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -93,6 +121,7 @@
+     if (!paste) {
+       statusEl.textContent = 'Paste JSON to continue.';
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -100,6 +129,7 @@
+       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -108,6 +138,7 @@
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -117,6 +148,7 @@
+     if (preview.length > 700) preview = preview.slice(0, 700) + '\n…';
+     previewEl.textContent = preview;
+     previewEl.hidden = false;
++    updateWizardNavState();
+   }
+ 
+   function updateImagesStatus() {
+@@ -128,12 +160,14 @@
+     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
+     if (files.length === 0) {
+       statusEl.textContent = 'No images selected.';
++      updateWizardNavState();
+       return true;
+     }
+ 
+     if (files.length > MAX_IMAGE_COUNT) {
+       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+@@ -141,12 +175,14 @@
+     if (oversized) {
+       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+     var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
+     statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
+     statusEl.classList.add('is-valid');
++    updateWizardNavState();
+     return true;
+   }
+ 
+@@ -286,6 +322,7 @@
+     } else {
+       hint.textContent = 'Add up to five custom constraints.';
+     }
++    updateWizardNavState();
+   }
+ 
+   function validateCustomConstraint(item) {
+@@ -298,6 +335,7 @@
+       errorEl.style.display = 'none';
+       item.querySelector('.custom-title').classList.remove('is-invalid');
+       item.querySelector('.custom-desc').classList.remove('is-invalid');
++      updateWizardNavState();
+       return true;
+     }
+ 
+@@ -305,6 +343,7 @@
+     errorEl.style.display = valid ? 'none' : 'block';
+     item.querySelector('.custom-title').classList.toggle('is-invalid', !valid && title.length === 0);
+     item.querySelector('.custom-desc').classList.toggle('is-invalid', !valid && desc.length === 0);
++    updateWizardNavState();
+     return valid;
+   }
+ 
+
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..05b94198bc7a3932a3a10986b6589224bb8720b8
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,32 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
+ 
++  function isStep1Ready() {
++    return !!getDatasetFile() && updateImagesStatus();
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -49,6 +75,7 @@
+     if (step === maxStep - 1) nextLabel = 'Review';
+     if (step === maxStep) nextLabel = 'Run evaluation';
+     document.getElementById('wizard-next').textContent = nextLabel;
++    updateWizardNavState();
+   }
+ 
+   function setDatasetSource(source) {
+@@ -86,6 +113,7 @@
+         statusEl.textContent = 'Select a JSON file to continue.';
+       }
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -93,6 +121,7 @@
+     if (!paste) {
+       statusEl.textContent = 'Paste JSON to continue.';
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -100,6 +129,7 @@
+       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -108,6 +138,7 @@
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -117,6 +148,7 @@
+     if (preview.length > 700) preview = preview.slice(0, 700) + '\n…';
+     previewEl.textContent = preview;
+     previewEl.hidden = false;
++    updateWizardNavState();
+   }
+ 
+   function updateImagesStatus() {
+@@ -128,12 +160,14 @@
+     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
+     if (files.length === 0) {
+       statusEl.textContent = 'No images selected.';
++      updateWizardNavState();
+       return true;
+     }
+ 
+     if (files.length > MAX_IMAGE_COUNT) {
+       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+@@ -141,12 +175,14 @@
+     if (oversized) {
+       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+     var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
+     statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
+     statusEl.classList.add('is-valid');
++    updateWizardNavState();
+     return true;
+   }
+ 
+@@ -286,6 +322,7 @@
+     } else {
+       hint.textContent = 'Add up to five custom constraints.';
+     }
++    updateWizardNavState();
+   }
+ 
+   function validateCustomConstraint(item) {
+@@ -298,6 +335,7 @@
+       errorEl.style.display = 'none';
+       item.querySelector('.custom-title').classList.remove('is-invalid');
+       item.querySelector('.custom-desc').classList.remove('is-invalid');
++      updateWizardNavState();
+       return true;
+     }
+ 
+@@ -305,6 +343,7 @@
+     errorEl.style.display = valid ? 'none' : 'block';
+     item.querySelector('.custom-title').classList.toggle('is-invalid', !valid && title.length === 0);
+     item.querySelector('.custom-desc').classList.toggle('is-invalid', !valid && desc.length === 0);
++    updateWizardNavState();
+     return valid;
+   }
+ 
+
+
+thinking
+**Updating remove-custom handler**
+
+I'm modifying the remove-custom handler to also call updateWizardNavState to keep the navigation state in sync.
+file update
+M /Users/yani/Noema/backend/web/static/wizard.js
+@@ -309,2 +309,3 @@
+       updateConstraintsCount();
++      updateWizardNavState();
+     });
+apply_patch(auto_approved=true) exited 0 in 37ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/web/static/wizard.js
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..57210a23acb508b21365c415f1d99ab672995275
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,32 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
+ 
++  function isStep1Ready() {
++    return !!getDatasetFile() && updateImagesStatus();
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -49,6 +75,7 @@
+     if (step === maxStep - 1) nextLabel = 'Review';
+     if (step === maxStep) nextLabel = 'Run evaluation';
+     document.getElementById('wizard-next').textContent = nextLabel;
++    updateWizardNavState();
+   }
+ 
+   function setDatasetSource(source) {
+@@ -86,6 +113,7 @@
+         statusEl.textContent = 'Select a JSON file to continue.';
+       }
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -93,6 +121,7 @@
+     if (!paste) {
+       statusEl.textContent = 'Paste JSON to continue.';
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -100,6 +129,7 @@
+       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -108,6 +138,7 @@
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -117,6 +148,7 @@
+     if (preview.length > 700) preview = preview.slice(0, 700) + '\n…';
+     previewEl.textContent = preview;
+     previewEl.hidden = false;
++    updateWizardNavState();
+   }
+ 
+   function updateImagesStatus() {
+@@ -128,12 +160,14 @@
+     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
+     if (files.length === 0) {
+       statusEl.textContent = 'No images selected.';
++      updateWizardNavState();
+       return true;
+     }
+ 
+     if (files.length > MAX_IMAGE_COUNT) {
+       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+@@ -141,12 +175,14 @@
+     if (oversized) {
+       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+     var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
+     statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
+     statusEl.classList.add('is-valid');
++    updateWizardNavState();
+     return true;
+   }
+ 
+@@ -271,6 +307,7 @@
+       customConstraintCount--;
+       updateCustomLimitHint();
+       updateConstraintsCount();
++      updateWizardNavState();
+     });
+ 
+     validateCustomConstraint(div);
+@@ -286,6 +323,7 @@
+     } else {
+       hint.textContent = 'Add up to five custom constraints.';
+     }
++    updateWizardNavState();
+   }
+ 
+   function validateCustomConstraint(item) {
+@@ -298,6 +336,7 @@
+       errorEl.style.display = 'none';
+       item.querySelector('.custom-title').classList.remove('is-invalid');
+       item.querySelector('.custom-desc').classList.remove('is-invalid');
++      updateWizardNavState();
+       return true;
+     }
+ 
+@@ -305,6 +344,7 @@
+     errorEl.style.display = valid ? 'none' : 'block';
+     item.querySelector('.custom-title').classList.toggle('is-invalid', !valid && title.length === 0);
+     item.querySelector('.custom-desc').classList.toggle('is-invalid', !valid && desc.length === 0);
++    updateWizardNavState();
+     return valid;
+   }
+ 
+
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..57210a23acb508b21365c415f1d99ab672995275
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,32 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
+ 
++  function isStep1Ready() {
++    return !!getDatasetFile() && updateImagesStatus();
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -49,6 +75,7 @@
+     if (step === maxStep - 1) nextLabel = 'Review';
+     if (step === maxStep) nextLabel = 'Run evaluation';
+     document.getElementById('wizard-next').textContent = nextLabel;
++    updateWizardNavState();
+   }
+ 
+   function setDatasetSource(source) {
+@@ -86,6 +113,7 @@
+         statusEl.textContent = 'Select a JSON file to continue.';
+       }
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -93,6 +121,7 @@
+     if (!paste) {
+       statusEl.textContent = 'Paste JSON to continue.';
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -100,6 +129,7 @@
+       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -108,6 +138,7 @@
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -117,6 +148,7 @@
+     if (preview.length > 700) preview = preview.slice(0, 700) + '\n…';
+     previewEl.textContent = preview;
+     previewEl.hidden = false;
++    updateWizardNavState();
+   }
+ 
+   function updateImagesStatus() {
+@@ -128,12 +160,14 @@
+     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
+     if (files.length === 0) {
+       statusEl.textContent = 'No images selected.';
++      updateWizardNavState();
+       return true;
+     }
+ 
+     if (files.length > MAX_IMAGE_COUNT) {
+       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+@@ -141,12 +175,14 @@
+     if (oversized) {
+       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+     var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
+     statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
+     statusEl.classList.add('is-valid');
++    updateWizardNavState();
+     return true;
+   }
+ 
+@@ -271,6 +307,7 @@
+       customConstraintCount--;
+       updateCustomLimitHint();
+       updateConstraintsCount();
++      updateWizardNavState();
+     });
+ 
+     validateCustomConstraint(div);
+@@ -286,6 +323,7 @@
+     } else {
+       hint.textContent = 'Add up to five custom constraints.';
+     }
++    updateWizardNavState();
+   }
+ 
+   function validateCustomConstraint(item) {
+@@ -298,6 +336,7 @@
+       errorEl.style.display = 'none';
+       item.querySelector('.custom-title').classList.remove('is-invalid');
+       item.querySelector('.custom-desc').classList.remove('is-invalid');
++      updateWizardNavState();
+       return true;
+     }
+ 
+@@ -305,6 +344,7 @@
+     errorEl.style.display = valid ? 'none' : 'block';
+     item.querySelector('.custom-title').classList.toggle('is-invalid', !valid && title.length === 0);
+     item.querySelector('.custom-desc').classList.toggle('is-invalid', !valid && desc.length === 0);
++    updateWizardNavState();
+     return valid;
+   }
+ 
+
+
+thinking
+**Adding dataset validation on wizard-next**
+
+I'm inserting a call to update the wizard navigation state when the dataset is invalid and verifying the step 2 guard to ensure proper flow control before patching.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 498ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "wizard-next" -n -C 3 web/static/wizard.js' in /Users/yani/Noema/backend succeeded in 52ms:
+45-  }
+46-
+47-  function updateWizardNavState() {
+48:    var nextBtn = document.getElementById('wizard-next');
+49-    if (!nextBtn) return;
+50-    if (currentStep === 1) {
+51-      nextBtn.disabled = !isStep1Ready();
+--
+74-    var nextLabel = 'Next';
+75-    if (step === maxStep - 1) nextLabel = 'Review';
+76-    if (step === maxStep) nextLabel = 'Run evaluation';
+77:    document.getElementById('wizard-next').textContent = nextLabel;
+78-    updateWizardNavState();
+79-  }
+80-
+--
+443-  var imagesInputEl = document.getElementById('images-file');
+444-  if (imagesInputEl) imagesInputEl.addEventListener('change', updateImagesStatus);
+445-
+446:  document.getElementById('wizard-next').addEventListener('click', function() {
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..57210a23acb508b21365c415f1d99ab672995275
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,32 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
+ 
++  function isStep1Ready() {
++    return !!getDatasetFile() && updateImagesStatus();
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -49,6 +75,7 @@
+     if (step === maxStep - 1) nextLabel = 'Review';
+     if (step === maxStep) nextLabel = 'Run evaluation';
+     document.getElementById('wizard-next').textContent = nextLabel;
++    updateWizardNavState();
+   }
+ 
+   function setDatasetSource(source) {
+@@ -86,6 +113,7 @@
+         statusEl.textContent = 'Select a JSON file to continue.';
+       }
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -93,6 +121,7 @@
+     if (!paste) {
+       statusEl.textContent = 'Paste JSON to continue.';
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -100,6 +129,7 @@
+       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -108,6 +138,7 @@
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -117,6 +148,7 @@
+     if (preview.length > 700) preview = preview.slice(0, 700) + '\n…';
+     previewEl.textContent = preview;
+     previewEl.hidden = false;
++    updateWizardNavState();
+   }
+ 
+   function updateImagesStatus() {
+@@ -128,12 +160,14 @@
+     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
+     if (files.length === 0) {
+       statusEl.textContent = 'No images selected.';
++      updateWizardNavState();
+       return true;
+     }
+ 
+     if (files.length > MAX_IMAGE_COUNT) {
+       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+@@ -141,12 +175,14 @@
+     if (oversized) {
+       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+     var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
+     statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
+     statusEl.classList.add('is-valid');
++    updateWizardNavState();
+     return true;
+   }
+ 
+@@ -271,6 +307,7 @@
+       customConstraintCount--;
+       updateCustomLimitHint();
+       updateConstraintsCount();
++      updateWizardNavState();
+     });
+ 
+     validateCustomConstraint(div);
+@@ -286,6 +323,7 @@
+     } else {
+       hint.textContent = 'Add up to five custom constraints.';
+     }
++    updateWizardNavState();
+   }
+ 
+   function validateCustomConstraint(item) {
+@@ -298,6 +336,7 @@
+       errorEl.style.display = 'none';
+       item.querySelector('.custom-title').classList.remove('is-invalid');
+       item.querySelector('.custom-desc').classList.remove('is-invalid');
++      updateWizardNavState();
+       return true;
+     }
+ 
+@@ -305,6 +344,7 @@
+     errorEl.style.display = valid ? 'none' : 'block';
+     item.querySelector('.custom-title').classList.toggle('is-invalid', !valid && title.length === 0);
+     item.querySelector('.custom-desc').classList.toggle('is-invalid', !valid && desc.length === 0);
++    updateWizardNavState();
+     return valid;
+   }
+ 
+
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '430,480p' web/static/wizard.js" in /Users/yani/Noema/backend succeeded in 52ms:
+      '<div class="review-item"><span class="review-label">Images</span><span class="review-value">' + escapeHtml(imagesLine) + '</span></div>' +
+      '<div class="review-item"><span class="review-label">Reveal</span><span class="review-value">Max severity: ' + (spec.policy.reveal.max_severity ? 'Yes' : 'No') + ' · Commitment: ' + (spec.policy.reveal.commitment ? 'Yes' : 'No') + '</span></div>' +
+      '<div class="review-item"><span class="review-label">Constraints</span><span class="review-value">' + enabledCount + ' enabled</span></div>';
+  }
+
+  document.querySelectorAll('.segmented-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      setDatasetSource(this.getAttribute('data-source'));
+    });
+  });
+
+  document.getElementById('dataset-file').addEventListener('change', updateDatasetStatus);
+  document.getElementById('dataset-paste').addEventListener('input', updateDatasetStatus);
+  var imagesInputEl = document.getElementById('images-file');
+  if (imagesInputEl) imagesInputEl.addEventListener('change', updateImagesStatus);
+
+  document.getElementById('wizard-next').addEventListener('click', function() {
+    if (currentStep < maxStep) {
+      if (currentStep === 1) {
+        var df = getDatasetFile();
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..57210a23acb508b21365c415f1d99ab672995275
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,32 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
+ 
++  function isStep1Ready() {
++    return !!getDatasetFile() && updateImagesStatus();
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -49,6 +75,7 @@
+     if (step === maxStep - 1) nextLabel = 'Review';
+     if (step === maxStep) nextLabel = 'Run evaluation';
+     document.getElementById('wizard-next').textContent = nextLabel;
++    updateWizardNavState();
+   }
+ 
+   function setDatasetSource(source) {
+@@ -86,6 +113,7 @@
+         statusEl.textContent = 'Select a JSON file to continue.';
+       }
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -93,6 +121,7 @@
+     if (!paste) {
+       statusEl.textContent = 'Paste JSON to continue.';
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -100,6 +129,7 @@
+       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -108,6 +138,7 @@
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -117,6 +148,7 @@
+     if (preview.length > 700) preview = preview.slice(0, 700) + '\n…';
+     previewEl.textContent = preview;
+     previewEl.hidden = false;
++    updateWizardNavState();
+   }
+ 
+   function updateImagesStatus() {
+@@ -128,12 +160,14 @@
+     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
+     if (files.length === 0) {
+       statusEl.textContent = 'No images selected.';
++      updateWizardNavState();
+       return true;
+     }
+ 
+     if (files.length > MAX_IMAGE_COUNT) {
+       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+@@ -141,12 +175,14 @@
+     if (oversized) {
+       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+     var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
+     statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
+     statusEl.classList.add('is-valid');
++    updateWizardNavState();
+     return true;
+   }
+ 
+@@ -271,6 +307,7 @@
+       customConstraintCount--;
+       updateCustomLimitHint();
+       updateConstraintsCount();
++      updateWizardNavState();
+     });
+ 
+     validateCustomConstraint(div);
+@@ -286,6 +323,7 @@
+     } else {
+       hint.textContent = 'Add up to five custom constraints.';
+     }
++    updateWizardNavState();
+   }
+ 
+   function validateCustomConstraint(item) {
+@@ -298,6 +336,7 @@
+       errorEl.style.display = 'none';
+       item.querySelector('.custom-title').classList.remove('is-invalid');
+       item.querySelector('.custom-desc').classList.remove('is-invalid');
++      updateWizardNavState();
+       return true;
+     }
+ 
+@@ -305,6 +344,7 @@
+     errorEl.style.display = valid ? 'none' : 'block';
+     item.querySelector('.custom-title').classList.toggle('is-invalid', !valid && title.length === 0);
+     item.querySelector('.custom-desc').classList.toggle('is-invalid', !valid && desc.length === 0);
++    updateWizardNavState();
+     return valid;
+   }
+ 
+
+
+thinking
+**Planning patch for wizard state**
+
+Next, I'll add updateWizardNavState handling for invalid datasets and implement a guard for step2 in the wizard flow.
+file update
+M /Users/yani/Noema/backend/web/static/wizard.js
+@@ -452,2 +452,3 @@
+           document.getElementById('dataset-status').classList.add('is-invalid');
++          updateWizardNavState();
+           return;
+@@ -456,2 +457,3 @@
+       }
++      if (currentStep === 2 && !isStep2Ready()) return;
+       var next = currentStep + 1;
+apply_patch(auto_approved=true) exited 0 in 38ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/web/static/wizard.js
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..c79d1e6cb612bf312d44c5528e16fb131bbebe56
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,32 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
+ 
++  function isStep1Ready() {
++    return !!getDatasetFile() && updateImagesStatus();
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -49,6 +75,7 @@
+     if (step === maxStep - 1) nextLabel = 'Review';
+     if (step === maxStep) nextLabel = 'Run evaluation';
+     document.getElementById('wizard-next').textContent = nextLabel;
++    updateWizardNavState();
+   }
+ 
+   function setDatasetSource(source) {
+@@ -86,6 +113,7 @@
+         statusEl.textContent = 'Select a JSON file to continue.';
+       }
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -93,6 +121,7 @@
+     if (!paste) {
+       statusEl.textContent = 'Paste JSON to continue.';
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -100,6 +129,7 @@
+       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -108,6 +138,7 @@
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -117,6 +148,7 @@
+     if (preview.length > 700) preview = preview.slice(0, 700) + '\n…';
+     previewEl.textContent = preview;
+     previewEl.hidden = false;
++    updateWizardNavState();
+   }
+ 
+   function updateImagesStatus() {
+@@ -128,12 +160,14 @@
+     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
+     if (files.length === 0) {
+       statusEl.textContent = 'No images selected.';
++      updateWizardNavState();
+       return true;
+     }
+ 
+     if (files.length > MAX_IMAGE_COUNT) {
+       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+@@ -141,12 +175,14 @@
+     if (oversized) {
+       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+     var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
+     statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
+     statusEl.classList.add('is-valid');
++    updateWizardNavState();
+     return true;
+   }
+ 
+@@ -271,6 +307,7 @@
+       customConstraintCount--;
+       updateCustomLimitHint();
+       updateConstraintsCount();
++      updateWizardNavState();
+     });
+ 
+     validateCustomConstraint(div);
+@@ -286,6 +323,7 @@
+     } else {
+       hint.textContent = 'Add up to five custom constraints.';
+     }
++    updateWizardNavState();
+   }
+ 
+   function validateCustomConstraint(item) {
+@@ -298,6 +336,7 @@
+       errorEl.style.display = 'none';
+       item.querySelector('.custom-title').classList.remove('is-invalid');
+       item.querySelector('.custom-desc').classList.remove('is-invalid');
++      updateWizardNavState();
+       return true;
+     }
+ 
+@@ -305,6 +344,7 @@
+     errorEl.style.display = valid ? 'none' : 'block';
+     item.querySelector('.custom-title').classList.toggle('is-invalid', !valid && title.length === 0);
+     item.querySelector('.custom-desc').classList.toggle('is-invalid', !valid && desc.length === 0);
++    updateWizardNavState();
+     return valid;
+   }
+ 
+@@ -410,10 +450,12 @@
+         if (!df) {
+           updateDatasetStatus();
+           document.getElementById('dataset-status').classList.add('is-invalid');
++          updateWizardNavState();
+           return;
+         }
+         if (!updateImagesStatus()) return;
+       }
++      if (currentStep === 2 && !isStep2Ready()) return;
+       var next = currentStep + 1;
+       showStep(next);
+       if (next === 3) updateReviewSummary();
+
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..c79d1e6cb612bf312d44c5528e16fb131bbebe56
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,32 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
+ 
++  function isStep1Ready() {
++    return !!getDatasetFile() && updateImagesStatus();
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -49,6 +75,7 @@
+     if (step === maxStep - 1) nextLabel = 'Review';
+     if (step === maxStep) nextLabel = 'Run evaluation';
+     document.getElementById('wizard-next').textContent = nextLabel;
++    updateWizardNavState();
+   }
+ 
+   function setDatasetSource(source) {
+@@ -86,6 +113,7 @@
+         statusEl.textContent = 'Select a JSON file to continue.';
+       }
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -93,6 +121,7 @@
+     if (!paste) {
+       statusEl.textContent = 'Paste JSON to continue.';
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -100,6 +129,7 @@
+       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -108,6 +138,7 @@
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -117,6 +148,7 @@
+     if (preview.length > 700) preview = preview.slice(0, 700) + '\n…';
+     previewEl.textContent = preview;
+     previewEl.hidden = false;
++    updateWizardNavState();
+   }
+ 
+   function updateImagesStatus() {
+@@ -128,12 +160,14 @@
+     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
+     if (files.length === 0) {
+       statusEl.textContent = 'No images selected.';
++      updateWizardNavState();
+       return true;
+     }
+ 
+     if (files.length > MAX_IMAGE_COUNT) {
+       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+@@ -141,12 +175,14 @@
+     if (oversized) {
+       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+     var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
+     statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
+     statusEl.classList.add('is-valid');
++    updateWizardNavState();
+     return true;
+   }
+ 
+@@ -271,6 +307,7 @@
+       customConstraintCount--;
+       updateCustomLimitHint();
+       updateConstraintsCount();
++      updateWizardNavState();
+     });
+ 
+     validateCustomConstraint(div);
+@@ -286,6 +323,7 @@
+     } else {
+       hint.textContent = 'Add up to five custom constraints.';
+     }
++    updateWizardNavState();
+   }
+ 
+   function validateCustomConstraint(item) {
+@@ -298,6 +336,7 @@
+       errorEl.style.display = 'none';
+       item.querySelector('.custom-title').classList.remove('is-invalid');
+       item.querySelector('.custom-desc').classList.remove('is-invalid');
++      updateWizardNavState();
+       return true;
+     }
+ 
+@@ -305,6 +344,7 @@
+     errorEl.style.display = valid ? 'none' : 'block';
+     item.querySelector('.custom-title').classList.toggle('is-invalid', !valid && title.length === 0);
+     item.querySelector('.custom-desc').classList.toggle('is-invalid', !valid && desc.length === 0);
++    updateWizardNavState();
+     return valid;
+   }
+ 
+@@ -410,10 +450,12 @@
+         if (!df) {
+           updateDatasetStatus();
+           document.getElementById('dataset-status').classList.add('is-invalid');
++          updateWizardNavState();
+           return;
+         }
+         if (!updateImagesStatus()) return;
+       }
++      if (currentStep === 2 && !isStep2Ready()) return;
+       var next = currentStep + 1;
+       showStep(next);
+       if (next === 3) updateReviewSummary();
+
+
+
+thinking
+**Breaking recursion between status updates**
+
+I'm refactoring to separate validation from DOM updates by introducing an images validation helper used in wizard navigation state checks; this avoids recursion by having updateWizardNavState rely on validation only, letting updateImagesStatus update the DOM without causing looped calls.
+thinking
+**Adding image validation helper and adjusting readiness check**
+
+I'm adding the `isImagesValid` function and updating `isStep1Ready` and `updateWizardNavState` to use it, ensuring clear separation between validation and DOM updates.
+file update
+M /Users/yani/Noema/backend/web/static/wizard.js
+@@ -35,3 +35,11 @@
+   function isStep1Ready() {
+-    return !!getDatasetFile() && updateImagesStatus();
++    return !!getDatasetFile() && isImagesValid();
++  }
++
++  function isImagesValid() {
++    var imagesInput = document.getElementById('images-file');
++    var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
++    if (files.length === 0) return true;
++    if (files.length > MAX_IMAGE_COUNT) return false;
++    return !files.some(function(file) { return file.size > MAX_IMAGE_BYTES; });
+   }
+apply_patch(auto_approved=true) exited 0 in 39ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/web/static/wizard.js
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..b0337bfeeca60d2c3ff684e2c7d39c99a88311f5
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,40 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
+ 
++  function isStep1Ready() {
++    return !!getDatasetFile() && isImagesValid();
++  }
++
++  function isImagesValid() {
++    var imagesInput = document.getElementById('images-file');
++    var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
++    if (files.length === 0) return true;
++    if (files.length > MAX_IMAGE_COUNT) return false;
++    return !files.some(function(file) { return file.size > MAX_IMAGE_BYTES; });
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -49,6 +83,7 @@
+     if (step === maxStep - 1) nextLabel = 'Review';
+     if (step === maxStep) nextLabel = 'Run evaluation';
+     document.getElementById('wizard-next').textContent = nextLabel;
++    updateWizardNavState();
+   }
+ 
+   function setDatasetSource(source) {
+@@ -86,6 +121,7 @@
+         statusEl.textContent = 'Select a JSON file to continue.';
+       }
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -93,6 +129,7 @@
+     if (!paste) {
+       statusEl.textContent = 'Paste JSON to continue.';
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -100,6 +137,7 @@
+       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -108,6 +146,7 @@
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -117,6 +156,7 @@
+     if (preview.length > 700) preview = preview.slice(0, 700) + '\n…';
+     previewEl.textContent = preview;
+     previewEl.hidden = false;
++    updateWizardNavState();
+   }
+ 
+   function updateImagesStatus() {
+@@ -128,12 +168,14 @@
+     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
+     if (files.length === 0) {
+       statusEl.textContent = 'No images selected.';
++      updateWizardNavState();
+       return true;
+     }
+ 
+     if (files.length > MAX_IMAGE_COUNT) {
+       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+@@ -141,12 +183,14 @@
+     if (oversized) {
+       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+     var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
+     statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
+     statusEl.classList.add('is-valid');
++    updateWizardNavState();
+     return true;
+   }
+ 
+@@ -271,6 +315,7 @@
+       customConstraintCount--;
+       updateCustomLimitHint();
+       updateConstraintsCount();
++      updateWizardNavState();
+     });
+ 
+     validateCustomConstraint(div);
+@@ -286,6 +331,7 @@
+     } else {
+       hint.textContent = 'Add up to five custom constraints.';
+     }
++    updateWizardNavState();
+   }
+ 
+   function validateCustomConstraint(item) {
+@@ -298,6 +344,7 @@
+       errorEl.style.display = 'none';
+       item.querySelector('.custom-title').classList.remove('is-invalid');
+       item.querySelector('.custom-desc').classList.remove('is-invalid');
++      updateWizardNavState();
+       return true;
+     }
+ 
+@@ -305,6 +352,7 @@
+     errorEl.style.display = valid ? 'none' : 'block';
+     item.querySelector('.custom-title').classList.toggle('is-invalid', !valid && title.length === 0);
+     item.querySelector('.custom-desc').classList.toggle('is-invalid', !valid && desc.length === 0);
++    updateWizardNavState();
+     return valid;
+   }
+ 
+@@ -410,10 +458,12 @@
+         if (!df) {
+           updateDatasetStatus();
+           document.getElementById('dataset-status').classList.add('is-invalid');
++          updateWizardNavState();
+           return;
+         }
+         if (!updateImagesStatus()) return;
+       }
++      if (currentStep === 2 && !isStep2Ready()) return;
+       var next = currentStep + 1;
+       showStep(next);
+       if (next === 3) updateReviewSummary();
+
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..b0337bfeeca60d2c3ff684e2c7d39c99a88311f5
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,40 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
+ 
++  function isStep1Ready() {
++    return !!getDatasetFile() && isImagesValid();
++  }
++
++  function isImagesValid() {
++    var imagesInput = document.getElementById('images-file');
++    var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
++    if (files.length === 0) return true;
++    if (files.length > MAX_IMAGE_COUNT) return false;
++    return !files.some(function(file) { return file.size > MAX_IMAGE_BYTES; });
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -49,6 +83,7 @@
+     if (step === maxStep - 1) nextLabel = 'Review';
+     if (step === maxStep) nextLabel = 'Run evaluation';
+     document.getElementById('wizard-next').textContent = nextLabel;
++    updateWizardNavState();
+   }
+ 
+   function setDatasetSource(source) {
+@@ -86,6 +121,7 @@
+         statusEl.textContent = 'Select a JSON file to continue.';
+       }
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -93,6 +129,7 @@
+     if (!paste) {
+       statusEl.textContent = 'Paste JSON to continue.';
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -100,6 +137,7 @@
+       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -108,6 +146,7 @@
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -117,6 +156,7 @@
+     if (preview.length > 700) preview = preview.slice(0, 700) + '\n…';
+     previewEl.textContent = preview;
+     previewEl.hidden = false;
++    updateWizardNavState();
+   }
+ 
+   function updateImagesStatus() {
+@@ -128,12 +168,14 @@
+     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
+     if (files.length === 0) {
+       statusEl.textContent = 'No images selected.';
++      updateWizardNavState();
+       return true;
+     }
+ 
+     if (files.length > MAX_IMAGE_COUNT) {
+       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+@@ -141,12 +183,14 @@
+     if (oversized) {
+       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+     var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
+     statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
+     statusEl.classList.add('is-valid');
++    updateWizardNavState();
+     return true;
+   }
+ 
+@@ -271,6 +315,7 @@
+       customConstraintCount--;
+       updateCustomLimitHint();
+       updateConstraintsCount();
++      updateWizardNavState();
+     });
+ 
+     validateCustomConstraint(div);
+@@ -286,6 +331,7 @@
+     } else {
+       hint.textContent = 'Add up to five custom constraints.';
+     }
++    updateWizardNavState();
+   }
+ 
+   function validateCustomConstraint(item) {
+@@ -298,6 +344,7 @@
+       errorEl.style.display = 'none';
+       item.querySelector('.custom-title').classList.remove('is-invalid');
+       item.querySelector('.custom-desc').classList.remove('is-invalid');
++      updateWizardNavState();
+       return true;
+     }
+ 
+@@ -305,6 +352,7 @@
+     errorEl.style.display = valid ? 'none' : 'block';
+     item.querySelector('.custom-title').classList.toggle('is-invalid', !valid && title.length === 0);
+     item.querySelector('.custom-desc').classList.toggle('is-invalid', !valid && desc.length === 0);
++    updateWizardNavState();
+     return valid;
+   }
+ 
+@@ -410,10 +458,12 @@
+         if (!df) {
+           updateDatasetStatus();
+           document.getElementById('dataset-status').classList.add('is-invalid');
++          updateWizardNavState();
+           return;
+         }
+         if (!updateImagesStatus()) return;
+       }
++      if (currentStep === 2 && !isStep2Ready()) return;
+       var next = currentStep + 1;
+       showStep(next);
+       if (next === 3) updateReviewSummary();
+
+
+
+thinking
+**Confirming recursion resolved and UX tweaks**
+
+Recursion between updateWizardNavState and updateImagesStatus is fixed, with proper guards on status element presence. The UX now intentionally disables the Next button initially until a dataset is selected, reflecting the new validation logic. Next, I'll verify updateWizardNavState properly updates step readiness especially in step 2 with or without custom constraints.
+thinking
+**Removing recursion by relocating update calls**
+
+Recursion arises because validateCustomConstraint calls updateWizardNavState while updateWizardNavState calls validateCustomConstraint. To fix this, I'll remove updateWizardNavState calls from validateCustomConstraint and instead trigger updateWizardNavState in related event handlers after validation, preventing cyclic calls.
+file update
+M /Users/yani/Noema/backend/web/static/wizard.js
+@@ -346,3 +346,2 @@
+       item.querySelector('.custom-desc').classList.remove('is-invalid');
+-      updateWizardNavState();
+       return true;
+@@ -354,3 +353,2 @@
+     item.querySelector('.custom-desc').classList.toggle('is-invalid', !valid && desc.length === 0);
+-    updateWizardNavState();
+     return valid;
+apply_patch(auto_approved=true) exited 0 in 40ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/web/static/wizard.js
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..548c7b5c4614363183624fa763d4d5bcdf98da17
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,40 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
+ 
++  function isStep1Ready() {
++    return !!getDatasetFile() && isImagesValid();
++  }
++
++  function isImagesValid() {
++    var imagesInput = document.getElementById('images-file');
++    var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
++    if (files.length === 0) return true;
++    if (files.length > MAX_IMAGE_COUNT) return false;
++    return !files.some(function(file) { return file.size > MAX_IMAGE_BYTES; });
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -49,6 +83,7 @@
+     if (step === maxStep - 1) nextLabel = 'Review';
+     if (step === maxStep) nextLabel = 'Run evaluation';
+     document.getElementById('wizard-next').textContent = nextLabel;
++    updateWizardNavState();
+   }
+ 
+   function setDatasetSource(source) {
+@@ -86,6 +121,7 @@
+         statusEl.textContent = 'Select a JSON file to continue.';
+       }
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -93,6 +129,7 @@
+     if (!paste) {
+       statusEl.textContent = 'Paste JSON to continue.';
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -100,6 +137,7 @@
+       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -108,6 +146,7 @@
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -117,6 +156,7 @@
+     if (preview.length > 700) preview = preview.slice(0, 700) + '\n…';
+     previewEl.textContent = preview;
+     previewEl.hidden = false;
++    updateWizardNavState();
+   }
+ 
+   function updateImagesStatus() {
+@@ -128,12 +168,14 @@
+     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
+     if (files.length === 0) {
+       statusEl.textContent = 'No images selected.';
++      updateWizardNavState();
+       return true;
+     }
+ 
+     if (files.length > MAX_IMAGE_COUNT) {
+       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+@@ -141,12 +183,14 @@
+     if (oversized) {
+       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+     var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
+     statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
+     statusEl.classList.add('is-valid');
++    updateWizardNavState();
+     return true;
+   }
+ 
+@@ -271,6 +315,7 @@
+       customConstraintCount--;
+       updateCustomLimitHint();
+       updateConstraintsCount();
++      updateWizardNavState();
+     });
+ 
+     validateCustomConstraint(div);
+@@ -286,6 +331,7 @@
+     } else {
+       hint.textContent = 'Add up to five custom constraints.';
+     }
++    updateWizardNavState();
+   }
+ 
+   function validateCustomConstraint(item) {
+@@ -410,10 +456,12 @@
+         if (!df) {
+           updateDatasetStatus();
+           document.getElementById('dataset-status').classList.add('is-invalid');
++          updateWizardNavState();
+           return;
+         }
+         if (!updateImagesStatus()) return;
+       }
++      if (currentStep === 2 && !isStep2Ready()) return;
+       var next = currentStep + 1;
+       showStep(next);
+       if (next === 3) updateReviewSummary();
+
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..548c7b5c4614363183624fa763d4d5bcdf98da17
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,40 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
+ 
++  function isStep1Ready() {
++    return !!getDatasetFile() && isImagesValid();
++  }
++
++  function isImagesValid() {
++    var imagesInput = document.getElementById('images-file');
++    var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
++    if (files.length === 0) return true;
++    if (files.length > MAX_IMAGE_COUNT) return false;
++    return !files.some(function(file) { return file.size > MAX_IMAGE_BYTES; });
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -49,6 +83,7 @@
+     if (step === maxStep - 1) nextLabel = 'Review';
+     if (step === maxStep) nextLabel = 'Run evaluation';
+     document.getElementById('wizard-next').textContent = nextLabel;
++    updateWizardNavState();
+   }
+ 
+   function setDatasetSource(source) {
+@@ -86,6 +121,7 @@
+         statusEl.textContent = 'Select a JSON file to continue.';
+       }
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -93,6 +129,7 @@
+     if (!paste) {
+       statusEl.textContent = 'Paste JSON to continue.';
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -100,6 +137,7 @@
+       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -108,6 +146,7 @@
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -117,6 +156,7 @@
+     if (preview.length > 700) preview = preview.slice(0, 700) + '\n…';
+     previewEl.textContent = preview;
+     previewEl.hidden = false;
++    updateWizardNavState();
+   }
+ 
+   function updateImagesStatus() {
+@@ -128,12 +168,14 @@
+     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
+     if (files.length === 0) {
+       statusEl.textContent = 'No images selected.';
++      updateWizardNavState();
+       return true;
+     }
+ 
+     if (files.length > MAX_IMAGE_COUNT) {
+       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+@@ -141,12 +183,14 @@
+     if (oversized) {
+       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+     var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
+     statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
+     statusEl.classList.add('is-valid');
++    updateWizardNavState();
+     return true;
+   }
+ 
+@@ -271,6 +315,7 @@
+       customConstraintCount--;
+       updateCustomLimitHint();
+       updateConstraintsCount();
++      updateWizardNavState();
+     });
+ 
+     validateCustomConstraint(div);
+@@ -286,6 +331,7 @@
+     } else {
+       hint.textContent = 'Add up to five custom constraints.';
+     }
++    updateWizardNavState();
+   }
+ 
+   function validateCustomConstraint(item) {
+@@ -410,10 +456,12 @@
+         if (!df) {
+           updateDatasetStatus();
+           document.getElementById('dataset-status').classList.add('is-invalid');
++          updateWizardNavState();
+           return;
+         }
+         if (!updateImagesStatus()) return;
+       }
++      if (currentStep === 2 && !isStep2Ready()) return;
+       var next = currentStep + 1;
+       showStep(next);
+       if (next === 3) updateReviewSummary();
+
+
+thinking
+**Adding update calls to custom constraint handlers**
+
+I'm modifying event handlers for custom constraints to call updateWizardNavState after validation and initially, ensuring the wizard navigation state stays in sync with constraint changes.
+file update
+M /Users/yani/Noema/backend/web/static/wizard.js
+@@ -308,4 +308,11 @@
+     div.querySelectorAll('.custom-title, .custom-desc, .custom-enabled').forEach(function(el) {
+-      el.addEventListener('input', function() { validateCustomConstraint(div); });
+-      el.addEventListener('change', function() { validateCustomConstraint(div); updateConstraintsCount(); });
++      el.addEventListener('input', function() {
++        validateCustomConstraint(div);
++        updateWizardNavState();
++      });
++      el.addEventListener('change', function() {
++        validateCustomConstraint(div);
++        updateConstraintsCount();
++        updateWizardNavState();
++      });
+     });
+@@ -322,2 +329,3 @@
+     updateConstraintsCount();
++    updateWizardNavState();
+   }
+apply_patch(auto_approved=true) exited 0 in 40ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/web/static/wizard.js
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..bfc4ae4af41fc0ca09e79fd34ab679b06f1dd349
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,40 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
+ 
++  function isStep1Ready() {
++    return !!getDatasetFile() && isImagesValid();
++  }
++
++  function isImagesValid() {
++    var imagesInput = document.getElementById('images-file');
++    var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
++    if (files.length === 0) return true;
++    if (files.length > MAX_IMAGE_COUNT) return false;
++    return !files.some(function(file) { return file.size > MAX_IMAGE_BYTES; });
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -49,6 +83,7 @@
+     if (step === maxStep - 1) nextLabel = 'Review';
+     if (step === maxStep) nextLabel = 'Run evaluation';
+     document.getElementById('wizard-next').textContent = nextLabel;
++    updateWizardNavState();
+   }
+ 
+   function setDatasetSource(source) {
+@@ -86,6 +121,7 @@
+         statusEl.textContent = 'Select a JSON file to continue.';
+       }
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -93,6 +129,7 @@
+     if (!paste) {
+       statusEl.textContent = 'Paste JSON to continue.';
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -100,6 +137,7 @@
+       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -108,6 +146,7 @@
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -117,6 +156,7 @@
+     if (preview.length > 700) preview = preview.slice(0, 700) + '\n…';
+     previewEl.textContent = preview;
+     previewEl.hidden = false;
++    updateWizardNavState();
+   }
+ 
+   function updateImagesStatus() {
+@@ -128,12 +168,14 @@
+     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
+     if (files.length === 0) {
+       statusEl.textContent = 'No images selected.';
++      updateWizardNavState();
+       return true;
+     }
+ 
+     if (files.length > MAX_IMAGE_COUNT) {
+       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+@@ -141,12 +183,14 @@
+     if (oversized) {
+       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+     var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
+     statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
+     statusEl.classList.add('is-valid');
++    updateWizardNavState();
+     return true;
+   }
+ 
+@@ -262,8 +306,15 @@
+     list.appendChild(div);
+ 
+     div.querySelectorAll('.custom-title, .custom-desc, .custom-enabled').forEach(function(el) {
+-      el.addEventListener('input', function() { validateCustomConstraint(div); });
+-      el.addEventListener('change', function() { validateCustomConstraint(div); updateConstraintsCount(); });
++      el.addEventListener('input', function() {
++        validateCustomConstraint(div);
++        updateWizardNavState();
++      });
++      el.addEventListener('change', function() {
++        validateCustomConstraint(div);
++        updateConstraintsCount();
++        updateWizardNavState();
++      });
+     });
+ 
+     div.querySelector('.remove-custom').addEventListener('click', function() {
+@@ -271,10 +322,12 @@
+       customConstraintCount--;
+       updateCustomLimitHint();
+       updateConstraintsCount();
++      updateWizardNavState();
+     });
+ 
+     validateCustomConstraint(div);
+     updateConstraintsCount();
++    updateWizardNavState();
+   }
+ 
+   function updateCustomLimitHint() {
+@@ -286,6 +339,7 @@
+     } else {
+       hint.textContent = 'Add up to five custom constraints.';
+     }
++    updateWizardNavState();
+   }
+ 
+   function validateCustomConstraint(item) {
+@@ -410,10 +464,12 @@
+         if (!df) {
+           updateDatasetStatus();
+           document.getElementById('dataset-status').classList.add('is-invalid');
++          updateWizardNavState();
+           return;
+         }
+         if (!updateImagesStatus()) return;
+       }
++      if (currentStep === 2 && !isStep2Ready()) return;
+       var next = currentStep + 1;
+       showStep(next);
+       if (next === 3) updateReviewSummary();
+
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..bfc4ae4af41fc0ca09e79fd34ab679b06f1dd349
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,40 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
+ 
++  function isStep1Ready() {
++    return !!getDatasetFile() && isImagesValid();
++  }
++
++  function isImagesValid() {
++    var imagesInput = document.getElementById('images-file');
++    var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
++    if (files.length === 0) return true;
++    if (files.length > MAX_IMAGE_COUNT) return false;
++    return !files.some(function(file) { return file.size > MAX_IMAGE_BYTES; });
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -49,6 +83,7 @@
+     if (step === maxStep - 1) nextLabel = 'Review';
+     if (step === maxStep) nextLabel = 'Run evaluation';
+     document.getElementById('wizard-next').textContent = nextLabel;
++    updateWizardNavState();
+   }
+ 
+   function setDatasetSource(source) {
+@@ -86,6 +121,7 @@
+         statusEl.textContent = 'Select a JSON file to continue.';
+       }
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -93,6 +129,7 @@
+     if (!paste) {
+       statusEl.textContent = 'Paste JSON to continue.';
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -100,6 +137,7 @@
+       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -108,6 +146,7 @@
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -117,6 +156,7 @@
+     if (preview.length > 700) preview = preview.slice(0, 700) + '\n…';
+     previewEl.textContent = preview;
+     previewEl.hidden = false;
++    updateWizardNavState();
+   }
+ 
+   function updateImagesStatus() {
+@@ -128,12 +168,14 @@
+     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
+     if (files.length === 0) {
+       statusEl.textContent = 'No images selected.';
++      updateWizardNavState();
+       return true;
+     }
+ 
+     if (files.length > MAX_IMAGE_COUNT) {
+       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+@@ -141,12 +183,14 @@
+     if (oversized) {
+       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+     var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
+     statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
+     statusEl.classList.add('is-valid');
++    updateWizardNavState();
+     return true;
+   }
+ 
+@@ -262,8 +306,15 @@
+     list.appendChild(div);
+ 
+     div.querySelectorAll('.custom-title, .custom-desc, .custom-enabled').forEach(function(el) {
+-      el.addEventListener('input', function() { validateCustomConstraint(div); });
+-      el.addEventListener('change', function() { validateCustomConstraint(div); updateConstraintsCount(); });
++      el.addEventListener('input', function() {
++        validateCustomConstraint(div);
++        updateWizardNavState();
++      });
++      el.addEventListener('change', function() {
++        validateCustomConstraint(div);
++        updateConstraintsCount();
++        updateWizardNavState();
++      });
+     });
+ 
+     div.querySelector('.remove-custom').addEventListener('click', function() {
+@@ -271,10 +322,12 @@
+       customConstraintCount--;
+       updateCustomLimitHint();
+       updateConstraintsCount();
++      updateWizardNavState();
+     });
+ 
+     validateCustomConstraint(div);
+     updateConstraintsCount();
++    updateWizardNavState();
+   }
+ 
+   function updateCustomLimitHint() {
+@@ -286,6 +339,7 @@
+     } else {
+       hint.textContent = 'Add up to five custom constraints.';
+     }
++    updateWizardNavState();
+   }
+ 
+   function validateCustomConstraint(item) {
+@@ -410,10 +464,12 @@
+         if (!df) {
+           updateDatasetStatus();
+           document.getElementById('dataset-status').classList.add('is-invalid');
++          updateWizardNavState();
+           return;
+         }
+         if (!updateImagesStatus()) return;
+       }
++      if (currentStep === 2 && !isStep2Ready()) return;
+       var next = currentStep + 1;
+       showStep(next);
+       if (next === 3) updateReviewSummary();
+
+
+
+thinking
+**Confirming updateWizardNavState calls and recursion fixes**
+
+The updateWizardNavState function is now only called where safe, avoiding recursion and premature DOM access, with calls properly sequenced after DOM load and wizard setup. JSON parsing on each image status update is noted but accepted.
+thinking
+**Running all tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 322ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	0.054s
+ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
 file update:
-diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
-index e85a0702209ca351eff8a5238f4cc1b73fbe6822..86cc53272dc561f9692f36a8b8722ddc27fe3754
---- a/backend/internal/evaluate/storage.go
-+++ b/backend/internal/evaluate/storage.go
-@@ -52,15 +52,38 @@
- 		return fmt.Errorf("open upload: %w", err)
- 	}
- 	defer src.Close()
--	out, err := os.Create(dst)
-+	dir := filepath.Dir(dst)
-+	base := filepath.Base(dst)
-+	tmp, err := os.CreateTemp(dir, base+".tmp-*")
- 	if err != nil {
--		return fmt.Errorf("create %s: %w", dst, err)
-+		return fmt.Errorf("create temp for %s: %w", dst, err)
- 	}
--	defer out.Close()
--	_, err = io.Copy(out, src)
--	if err != nil {
-+	tmpName := tmp.Name()
-+	cleanup := true
-+	defer func() {
-+		if cleanup {
-+			_ = os.Remove(tmpName)
-+		}
-+	}()
-+	if err := tmp.Chmod(0644); err != nil {
-+		_ = tmp.Close()
-+		return fmt.Errorf("chmod temp for %s: %w", dst, err)
-+	}
-+	if _, err := io.Copy(tmp, src); err != nil {
-+		_ = tmp.Close()
- 		return fmt.Errorf("copy to %s: %w", dst, err)
- 	}
-+	if err := tmp.Sync(); err != nil {
-+		_ = tmp.Close()
-+		return fmt.Errorf("sync %s: %w", dst, err)
-+	}
-+	if err := tmp.Close(); err != nil {
-+		return fmt.Errorf("close %s: %w", dst, err)
-+	}
-+	if err := os.Rename(tmpName, dst); err != nil {
-+		return fmt.Errorf("rename %s: %w", dst, err)
-+	}
-+	cleanup = false
- 	return nil
- }
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..bfc4ae4af41fc0ca09e79fd34ab679b06f1dd349
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,40 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
  
++  function isStep1Ready() {
++    return !!getDatasetFile() && isImagesValid();
++  }
++
++  function isImagesValid() {
++    var imagesInput = document.getElementById('images-file');
++    var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
++    if (files.length === 0) return true;
++    if (files.length > MAX_IMAGE_COUNT) return false;
++    return !files.some(function(file) { return file.size > MAX_IMAGE_BYTES; });
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -49,6 +83,7 @@
+     if (step === maxStep - 1) nextLabel = 'Review';
+     if (step === maxStep) nextLabel = 'Run evaluation';
+     document.getElementById('wizard-next').textContent = nextLabel;
++    updateWizardNavState();
+   }
+ 
+   function setDatasetSource(source) {
+@@ -86,6 +121,7 @@
+         statusEl.textContent = 'Select a JSON file to continue.';
+       }
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -93,6 +129,7 @@
+     if (!paste) {
+       statusEl.textContent = 'Paste JSON to continue.';
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -100,6 +137,7 @@
+       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -108,6 +146,7 @@
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -117,6 +156,7 @@
+     if (preview.length > 700) preview = preview.slice(0, 700) + '\n…';
+     previewEl.textContent = preview;
+     previewEl.hidden = false;
++    updateWizardNavState();
+   }
+ 
+   function updateImagesStatus() {
+@@ -128,12 +168,14 @@
+     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
+     if (files.length === 0) {
+       statusEl.textContent = 'No images selected.';
++      updateWizardNavState();
+       return true;
+     }
+ 
+     if (files.length > MAX_IMAGE_COUNT) {
+       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+@@ -141,12 +183,14 @@
+     if (oversized) {
+       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+     var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
+     statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
+     statusEl.classList.add('is-valid');
++    updateWizardNavState();
+     return true;
+   }
+ 
+@@ -262,8 +306,15 @@
+     list.appendChild(div);
+ 
+     div.querySelectorAll('.custom-title, .custom-desc, .custom-enabled').forEach(function(el) {
+-      el.addEventListener('input', function() { validateCustomConstraint(div); });
+-      el.addEventListener('change', function() { validateCustomConstraint(div); updateConstraintsCount(); });
++      el.addEventListener('input', function() {
++        validateCustomConstraint(div);
++        updateWizardNavState();
++      });
++      el.addEventListener('change', function() {
++        validateCustomConstraint(div);
++        updateConstraintsCount();
++        updateWizardNavState();
++      });
+     });
+ 
+     div.querySelector('.remove-custom').addEventListener('click', function() {
+@@ -271,10 +322,12 @@
+       customConstraintCount--;
+       updateCustomLimitHint();
+       updateConstraintsCount();
++      updateWizardNavState();
+     });
+ 
+     validateCustomConstraint(div);
+     updateConstraintsCount();
++    updateWizardNavState();
+   }
+ 
+   function updateCustomLimitHint() {
+@@ -286,6 +339,7 @@
+     } else {
+       hint.textContent = 'Add up to five custom constraints.';
+     }
++    updateWizardNavState();
+   }
+ 
+   function validateCustomConstraint(item) {
+@@ -410,10 +464,12 @@
+         if (!df) {
+           updateDatasetStatus();
+           document.getElementById('dataset-status').classList.add('is-invalid');
++          updateWizardNavState();
+           return;
+         }
+         if (!updateImagesStatus()) return;
+       }
++      if (currentStep === 2 && !isStep2Ready()) return;
+       var next = currentStep + 1;
+       showStep(next);
+       if (next === 3) updateReviewSummary();
 
+
+thinking
+**Summarizing final changes**
+
+The file `web/static/wizard.js` was changed to disable the wizard's next button until the dataset, images, and custom constraints are all valid, reducing user errors. Tests were run to verify this validation logic and button state behavior.
 codex
 What you changed (short)
-- Made `saveUpload` write uploads via a temp file + fsync + atomic rename to avoid leaving partial files on disk if a copy fails (`internal/evaluate/storage.go`).
+- Improved wizard UX by disabling the Next/Review button until the current step is valid (dataset + image limits on step 1, custom constraints on step 2), reducing dead-end clicks. (`web/static/wizard.js`)
 
-Tests run (must include go test ./...)
+Tests run
 - `go test ./...`
-
-If you want, I can add a small test around `saveUpload` error cleanup next iteration, but it will require a bit of scaffolding to simulate a mid-copy failure.
 file update:
-diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
-index e85a0702209ca351eff8a5238f4cc1b73fbe6822..86cc53272dc561f9692f36a8b8722ddc27fe3754
---- a/backend/internal/evaluate/storage.go
-+++ b/backend/internal/evaluate/storage.go
-@@ -52,15 +52,38 @@
- 		return fmt.Errorf("open upload: %w", err)
- 	}
- 	defer src.Close()
--	out, err := os.Create(dst)
-+	dir := filepath.Dir(dst)
-+	base := filepath.Base(dst)
-+	tmp, err := os.CreateTemp(dir, base+".tmp-*")
- 	if err != nil {
--		return fmt.Errorf("create %s: %w", dst, err)
-+		return fmt.Errorf("create temp for %s: %w", dst, err)
- 	}
--	defer out.Close()
--	_, err = io.Copy(out, src)
--	if err != nil {
-+	tmpName := tmp.Name()
-+	cleanup := true
-+	defer func() {
-+		if cleanup {
-+			_ = os.Remove(tmpName)
-+		}
-+	}()
-+	if err := tmp.Chmod(0644); err != nil {
-+		_ = tmp.Close()
-+		return fmt.Errorf("chmod temp for %s: %w", dst, err)
-+	}
-+	if _, err := io.Copy(tmp, src); err != nil {
-+		_ = tmp.Close()
- 		return fmt.Errorf("copy to %s: %w", dst, err)
- 	}
-+	if err := tmp.Sync(); err != nil {
-+		_ = tmp.Close()
-+		return fmt.Errorf("sync %s: %w", dst, err)
-+	}
-+	if err := tmp.Close(); err != nil {
-+		return fmt.Errorf("close %s: %w", dst, err)
-+	}
-+	if err := os.Rename(tmpName, dst); err != nil {
-+		return fmt.Errorf("rename %s: %w", dst, err)
-+	}
-+	cleanup = false
- 	return nil
- }
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 3987fdb525a0a6f065e39a2784f16d5342967a1c..bfc4ae4af41fc0ca09e79fd34ab679b06f1dd349
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -32,6 +32,40 @@
+     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
+   }
  
++  function isStep1Ready() {
++    return !!getDatasetFile() && isImagesValid();
++  }
++
++  function isImagesValid() {
++    var imagesInput = document.getElementById('images-file');
++    var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
++    if (files.length === 0) return true;
++    if (files.length > MAX_IMAGE_COUNT) return false;
++    return !files.some(function(file) { return file.size > MAX_IMAGE_BYTES; });
++  }
++
++  function isStep2Ready() {
++    var ok = true;
++    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
++      if (!validateCustomConstraint(item)) ok = false;
++    });
++    return ok;
++  }
++
++  function updateWizardNavState() {
++    var nextBtn = document.getElementById('wizard-next');
++    if (!nextBtn) return;
++    if (currentStep === 1) {
++      nextBtn.disabled = !isStep1Ready();
++      return;
++    }
++    if (currentStep === 2) {
++      nextBtn.disabled = !isStep2Ready();
++      return;
++    }
++    nextBtn.disabled = false;
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -49,6 +83,7 @@
+     if (step === maxStep - 1) nextLabel = 'Review';
+     if (step === maxStep) nextLabel = 'Run evaluation';
+     document.getElementById('wizard-next').textContent = nextLabel;
++    updateWizardNavState();
+   }
+ 
+   function setDatasetSource(source) {
+@@ -86,6 +121,7 @@
+         statusEl.textContent = 'Select a JSON file to continue.';
+       }
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -93,6 +129,7 @@
+     if (!paste) {
+       statusEl.textContent = 'Paste JSON to continue.';
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -100,6 +137,7 @@
+       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -108,6 +146,7 @@
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+       statusEl.classList.add('is-invalid');
+       previewEl.hidden = true;
++      updateWizardNavState();
+       return;
+     }
+ 
+@@ -117,6 +156,7 @@
+     if (preview.length > 700) preview = preview.slice(0, 700) + '\n…';
+     previewEl.textContent = preview;
+     previewEl.hidden = false;
++    updateWizardNavState();
+   }
+ 
+   function updateImagesStatus() {
+@@ -128,12 +168,14 @@
+     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
+     if (files.length === 0) {
+       statusEl.textContent = 'No images selected.';
++      updateWizardNavState();
+       return true;
+     }
+ 
+     if (files.length > MAX_IMAGE_COUNT) {
+       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+@@ -141,12 +183,14 @@
+     if (oversized) {
+       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
+       statusEl.classList.add('is-invalid');
++      updateWizardNavState();
+       return false;
+     }
+ 
+     var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
+     statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
+     statusEl.classList.add('is-valid');
++    updateWizardNavState();
+     return true;
+   }
+ 
+@@ -262,8 +306,15 @@
+     list.appendChild(div);
+ 
+     div.querySelectorAll('.custom-title, .custom-desc, .custom-enabled').forEach(function(el) {
+-      el.addEventListener('input', function() { validateCustomConstraint(div); });
+-      el.addEventListener('change', function() { validateCustomConstraint(div); updateConstraintsCount(); });
++      el.addEventListener('input', function() {
++        validateCustomConstraint(div);
++        updateWizardNavState();
++      });
++      el.addEventListener('change', function() {
++        validateCustomConstraint(div);
++        updateConstraintsCount();
++        updateWizardNavState();
++      });
+     });
+ 
+     div.querySelector('.remove-custom').addEventListener('click', function() {
+@@ -271,10 +322,12 @@
+       customConstraintCount--;
+       updateCustomLimitHint();
+       updateConstraintsCount();
++      updateWizardNavState();
+     });
+ 
+     validateCustomConstraint(div);
+     updateConstraintsCount();
++    updateWizardNavState();
+   }
+ 
+   function updateCustomLimitHint() {
+@@ -286,6 +339,7 @@
+     } else {
+       hint.textContent = 'Add up to five custom constraints.';
+     }
++    updateWizardNavState();
+   }
+ 
+   function validateCustomConstraint(item) {
+@@ -410,10 +464,12 @@
+         if (!df) {
+           updateDatasetStatus();
+           document.getElementById('dataset-status').classList.add('is-invalid');
++          updateWizardNavState();
+           return;
+         }
+         if (!updateImagesStatus()) return;
+       }
++      if (currentStep === 2 && !isStep2Ready()) return;
+       var next = currentStep + 1;
+       showStep(next);
+       if (next === 3) updateReviewSummary();
 
 tokens used
-20,031
+85,114
 What you changed (short)
-- Made `saveUpload` write uploads via a temp file + fsync + atomic rename to avoid leaving partial files on disk if a copy fails (`internal/evaluate/storage.go`).
+- Improved wizard UX by disabling the Next/Review button until the current step is valid (dataset + image limits on step 1, custom constraints on step 2), reducing dead-end clicks. (`web/static/wizard.js`)
 
-Tests run (must include go test ./...)
+Tests run
 - `go test ./...`
-
-If you want, I can add a small test around `saveUpload` error cleanup next iteration, but it will require a bit of scaffolding to simulate a mid-copy failure.

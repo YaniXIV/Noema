@@ -32,6 +32,40 @@
     return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
   }
 
+  function isStep1Ready() {
+    return !!getDatasetFile() && isImagesValid();
+  }
+
+  function isImagesValid() {
+    var imagesInput = document.getElementById('images-file');
+    var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
+    if (files.length === 0) return true;
+    if (files.length > MAX_IMAGE_COUNT) return false;
+    return !files.some(function(file) { return file.size > MAX_IMAGE_BYTES; });
+  }
+
+  function isStep2Ready() {
+    var ok = true;
+    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
+      if (!validateCustomConstraint(item)) ok = false;
+    });
+    return ok;
+  }
+
+  function updateWizardNavState() {
+    var nextBtn = document.getElementById('wizard-next');
+    if (!nextBtn) return;
+    if (currentStep === 1) {
+      nextBtn.disabled = !isStep1Ready();
+      return;
+    }
+    if (currentStep === 2) {
+      nextBtn.disabled = !isStep2Ready();
+      return;
+    }
+    nextBtn.disabled = false;
+  }
+
   function showStep(step) {
     currentStep = step;
     document.querySelectorAll('.stepper-step').forEach(function(el) {
@@ -49,6 +83,7 @@
     if (step === maxStep - 1) nextLabel = 'Review';
     if (step === maxStep) nextLabel = 'Run evaluation';
     document.getElementById('wizard-next').textContent = nextLabel;
+    updateWizardNavState();
   }
 
   function setDatasetSource(source) {
@@ -86,6 +121,7 @@
         statusEl.textContent = 'Select a JSON file to continue.';
       }
       previewEl.hidden = true;
+      updateWizardNavState();
       return;
     }
 
@@ -93,6 +129,7 @@
     if (!paste) {
       statusEl.textContent = 'Paste JSON to continue.';
       previewEl.hidden = true;
+      updateWizardNavState();
       return;
     }
 
@@ -100,6 +137,7 @@
       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
       statusEl.classList.add('is-invalid');
       previewEl.hidden = true;
+      updateWizardNavState();
       return;
     }
 
@@ -108,6 +146,7 @@
       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
       statusEl.classList.add('is-invalid');
       previewEl.hidden = true;
+      updateWizardNavState();
       return;
     }
 
@@ -117,6 +156,7 @@
     if (preview.length > 700) preview = preview.slice(0, 700) + '\n…';
     previewEl.textContent = preview;
     previewEl.hidden = false;
+    updateWizardNavState();
   }
 
   function updateImagesStatus() {
@@ -128,12 +168,14 @@
     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
     if (files.length === 0) {
       statusEl.textContent = 'No images selected.';
+      updateWizardNavState();
       return true;
     }
 
     if (files.length > MAX_IMAGE_COUNT) {
       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
       statusEl.classList.add('is-invalid');
+      updateWizardNavState();
       return false;
     }
 
@@ -141,12 +183,14 @@
     if (oversized) {
       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
       statusEl.classList.add('is-invalid');
+      updateWizardNavState();
       return false;
     }
 
     var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
     statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
     statusEl.classList.add('is-valid');
+    updateWizardNavState();
     return true;
   }
 
@@ -262,8 +306,15 @@
     list.appendChild(div);
 
     div.querySelectorAll('.custom-title, .custom-desc, .custom-enabled').forEach(function(el) {
-      el.addEventListener('input', function() { validateCustomConstraint(div); });
-      el.addEventListener('change', function() { validateCustomConstraint(div); updateConstraintsCount(); });
+      el.addEventListener('input', function() {
+        validateCustomConstraint(div);
+        updateWizardNavState();
+      });
+      el.addEventListener('change', function() {
+        validateCustomConstraint(div);
+        updateConstraintsCount();
+        updateWizardNavState();
+      });
     });
 
     div.querySelector('.remove-custom').addEventListener('click', function() {
@@ -271,10 +322,12 @@
       customConstraintCount--;
       updateCustomLimitHint();
       updateConstraintsCount();
+      updateWizardNavState();
     });
 
     validateCustomConstraint(div);
     updateConstraintsCount();
+    updateWizardNavState();
   }
 
   function updateCustomLimitHint() {
@@ -286,6 +339,7 @@
     } else {
       hint.textContent = 'Add up to five custom constraints.';
     }
+    updateWizardNavState();
   }
 
   function validateCustomConstraint(item) {
@@ -410,10 +464,12 @@
         if (!df) {
           updateDatasetStatus();
           document.getElementById('dataset-status').classList.add('is-invalid');
+          updateWizardNavState();
           return;
         }
         if (!updateImagesStatus()) return;
       }
+      if (currentStep === 2 && !isStep2Ready()) return;
       var next = currentStep + 1;
       showStep(next);
       if (next === 3) updateReviewSummary();
