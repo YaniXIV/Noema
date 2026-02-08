@@ -7,7 +7,7 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3c7d-e2a5-7f30-9ff5-14c5471fe586
+session id: 019c3ec3-21fa-7bf0-aea0-79bc234e541c
 --------
 user
 You are an autonomous coding agent polishing the Noema repository.
@@ -18,8 +18,9 @@ Hard rules:
 - Keep changes small: max 3 files per iteration.
 - No cosmetic-only edits.
 - No new dependencies unless absolutely necessary.
+- keep all the same ui functionality, the end user should be able to do the same stuff but the experiance and design should be better.
 
-Goal: continuously improve production quality.
+Goal: continuously improve production quality. continuously improve front end quality and polish.
 
 Iteration:
 1) Run: cd backend && go test ./...
@@ -29,7 +30,7 @@ Iteration:
 Pick the highest-value improvement:
 A) Reliability/correctness: validation, error handling, run persistence, verify robustness
 B) Tests: add/strengthen tests for the change you made
-C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+C) upgrading the user interface so that it looks better.
 D) Maintainability: reduce duplication with tiny refactors
 E) UX: wizard/results/verify clarity (small, safe changes)
 F) Docs: README/DEPLOYMENT polish
@@ -41,50 +42,25 @@ Finish with:
 mcp startup: no servers
 
 thinking
-**Preparing to run Go tests**
-
-I'll run the Go tests using exec since AGENTS? is provided without a skill and requires running go test directly.
+**Preparing to run tests**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 103ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 195ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
 ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
-?   	noema/internal/session	[no test files]
-?   	noema/internal/verify	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
 
 thinking
-**Searching for TODO comments**
+**Listing frontend files**
 
-I'm scanning the repo to find TODOs that suggest small reliability improvements or tests to add, targeting no more than three files for quick enhancements.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"TODO|FIXME|panic\\(|\\bmust\\b\" internal | head -100" in /Users/yani/Noema/backend succeeded in 52ms:
-internal/evaluate/parse.go:29:			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
-internal/evaluate/parse.go:34:			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
-internal/evaluate/parse.go:55:			return nil, nil, fmt.Errorf("each image must be at most 5MB")
-internal/evaluate/parse.go:86:			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
-internal/evaluate/dataset.go:37:		return nil, Dataset{}, fmt.Errorf("dataset must be valid JSON")
-internal/evaluate/dataset.go:40:		return nil, Dataset{}, fmt.Errorf("dataset must be a single JSON value")
-internal/evaluate/dataset.go:45:		return nil, Dataset{}, fmt.Errorf("dataset must match schema")
-internal/evaluate/dataset.go:48:		return nil, Dataset{}, fmt.Errorf("dataset.items must be a non-empty array")
-internal/evaluate/policy.go:31:		return nil, fmt.Errorf("at least one constraint must be enabled")
-internal/zk/zk.go:86:		return nil, fmt.Errorf("policy threshold must be 0..2")
-internal/zk/zk.go:89:		return nil, fmt.Errorf("max severity must be 0..2")
-
-thinking
-**Planning test additions**
-
-I'm considering adding tests for existing behavior by exploring potential gaps, particularly in internal/verify or gemini areas.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME" internal/cmd -g"*.go"' in /Users/yani/Noema/backend exited 2 in 52ms:
-rg: internal/cmd: IO error for operation on internal/cmd: No such file or directory (os error 2)
-
-thinking
-**Considering adding tests for evaluation and parsing**
+I'm listing frontend files to identify where to apply the preferred improvement after tests passed.
 exec
 /bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
 cmd
@@ -93,192 +69,933 @@ go.mod
 go.sum
 internal
 main
-server
 web
 
 thinking
-**Considering dataset validation**
+**Exploring frontend setup**
 
-Planning to add validation for dataset items by reviewing the evaluate/parse.go file to identify existing parsing logic and how to integrate validation.
+I'm checking the codebase to confirm that the frontend is implemented in a web framework and to understand its structure.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"encoding/json"
-	"fmt"
-	"mime/multipart"
-
-	"noema/internal/config"
-)
-
-func parseSpec(form *multipart.Form) (Spec, error) {
-	specStrs := form.Value["spec"]
-	if len(specStrs) == 0 || specStrs[0] == "" {
-		return Spec{}, fmt.Errorf("missing field: spec")
-	}
-	var spec Spec
-	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
-		return Spec{}, fmt.Errorf("invalid spec JSON")
-	}
-	return spec, nil
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web' in /Users/yani/Noema/backend succeeded in 52ms:
+static
+templates
 
 thinking
-**Considering error message improvements and data validations**
+**Reviewing templates for design improvement**
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package evaluate
-
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io"
-	"mime/multipart"
-)
-
-type Dataset struct {
-	Items []DatasetItem `json:"items"`
-}
-
-type DatasetItem struct {
-	ID       string         `json:"id"`
-	Text     string         `json:"text"`
-	Metadata map[string]any `json:"metadata,omitempty"`
-	ImageRef string         `json:"image_ref,omitempty"`
-}
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/templates' in /Users/yani/Noema/backend succeeded in 52ms:
+app.html
+app_new.html
+app_results.html
+index.html
+partial_header_app.html
+partial_header_public.html
+partial_header_upload.html
+partial_orb.html
+upload.html
+verify.html
+verify_results.html
 
 thinking
-**Considering ID uniqueness and session scope**
+**Reviewing static CSS for improvement**
+
+I'm checking the static CSS files to identify one meaningful improvement, focusing on app.html as a candidate for enhancement.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "error|nil" internal/session -g"*.go"' in /Users/yani/Noema/backend succeeded in 51ms:
-internal/session/session.go:19:	sig := hex.EncodeToString(mac.Sum(nil))
-internal/session/session.go:32:	if err != nil || len(sig) != sha256.Size {
-internal/session/session.go:36:	if err != nil {
-internal/session/session.go:42:	expected := mac.Sum(nil)
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/session/session.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package session
-
-import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
-	"fmt"
-	"strings"
-)
-
-const CookieName = "noema_judge"
-
-// Sign produces a signed cookie value for the given payload (e.g. judge key).
-// Format: base64(payload) + "." + hex(HMAC-SHA256(secret, payload)).
-func Sign(secret, payload string) string {
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(payload))
-	sig := hex.EncodeToString(mac.Sum(nil))
-	encoded := base64.StdEncoding.EncodeToString([]byte(payload))
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/static' in /Users/yani/Noema/backend succeeded in 52ms:
+app.js
+constraints.js
+results.js
+styles.css
+upload.js
+verify.js
+wizard.js
 
 thinking
-**Adding session sign/verify tests**
+**Reviewing CSS for UI improvements**
 
-I'm creating tests to verify signing and verifying sessions, covering valid cases, tampering detection, invalid formats, and edge cases like payloads containing dots, ensuring robust session handling.
+I'm inspecting styles.css to identify UI enhancements that won't compromise functionality, aiming to keep changes within three files.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && cat <<'EOF' > internal/session/session_test.go
-package session
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 51ms:
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap');
 
-import (
-	\"encoding/hex\"
-	\"strings\"
-	\"testing\"
-)
-
-func TestSignVerifyRoundTrip(t *testing.T) {
-	secret := \"s3cr3t\"
-	payload := \"judge-key-123\"
-
-	signed := Sign(secret, payload)
-	got, ok := Verify(secret, signed)
-	if "'!ok {
-		t.Fatalf("expected verify ok")
-	}
-	if got != payload {
-		t.Fatalf("expected payload %q, got %q", payload, got)
-	}
+:root {
+  --bg: #05060a;
+  --bg-card: rgba(9, 12, 18, 0.9);
+  --text: #f4f6fb;
+  --text-muted: #9aa3b2;
+  --accent: #45d4ff;
+  --accent-strong: #2c7bff;
+  --accent-glow: rgba(69, 212, 255, 0.35);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(69, 212, 255, 0.4);
+  --error: #f87171;
+  --success: #22c55e;
+  --warning: #fbbf24;
+  --shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
 }
 
-func TestVerifyRejectsTampering(t *testing.T) {
-	secret := "secret"
-	payload := "abc"
-
-	signed := Sign(secret, payload)
-	if !strings.Contains(signed, ".") {
-		t.Fatalf("expected signed value to contain dot")
-	}
-	// Flip the last hex character.
-	last := signed[len(signed)-1]
-	replacement := byte('"'0')
-	if last == '0' {
-		replacement = '1'
-	}
-	tampered := signed[:len(signed)-1] + string(replacement)
-
-	_, ok := Verify(secret, tampered)
-	if ok {
-		t.Fatalf(\"expected tampered signature to fail\")
-	}
+*,
+*::before,
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '200,400p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 51ms:
+  color: var(--text-muted);
 }
 
-func TestVerifyRejectsInvalidFormat(t *testing.T) {
-	secret := \"secret\"
-
-	cases := []string{
-		\"\",                   // empty
-		\"no-dot\",             // missing dot
-		\"abc.def\",            // non-hex signature
-		\"YWJj.\" + hex.EncodeToString([]byte(\"short\")), // wrong length
-	}
-
-	for _, tc := range cases {
-		_, ok := Verify(secret, tc)
-		if ok {
-			t.Fatalf(\"expected verify to fail for %q\", tc)
-		}
-	}
+.input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 }
-EOF" in /Users/yani/Noema/backend succeeded in 52ms:
+.input::placeholder { color: var(--text-muted); }
+.input:hover { border-color: rgba(255,255,255,0.18); }
+.input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '400,800p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+.upload-file {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.upload-file-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-file-size {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.upload-hint {
+
+thinking
+**Considering UI improvements**
+
+I'm thinking about enhancing the results display for better readability by adding meaningful structure or a sticky summary while preserving existing functionality. Next, I'll review the results section to identify where to add visual hierarchy.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '800,1200p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+}
+
+.results-constraint-meta {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.results-proof-meta {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.results-pre {
+  margin-top: 0.9rem;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  max-height: 320px;
+
+thinking
+**Planning results page UI tweaks**
+
+Considering adding summary chips, sticky actions, or gradient headers to improve large output scannability without changing functionality. Next, I'll inspect the results template and related CSS to check data availability and feasible style enhancements.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/templates/app_results.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "app_results"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Results</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body data-run-id="{{.RunID}}">
+  {{template "header_app" .}}
+
+  <main class="main main-results">
+    {{template "orb" .}}
+    <div class="card results-card">
+      <div class="results-header">
+        <div>
+          <h1 class="card-title">Evaluation results</h1>
+          <p class="text-muted" id="results-run-id">Run ID: {{.RunID}}</p>
+        </div>
+
+thinking
+**Considering UI improvements within file limits**
+
+I'm focusing on meaningful UI enhancements like adding visual cards or copy feedback that can fit within three files and minimal JS changes, starting by inspecting the results.js for feasible UX tweaks.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/static/results.js" in /Users/yani/Noema/backend succeeded in 52ms:
+(function() {
+  var runId = document.body.getAttribute('data-run-id') || document.getElementById('results-run-id').textContent.replace('Run ID: ', '').trim();
+  var key = 'noema_run_' + runId;
+  var data;
+  try {
+    var raw = localStorage.getItem(key);
+    data = raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    data = null;
+  }
+
+  function copyText(text, button) {
+    if (!text) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function() {
+        if (button) showCopied(button);
+      });
+    } else {
+      var temp = document.createElement('textarea');
+      temp.value = text;
 
 
 thinking
-**Verifying hex decoding edge cases**
+**Planning constraint verdict UI**
 
-I confirmed that hex decoding rejects odd-length strings and noted a test case with a short hex input fails as expected due to signature length mismatch. I'm rerunning all tests to verify overall correctness.
+I'm planning to enhance the results constraints card with pass/fail visual feedback by adding conditional classes and a verdict pill via a span element, updating both the rendering logic and CSS for clear, accessible styling.
+thinking
+**Designing header layout with verdict styling**
+
+I'm refining the constraint card by adding a flex header row showing the title and verdict side-by-side, using data attributes for verdict states with CSS for subtle colored borders and backgrounds to enhance UI clarity without major structural changes.
+file update
+M /Users/yani/Noema/backend/web/static/results.js
+@@ -62,4 +62,9 @@
+       var verdict = item.pass === true ? 'PASS' : (item.pass === false ? 'FAIL' : '—');
++      var verdictClass = item.pass === true ? 'pass' : (item.pass === false ? 'fail' : 'unknown');
++      card.setAttribute('data-verdict', verdictClass);
+       card.innerHTML =
+-        '<div class="results-constraint-title">' + title + '</div>' +
++        '<div class="results-constraint-header">' +
++          '<div class="results-constraint-title">' + title + '</div>' +
++          '<span class="results-constraint-verdict results-constraint-verdict-' + verdictClass + '">' + verdict + '</span>' +
++        '</div>' +
+         '<div class="results-constraint-meta">Severity: ' + severity + ' · Allowed: ' + allowed + ' · ' + verdict + '</div>';
+apply_patch(auto_approved=true) exited 0 in 31ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/web/static/results.js
+file update:
+diff --git a/backend/web/static/results.js b/backend/web/static/results.js
+index c379a87989a6edfd9e83f0260f64f3ba3d15f612..cf359b476fb3ce1ba662d103051a416376f3ab9c
+--- a/backend/web/static/results.js
++++ b/backend/web/static/results.js
+@@ -60,8 +60,13 @@
+       var severity = item.severity !== undefined ? labelSeverity(item.severity) : '—';
+       var allowed = item.allowed_max_severity !== undefined ? labelSeverity(item.allowed_max_severity) : '—';
+       var verdict = item.pass === true ? 'PASS' : (item.pass === false ? 'FAIL' : '—');
++      var verdictClass = item.pass === true ? 'pass' : (item.pass === false ? 'fail' : 'unknown');
++      card.setAttribute('data-verdict', verdictClass);
+       card.innerHTML =
+-        '<div class="results-constraint-title">' + title + '</div>' +
++        '<div class="results-constraint-header">' +
++          '<div class="results-constraint-title">' + title + '</div>' +
++          '<span class="results-constraint-verdict results-constraint-verdict-' + verdictClass + '">' + verdict + '</span>' +
++        '</div>' +
+         '<div class="results-constraint-meta">Severity: ' + severity + ' · Allowed: ' + allowed + ' · ' + verdict + '</div>';
+       container.appendChild(card);
+     });
+
+file update:
+diff --git a/backend/web/static/results.js b/backend/web/static/results.js
+index c379a87989a6edfd9e83f0260f64f3ba3d15f612..cf359b476fb3ce1ba662d103051a416376f3ab9c
+--- a/backend/web/static/results.js
++++ b/backend/web/static/results.js
+@@ -60,8 +60,13 @@
+       var severity = item.severity !== undefined ? labelSeverity(item.severity) : '—';
+       var allowed = item.allowed_max_severity !== undefined ? labelSeverity(item.allowed_max_severity) : '—';
+       var verdict = item.pass === true ? 'PASS' : (item.pass === false ? 'FAIL' : '—');
++      var verdictClass = item.pass === true ? 'pass' : (item.pass === false ? 'fail' : 'unknown');
++      card.setAttribute('data-verdict', verdictClass);
+       card.innerHTML =
+-        '<div class="results-constraint-title">' + title + '</div>' +
++        '<div class="results-constraint-header">' +
++          '<div class="results-constraint-title">' + title + '</div>' +
++          '<span class="results-constraint-verdict results-constraint-verdict-' + verdictClass + '">' + verdict + '</span>' +
++        '</div>' +
+         '<div class="results-constraint-meta">Severity: ' + severity + ' · Allowed: ' + allowed + ' · ' + verdict + '</div>';
+       container.appendChild(card);
+     });
+
+
+thinking
+**Updating CSS near results-constraint**
+
+I'm adding new classes around the results-constraint card in styles.css to support the planned UI changes before patching.
+file update
+M /Users/yani/Noema/backend/web/static/styles.css
+@@ -795,2 +795,26 @@
+ 
++.results-constraint-card[data-verdict="pass"] {
++  border-color: rgba(34, 197, 94, 0.4);
++  background: rgba(34, 197, 94, 0.05);
++  box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.6);
++}
++
++.results-constraint-card[data-verdict="fail"] {
++  border-color: rgba(248, 113, 113, 0.45);
++  background: rgba(248, 113, 113, 0.06);
++  box-shadow: inset 3px 0 0 rgba(248, 113, 113, 0.7);
++}
++
++.results-constraint-card[data-verdict="unknown"] {
++  border-color: rgba(255, 255, 255, 0.12);
++  background: rgba(255, 255, 255, 0.02);
++}
++
++.results-constraint-header {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 0.75rem;
++}
++
+ .results-constraint-title {
+@@ -801,2 +825,30 @@
+ 
++.results-constraint-verdict {
++  font-size: 0.68rem;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++  padding: 0.2rem 0.55rem;
++  border-radius: 999px;
++  border: 1px solid var(--border);
++  color: var(--text-muted);
++  white-space: nowrap;
++}
++
++.results-constraint-verdict-pass {
++  color: #86efac;
++  border-color: rgba(34, 197, 94, 0.5);
++  background: rgba(34, 197, 94, 0.12);
++}
++
++.results-constraint-verdict-fail {
++  color: #fca5a5;
++  border-color: rgba(248, 113, 113, 0.5);
++  background: rgba(248, 113, 113, 0.12);
++}
++
++.results-constraint-verdict-unknown {
++  color: var(--text-muted);
++  border-color: rgba(255, 255, 255, 0.14);
++}
++
+ .results-constraint-meta {
+apply_patch(auto_approved=true) exited 0 in 37ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/web/static/styles.css
+file update:
+diff --git a/backend/web/static/results.js b/backend/web/static/results.js
+index c379a87989a6edfd9e83f0260f64f3ba3d15f612..cf359b476fb3ce1ba662d103051a416376f3ab9c
+--- a/backend/web/static/results.js
++++ b/backend/web/static/results.js
+@@ -60,8 +60,13 @@
+       var severity = item.severity !== undefined ? labelSeverity(item.severity) : '—';
+       var allowed = item.allowed_max_severity !== undefined ? labelSeverity(item.allowed_max_severity) : '—';
+       var verdict = item.pass === true ? 'PASS' : (item.pass === false ? 'FAIL' : '—');
++      var verdictClass = item.pass === true ? 'pass' : (item.pass === false ? 'fail' : 'unknown');
++      card.setAttribute('data-verdict', verdictClass);
+       card.innerHTML =
+-        '<div class="results-constraint-title">' + title + '</div>' +
++        '<div class="results-constraint-header">' +
++          '<div class="results-constraint-title">' + title + '</div>' +
++          '<span class="results-constraint-verdict results-constraint-verdict-' + verdictClass + '">' + verdict + '</span>' +
++        '</div>' +
+         '<div class="results-constraint-meta">Severity: ' + severity + ' · Allowed: ' + allowed + ' · ' + verdict + '</div>';
+       container.appendChild(card);
+     });
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 2c23fa29963b2f86ad17b867399f0a0110e8afb5..f658b5d103085a578f9cfc76f9bd2f7e9765504b
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -793,12 +793,64 @@
+   background: rgba(0, 0, 0, 0.3);
+ }
+ 
++.results-constraint-card[data-verdict="pass"] {
++  border-color: rgba(34, 197, 94, 0.4);
++  background: rgba(34, 197, 94, 0.05);
++  box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.6);
++}
++
++.results-constraint-card[data-verdict="fail"] {
++  border-color: rgba(248, 113, 113, 0.45);
++  background: rgba(248, 113, 113, 0.06);
++  box-shadow: inset 3px 0 0 rgba(248, 113, 113, 0.7);
++}
++
++.results-constraint-card[data-verdict="unknown"] {
++  border-color: rgba(255, 255, 255, 0.12);
++  background: rgba(255, 255, 255, 0.02);
++}
++
++.results-constraint-header {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 0.75rem;
++}
++
+ .results-constraint-title {
+   font-size: 0.9rem;
+   font-weight: 500;
+   margin-bottom: 0.35rem;
+ }
+ 
++.results-constraint-verdict {
++  font-size: 0.68rem;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++  padding: 0.2rem 0.55rem;
++  border-radius: 999px;
++  border: 1px solid var(--border);
++  color: var(--text-muted);
++  white-space: nowrap;
++}
++
++.results-constraint-verdict-pass {
++  color: #86efac;
++  border-color: rgba(34, 197, 94, 0.5);
++  background: rgba(34, 197, 94, 0.12);
++}
++
++.results-constraint-verdict-fail {
++  color: #fca5a5;
++  border-color: rgba(248, 113, 113, 0.5);
++  background: rgba(248, 113, 113, 0.12);
++}
++
++.results-constraint-verdict-unknown {
++  color: var(--text-muted);
++  border-color: rgba(255, 255, 255, 0.14);
++}
++
+ .results-constraint-meta {
+   font-size: 0.82rem;
+   color: var(--text-muted);
+
+file update:
+diff --git a/backend/web/static/results.js b/backend/web/static/results.js
+index c379a87989a6edfd9e83f0260f64f3ba3d15f612..cf359b476fb3ce1ba662d103051a416376f3ab9c
+--- a/backend/web/static/results.js
++++ b/backend/web/static/results.js
+@@ -60,8 +60,13 @@
+       var severity = item.severity !== undefined ? labelSeverity(item.severity) : '—';
+       var allowed = item.allowed_max_severity !== undefined ? labelSeverity(item.allowed_max_severity) : '—';
+       var verdict = item.pass === true ? 'PASS' : (item.pass === false ? 'FAIL' : '—');
++      var verdictClass = item.pass === true ? 'pass' : (item.pass === false ? 'fail' : 'unknown');
++      card.setAttribute('data-verdict', verdictClass);
+       card.innerHTML =
+-        '<div class="results-constraint-title">' + title + '</div>' +
++        '<div class="results-constraint-header">' +
++          '<div class="results-constraint-title">' + title + '</div>' +
++          '<span class="results-constraint-verdict results-constraint-verdict-' + verdictClass + '">' + verdict + '</span>' +
++        '</div>' +
+         '<div class="results-constraint-meta">Severity: ' + severity + ' · Allowed: ' + allowed + ' · ' + verdict + '</div>';
+       container.appendChild(card);
+     });
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 2c23fa29963b2f86ad17b867399f0a0110e8afb5..f658b5d103085a578f9cfc76f9bd2f7e9765504b
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -793,12 +793,64 @@
+   background: rgba(0, 0, 0, 0.3);
+ }
+ 
++.results-constraint-card[data-verdict="pass"] {
++  border-color: rgba(34, 197, 94, 0.4);
++  background: rgba(34, 197, 94, 0.05);
++  box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.6);
++}
++
++.results-constraint-card[data-verdict="fail"] {
++  border-color: rgba(248, 113, 113, 0.45);
++  background: rgba(248, 113, 113, 0.06);
++  box-shadow: inset 3px 0 0 rgba(248, 113, 113, 0.7);
++}
++
++.results-constraint-card[data-verdict="unknown"] {
++  border-color: rgba(255, 255, 255, 0.12);
++  background: rgba(255, 255, 255, 0.02);
++}
++
++.results-constraint-header {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 0.75rem;
++}
++
+ .results-constraint-title {
+   font-size: 0.9rem;
+   font-weight: 500;
+   margin-bottom: 0.35rem;
+ }
+ 
++.results-constraint-verdict {
++  font-size: 0.68rem;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++  padding: 0.2rem 0.55rem;
++  border-radius: 999px;
++  border: 1px solid var(--border);
++  color: var(--text-muted);
++  white-space: nowrap;
++}
++
++.results-constraint-verdict-pass {
++  color: #86efac;
++  border-color: rgba(34, 197, 94, 0.5);
++  background: rgba(34, 197, 94, 0.12);
++}
++
++.results-constraint-verdict-fail {
++  color: #fca5a5;
++  border-color: rgba(248, 113, 113, 0.5);
++  background: rgba(248, 113, 113, 0.12);
++}
++
++.results-constraint-verdict-unknown {
++  color: var(--text-muted);
++  border-color: rgba(255, 255, 255, 0.14);
++}
++
+ .results-constraint-meta {
+   font-size: 0.82rem;
+   color: var(--text-muted);
+
+
+thinking
+**Adjusting title and meta margins**
+
+Planning to remove the title's bottom margin and instead add a top margin to the meta line for balanced spacing within the header. This should align title and verdict cleanly without extra space pushing the header down.
+file update
+M /Users/yani/Noema/backend/web/static/styles.css
+@@ -822,3 +822,3 @@
+   font-weight: 500;
+-  margin-bottom: 0.35rem;
++  margin-bottom: 0;
+ }
+@@ -854,2 +854,3 @@
+ .results-constraint-meta {
++  margin-top: 0.35rem;
+   font-size: 0.82rem;
+apply_patch(auto_approved=true) exited 0 in 48ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/web/static/styles.css
+file update:
+diff --git a/backend/web/static/results.js b/backend/web/static/results.js
+index c379a87989a6edfd9e83f0260f64f3ba3d15f612..cf359b476fb3ce1ba662d103051a416376f3ab9c
+--- a/backend/web/static/results.js
++++ b/backend/web/static/results.js
+@@ -60,8 +60,13 @@
+       var severity = item.severity !== undefined ? labelSeverity(item.severity) : '—';
+       var allowed = item.allowed_max_severity !== undefined ? labelSeverity(item.allowed_max_severity) : '—';
+       var verdict = item.pass === true ? 'PASS' : (item.pass === false ? 'FAIL' : '—');
++      var verdictClass = item.pass === true ? 'pass' : (item.pass === false ? 'fail' : 'unknown');
++      card.setAttribute('data-verdict', verdictClass);
+       card.innerHTML =
+-        '<div class="results-constraint-title">' + title + '</div>' +
++        '<div class="results-constraint-header">' +
++          '<div class="results-constraint-title">' + title + '</div>' +
++          '<span class="results-constraint-verdict results-constraint-verdict-' + verdictClass + '">' + verdict + '</span>' +
++        '</div>' +
+         '<div class="results-constraint-meta">Severity: ' + severity + ' · Allowed: ' + allowed + ' · ' + verdict + '</div>';
+       container.appendChild(card);
+     });
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 2c23fa29963b2f86ad17b867399f0a0110e8afb5..2a81f1ed61a902fae23c0ba052b7863c60caec74
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -793,13 +793,66 @@
+   background: rgba(0, 0, 0, 0.3);
+ }
+ 
++.results-constraint-card[data-verdict="pass"] {
++  border-color: rgba(34, 197, 94, 0.4);
++  background: rgba(34, 197, 94, 0.05);
++  box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.6);
++}
++
++.results-constraint-card[data-verdict="fail"] {
++  border-color: rgba(248, 113, 113, 0.45);
++  background: rgba(248, 113, 113, 0.06);
++  box-shadow: inset 3px 0 0 rgba(248, 113, 113, 0.7);
++}
++
++.results-constraint-card[data-verdict="unknown"] {
++  border-color: rgba(255, 255, 255, 0.12);
++  background: rgba(255, 255, 255, 0.02);
++}
++
++.results-constraint-header {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 0.75rem;
++}
++
+ .results-constraint-title {
+   font-size: 0.9rem;
+   font-weight: 500;
+-  margin-bottom: 0.35rem;
++  margin-bottom: 0;
+ }
+ 
++.results-constraint-verdict {
++  font-size: 0.68rem;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++  padding: 0.2rem 0.55rem;
++  border-radius: 999px;
++  border: 1px solid var(--border);
++  color: var(--text-muted);
++  white-space: nowrap;
++}
++
++.results-constraint-verdict-pass {
++  color: #86efac;
++  border-color: rgba(34, 197, 94, 0.5);
++  background: rgba(34, 197, 94, 0.12);
++}
++
++.results-constraint-verdict-fail {
++  color: #fca5a5;
++  border-color: rgba(248, 113, 113, 0.5);
++  background: rgba(248, 113, 113, 0.12);
++}
++
++.results-constraint-verdict-unknown {
++  color: var(--text-muted);
++  border-color: rgba(255, 255, 255, 0.14);
++}
++
+ .results-constraint-meta {
++  margin-top: 0.35rem;
+   font-size: 0.82rem;
+   color: var(--text-muted);
+ }
+
+file update:
+diff --git a/backend/web/static/results.js b/backend/web/static/results.js
+index c379a87989a6edfd9e83f0260f64f3ba3d15f612..cf359b476fb3ce1ba662d103051a416376f3ab9c
+--- a/backend/web/static/results.js
++++ b/backend/web/static/results.js
+@@ -60,8 +60,13 @@
+       var severity = item.severity !== undefined ? labelSeverity(item.severity) : '—';
+       var allowed = item.allowed_max_severity !== undefined ? labelSeverity(item.allowed_max_severity) : '—';
+       var verdict = item.pass === true ? 'PASS' : (item.pass === false ? 'FAIL' : '—');
++      var verdictClass = item.pass === true ? 'pass' : (item.pass === false ? 'fail' : 'unknown');
++      card.setAttribute('data-verdict', verdictClass);
+       card.innerHTML =
+-        '<div class="results-constraint-title">' + title + '</div>' +
++        '<div class="results-constraint-header">' +
++          '<div class="results-constraint-title">' + title + '</div>' +
++          '<span class="results-constraint-verdict results-constraint-verdict-' + verdictClass + '">' + verdict + '</span>' +
++        '</div>' +
+         '<div class="results-constraint-meta">Severity: ' + severity + ' · Allowed: ' + allowed + ' · ' + verdict + '</div>';
+       container.appendChild(card);
+     });
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 2c23fa29963b2f86ad17b867399f0a0110e8afb5..2a81f1ed61a902fae23c0ba052b7863c60caec74
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -793,13 +793,66 @@
+   background: rgba(0, 0, 0, 0.3);
+ }
+ 
++.results-constraint-card[data-verdict="pass"] {
++  border-color: rgba(34, 197, 94, 0.4);
++  background: rgba(34, 197, 94, 0.05);
++  box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.6);
++}
++
++.results-constraint-card[data-verdict="fail"] {
++  border-color: rgba(248, 113, 113, 0.45);
++  background: rgba(248, 113, 113, 0.06);
++  box-shadow: inset 3px 0 0 rgba(248, 113, 113, 0.7);
++}
++
++.results-constraint-card[data-verdict="unknown"] {
++  border-color: rgba(255, 255, 255, 0.12);
++  background: rgba(255, 255, 255, 0.02);
++}
++
++.results-constraint-header {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 0.75rem;
++}
++
+ .results-constraint-title {
+   font-size: 0.9rem;
+   font-weight: 500;
+-  margin-bottom: 0.35rem;
++  margin-bottom: 0;
+ }
+ 
++.results-constraint-verdict {
++  font-size: 0.68rem;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++  padding: 0.2rem 0.55rem;
++  border-radius: 999px;
++  border: 1px solid var(--border);
++  color: var(--text-muted);
++  white-space: nowrap;
++}
++
++.results-constraint-verdict-pass {
++  color: #86efac;
++  border-color: rgba(34, 197, 94, 0.5);
++  background: rgba(34, 197, 94, 0.12);
++}
++
++.results-constraint-verdict-fail {
++  color: #fca5a5;
++  border-color: rgba(248, 113, 113, 0.5);
++  background: rgba(248, 113, 113, 0.12);
++}
++
++.results-constraint-verdict-unknown {
++  color: var(--text-muted);
++  border-color: rgba(255, 255, 255, 0.14);
++}
++
+ .results-constraint-meta {
++  margin-top: 0.35rem;
+   font-size: 0.82rem;
+   color: var(--text-muted);
+ }
+
+
+thinking
+**Running Go tests**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 383ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 206ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
 ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
-ok  	noema/internal/session	0.004s
-?   	noema/internal/verify	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/web/static/results.js b/backend/web/static/results.js
+index c379a87989a6edfd9e83f0260f64f3ba3d15f612..cf359b476fb3ce1ba662d103051a416376f3ab9c
+--- a/backend/web/static/results.js
++++ b/backend/web/static/results.js
+@@ -60,8 +60,13 @@
+       var severity = item.severity !== undefined ? labelSeverity(item.severity) : '—';
+       var allowed = item.allowed_max_severity !== undefined ? labelSeverity(item.allowed_max_severity) : '—';
+       var verdict = item.pass === true ? 'PASS' : (item.pass === false ? 'FAIL' : '—');
++      var verdictClass = item.pass === true ? 'pass' : (item.pass === false ? 'fail' : 'unknown');
++      card.setAttribute('data-verdict', verdictClass);
+       card.innerHTML =
+-        '<div class="results-constraint-title">' + title + '</div>' +
++        '<div class="results-constraint-header">' +
++          '<div class="results-constraint-title">' + title + '</div>' +
++          '<span class="results-constraint-verdict results-constraint-verdict-' + verdictClass + '">' + verdict + '</span>' +
++        '</div>' +
+         '<div class="results-constraint-meta">Severity: ' + severity + ' · Allowed: ' + allowed + ' · ' + verdict + '</div>';
+       container.appendChild(card);
+     });
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 2c23fa29963b2f86ad17b867399f0a0110e8afb5..2a81f1ed61a902fae23c0ba052b7863c60caec74
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -793,13 +793,66 @@
+   background: rgba(0, 0, 0, 0.3);
+ }
+ 
++.results-constraint-card[data-verdict="pass"] {
++  border-color: rgba(34, 197, 94, 0.4);
++  background: rgba(34, 197, 94, 0.05);
++  box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.6);
++}
++
++.results-constraint-card[data-verdict="fail"] {
++  border-color: rgba(248, 113, 113, 0.45);
++  background: rgba(248, 113, 113, 0.06);
++  box-shadow: inset 3px 0 0 rgba(248, 113, 113, 0.7);
++}
++
++.results-constraint-card[data-verdict="unknown"] {
++  border-color: rgba(255, 255, 255, 0.12);
++  background: rgba(255, 255, 255, 0.02);
++}
++
++.results-constraint-header {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 0.75rem;
++}
++
+ .results-constraint-title {
+   font-size: 0.9rem;
+   font-weight: 500;
+-  margin-bottom: 0.35rem;
++  margin-bottom: 0;
+ }
+ 
++.results-constraint-verdict {
++  font-size: 0.68rem;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++  padding: 0.2rem 0.55rem;
++  border-radius: 999px;
++  border: 1px solid var(--border);
++  color: var(--text-muted);
++  white-space: nowrap;
++}
++
++.results-constraint-verdict-pass {
++  color: #86efac;
++  border-color: rgba(34, 197, 94, 0.5);
++  background: rgba(34, 197, 94, 0.12);
++}
++
++.results-constraint-verdict-fail {
++  color: #fca5a5;
++  border-color: rgba(248, 113, 113, 0.5);
++  background: rgba(248, 113, 113, 0.12);
++}
++
++.results-constraint-verdict-unknown {
++  color: var(--text-muted);
++  border-color: rgba(255, 255, 255, 0.14);
++}
++
+ .results-constraint-meta {
++  margin-top: 0.35rem;
+   font-size: 0.82rem;
+   color: var(--text-muted);
+ }
+
 codex
 What you changed (short)
-- Added session cookie signing/verification tests covering round-trip, tampering, and invalid formats in `internal/session/session_test.go`.
+- Added pass/fail/unknown verdict chips and card styling to the results constraint summary for clearer scannability, without changing functionality.
+- Updated `web/static/results.js` to emit verdict metadata for styling.
 
-Tests run (must include go test ./...)
+Tests run
 - `go test ./...`
+file update:
+diff --git a/backend/web/static/results.js b/backend/web/static/results.js
+index c379a87989a6edfd9e83f0260f64f3ba3d15f612..cf359b476fb3ce1ba662d103051a416376f3ab9c
+--- a/backend/web/static/results.js
++++ b/backend/web/static/results.js
+@@ -60,8 +60,13 @@
+       var severity = item.severity !== undefined ? labelSeverity(item.severity) : '—';
+       var allowed = item.allowed_max_severity !== undefined ? labelSeverity(item.allowed_max_severity) : '—';
+       var verdict = item.pass === true ? 'PASS' : (item.pass === false ? 'FAIL' : '—');
++      var verdictClass = item.pass === true ? 'pass' : (item.pass === false ? 'fail' : 'unknown');
++      card.setAttribute('data-verdict', verdictClass);
+       card.innerHTML =
+-        '<div class="results-constraint-title">' + title + '</div>' +
++        '<div class="results-constraint-header">' +
++          '<div class="results-constraint-title">' + title + '</div>' +
++          '<span class="results-constraint-verdict results-constraint-verdict-' + verdictClass + '">' + verdict + '</span>' +
++        '</div>' +
+         '<div class="results-constraint-meta">Severity: ' + severity + ' · Allowed: ' + allowed + ' · ' + verdict + '</div>';
+       container.appendChild(card);
+     });
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 2c23fa29963b2f86ad17b867399f0a0110e8afb5..2a81f1ed61a902fae23c0ba052b7863c60caec74
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -793,13 +793,66 @@
+   background: rgba(0, 0, 0, 0.3);
+ }
+ 
++.results-constraint-card[data-verdict="pass"] {
++  border-color: rgba(34, 197, 94, 0.4);
++  background: rgba(34, 197, 94, 0.05);
++  box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.6);
++}
++
++.results-constraint-card[data-verdict="fail"] {
++  border-color: rgba(248, 113, 113, 0.45);
++  background: rgba(248, 113, 113, 0.06);
++  box-shadow: inset 3px 0 0 rgba(248, 113, 113, 0.7);
++}
++
++.results-constraint-card[data-verdict="unknown"] {
++  border-color: rgba(255, 255, 255, 0.12);
++  background: rgba(255, 255, 255, 0.02);
++}
++
++.results-constraint-header {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 0.75rem;
++}
++
+ .results-constraint-title {
+   font-size: 0.9rem;
+   font-weight: 500;
+-  margin-bottom: 0.35rem;
++  margin-bottom: 0;
+ }
+ 
++.results-constraint-verdict {
++  font-size: 0.68rem;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++  padding: 0.2rem 0.55rem;
++  border-radius: 999px;
++  border: 1px solid var(--border);
++  color: var(--text-muted);
++  white-space: nowrap;
++}
++
++.results-constraint-verdict-pass {
++  color: #86efac;
++  border-color: rgba(34, 197, 94, 0.5);
++  background: rgba(34, 197, 94, 0.12);
++}
++
++.results-constraint-verdict-fail {
++  color: #fca5a5;
++  border-color: rgba(248, 113, 113, 0.5);
++  background: rgba(248, 113, 113, 0.12);
++}
++
++.results-constraint-verdict-unknown {
++  color: var(--text-muted);
++  border-color: rgba(255, 255, 255, 0.14);
++}
++
+ .results-constraint-meta {
++  margin-top: 0.35rem;
+   font-size: 0.82rem;
+   color: var(--text-muted);
+ }
 
-If you want, I can add a small test for `SetCookieHeader` next.
 tokens used
-14,624
+26,693
 What you changed (short)
-- Added session cookie signing/verification tests covering round-trip, tampering, and invalid formats in `internal/session/session_test.go`.
+- Added pass/fail/unknown verdict chips and card styling to the results constraint summary for clearer scannability, without changing functionality.
+- Updated `web/static/results.js` to emit verdict metadata for styling.
 
-Tests run (must include go test ./...)
+Tests run
 - `go test ./...`
-
-If you want, I can add a small test for `SetCookieHeader` next.

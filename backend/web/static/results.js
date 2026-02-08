@@ -60,8 +60,13 @@
       var severity = item.severity !== undefined ? labelSeverity(item.severity) : '—';
       var allowed = item.allowed_max_severity !== undefined ? labelSeverity(item.allowed_max_severity) : '—';
       var verdict = item.pass === true ? 'PASS' : (item.pass === false ? 'FAIL' : '—');
+      var verdictClass = item.pass === true ? 'pass' : (item.pass === false ? 'fail' : 'unknown');
+      card.setAttribute('data-verdict', verdictClass);
       card.innerHTML =
-        '<div class="results-constraint-title">' + title + '</div>' +
+        '<div class="results-constraint-header">' +
+          '<div class="results-constraint-title">' + title + '</div>' +
+          '<span class="results-constraint-verdict results-constraint-verdict-' + verdictClass + '">' + verdict + '</span>' +
+        '</div>' +
         '<div class="results-constraint-meta">Severity: ' + severity + ' · Allowed: ' + allowed + ' · ' + verdict + '</div>';
       container.appendChild(card);
     });
