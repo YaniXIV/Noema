@@ -3,6 +3,10 @@
   var MAX_RECENT = 20;
   var listEl = document.getElementById('verify-list');
   var emptyEl = document.getElementById('verify-empty');
+  var emptyTitleEl = emptyEl ? emptyEl.querySelector('.empty-state-title') : null;
+  var emptyTextEl = emptyEl ? emptyEl.querySelector('.empty-state-text') : null;
+  var emptyTitleDefault = emptyTitleEl ? emptyTitleEl.textContent : '';
+  var emptyTextDefault = emptyTextEl ? emptyTextEl.textContent : '';
   var filterInput = document.getElementById('verify-filter');
   var countEl = document.getElementById('verify-count');
   var progressEl = document.getElementById('verify-progress');
@@ -246,6 +250,13 @@
 
     listEl.innerHTML = '';
     if (filtered.length === 0) {
+      if (q && emptyTitleEl && emptyTextEl) {
+        emptyTitleEl.textContent = 'No matches';
+        emptyTextEl.textContent = 'Try a different search or clear the filter.';
+      } else if (emptyTitleEl && emptyTextEl) {
+        emptyTitleEl.textContent = emptyTitleDefault;
+        emptyTextEl.textContent = emptyTextDefault;
+      }
       emptyEl.style.display = 'block';
       listEl.appendChild(emptyEl);
     } else {
