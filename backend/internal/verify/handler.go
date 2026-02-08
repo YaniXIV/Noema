@@ -2,6 +2,7 @@ package verify
 
 import (
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -38,7 +39,11 @@ func Handler() gin.HandlerFunc {
 		}
 
 		verified, msg, err := zk.VerifyProof(req.ProofB64, req.PublicInputsB64)
-		if err == nil {
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+			return
+		}
+		if verified || !shouldTryLegacy(msg) {
 			c.JSON(http.StatusOK, VerifyResponse{
 				RunID:    req.RunID,
 				Verified: verified,
@@ -49,7 +54,7 @@ func Handler() gin.HandlerFunc {
 
 		verified, msg, err = verifyLegacyStub(req.RunID, req.ProofB64, req.PublicInputsB64)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 			return
 		}
 		c.JSON(http.StatusOK, VerifyResponse{
@@ -60,17 +65,26 @@ func Handler() gin.HandlerFunc {
 	}
 }
 
+func shouldTryLegacy(msg string) bool {
+	switch msg {
+	case "invalid public inputs format", "invalid proof format":
+		return true
+	default:
+		return false
+	}
+}
+
 func verifyLegacyStub(runID, proofB64, publicInputsB64 string) (bool, string, error) {
 	if runID == "" {
-		return false, "missing run_id", nil
+		return false, "missing run_id", fmt.Errorf("missing run_id")
 	}
 	proofRaw, err := base64.StdEncoding.DecodeString(proofB64)
 	if err != nil {
-		return false, "invalid proof encoding", err
+		return false, "invalid proof encoding", fmt.Errorf("invalid proof encoding")
 	}
 	pubRaw, err := base64.StdEncoding.DecodeString(publicInputsB64)
 	if err != nil {
-		return false, "invalid public inputs encoding", err
+		return false, "invalid public inputs encoding", fmt.Errorf("invalid public inputs encoding")
 	}
 	expectedProof := "stub_proof_" + runID
 	expectedPub := "stub_inputs_" + runID

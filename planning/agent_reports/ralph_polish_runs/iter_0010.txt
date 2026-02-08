@@ -1,0 +1,710 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3c83-22b1-7582-9f78-679e5dcfe053
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Running Go tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 216ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+?   	noema/internal/verify	[no test files]
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Preparing to improve code maintainability**
+
+I'm planning to inspect the code for meaningful improvements focused on maintainability or reliability by searching for TODOs or similar markers to target impactful changes within a small scope.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME|panic|fatal" internal' in /Users/yani/Noema/backend exited 1 in 50ms:
+
+
+thinking
+**Identifying missing matches and considering error handling**
+
+No search hits were found, so I'll check the repo structure to improve the search or add error handling accordingly.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
+cmd
+data
+go.mod
+go.sum
+internal
+main
+server
+web
+
+thinking
+**Searching for error handling**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "error" internal/verify internal/web internal/gemini' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/gemini/gemini.go:54:func newClient(ctx context.Context) (*genai.Client, error) {
+internal/gemini/gemini.go:105:func SendText(ctx context.Context, text string) (string, error) {
+internal/gemini/gemini.go:123:func Evaluate(ctx context.Context, req EvalRequest) (EvalResponse, error) {
+internal/gemini/gemini.go:141:func EvaluateStream(ctx context.Context, req EvalRequest, onChunk func(string)) (EvalResponse, error) {
+internal/web/auth.go:25:// On success: set cookie, redirect 303 to /app. On failure: re-render index with inline error.
+internal/verify/handler.go:32:			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+internal/verify/handler.go:36:			c.JSON(http.StatusBadRequest, gin.H{"error": "missing proof or public inputs"})
+internal/verify/handler.go:52:			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+internal/verify/handler.go:63:func verifyLegacyStub(runID, proofB64, publicInputsB64 string) (bool, string, error) {
+internal/web/upload.go:48:		UploadGet(c, uploadTmpl, UploadData{Error: "Server error saving file."})
+internal/web/upload.go:75:		UploadGet(c, uploadTmpl, UploadData{Error: "Server error saving file."})
+internal/web/upload.go:81:		UploadGet(c, uploadTmpl, UploadData{Error: "Server error saving file."})
+
+thinking
+**Exploring verify handler for improvements**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/verify/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package verify
+
+import (
+	"encoding/base64"
+	"net/http"
+	"strings"
+
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+// VerifyRequest is the JSON body for POST /api/verify.
+type VerifyRequest struct {
+	RunID           string `json:"run_id"`
+	ProofB64        string `json:"proof_b64"`
+	PublicInputsB64 string `json:"public_inputs_b64"`
+}
+
+// VerifyResponse is the JSON response for POST /api/verify.
+
+thinking
+**Assessing error handling and run_id validation**
+
+I'm analyzing legacy stub fallback logic and error responses, noting that missing run_id currently returns 200 with verified=false, which might be better handled as a 400 error since proof validation needs run_id. Also spotted potential internal error leaks from base64 decode errors exposed to the client; switching to user-friendly messages could improve security. Next, I'll inspect the zk.VerifyProof error handling to clarify when to fallback or return errors.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/zk/verify.go" in /Users/yani/Noema/backend exited 1 in 52ms:
+sed: internal/zk/verify.go: No such file or directory
+
+thinking
+**Identifying need for internal list**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/zk' in /Users/yani/Noema/backend succeeded in 52ms:
+FORMAT.md
+zk.go
+zk_test.go
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package zk
+
+import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+const (
+	ProofSystem = "groth16"
+	ProofCurve  = "bn254"
+
+	publicInputsPrefix = "noema_public_inputs_v1|"
+	proofPrefix        = "noema_stub_proof_v1|"
+)
+
+// PublicInputs define the public inputs for policy aggregation.
+
+
+thinking
+**Identifying error handling inconsistencies**
+
+The handler falls back to the legacy stub even for base64 errors, which should return 400 immediately; also, missing runID in legacy stub yields 200 with an error message, which is inconsistent. Next, prioritizing clearer error responses for malformed base64 and restricting fallback to legacy stub only when appropriate will improve reliability.
+thinking
+**Refining fallback logic for legacy stub**
+
+The current handler never falls back to the legacy stub for invalid proof format cases because it only does so on errors, but those cases have err nil. I’m updating the handler to attempt legacy fallback when verification fails with invalid format messages while returning 400 immediately on missing inputs or malformed base64 errors. Also planning to treat missing runID in legacy stub as a 400 error for consistency.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/verify' in /Users/yani/Noema/backend succeeded in 52ms:
+handler.go
+
+
+thinking
+**Planning tests for legacy proof fallback**
+
+I'm adding tests in a new internal test file to verify fallback on legacy proof when zk verification fails due to invalid format, ensuring it returns verified true with the stub data; also adding a case for invalid base64 input returning a 400 error without fallback.
+thinking
+**Refining handler logic for legacy fallback and error cases**
+
+I'm updating the handler to return 400 errors for invalid base64 and missing run_id during legacy fallback and refining the legacy verifier to check for missing run_id with clear error messages. The handler will invoke legacy verification only on specific error messages and respond accordingly.
+file update
+M /Users/yani/Noema/backend/internal/verify/handler.go
+@@ -4,2 +4,3 @@
+ 	"encoding/base64"
++	"fmt"
+ 	"net/http"
+@@ -40,3 +41,7 @@
+ 		verified, msg, err := zk.VerifyProof(req.ProofB64, req.PublicInputsB64)
+-		if err == nil {
++		if err != nil {
++			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
++			return
++		}
++		if verified || !shouldTryLegacy(msg) {
+ 			c.JSON(http.StatusOK, VerifyResponse{
+@@ -51,3 +56,3 @@
+ 		if err != nil {
+-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
++			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+ 			return
+@@ -62,5 +67,14 @@
+ 
++func shouldTryLegacy(msg string) bool {
++	switch msg {
++	case "invalid public inputs format", "invalid proof format":
++		return true
++	default:
++		return false
++	}
++}
++
+ func verifyLegacyStub(runID, proofB64, publicInputsB64 string) (bool, string, error) {
+ 	if runID == "" {
+-		return false, "missing run_id", nil
++		return false, "missing run_id", fmt.Errorf("missing run_id")
+ 	}
+@@ -68,3 +82,3 @@
+ 	if err != nil {
+-		return false, "invalid proof encoding", err
++		return false, "invalid proof encoding", fmt.Errorf("invalid proof encoding")
+ 	}
+@@ -72,3 +86,3 @@
+ 	if err != nil {
+-		return false, "invalid public inputs encoding", err
++		return false, "invalid public inputs encoding", fmt.Errorf("invalid public inputs encoding")
+ 	}
+apply_patch(auto_approved=true) exited 0 in 29ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/verify/handler.go
+file update:
+diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
+index 33fc29dbed5de2d7250041f408fca0f7dfea0320..ede7399b4113f79a9bcde7b4bec6a5a265179eab
+--- a/backend/internal/verify/handler.go
++++ b/backend/internal/verify/handler.go
+@@ -2,6 +2,7 @@
+ 
+ import (
+ 	"encoding/base64"
++	"fmt"
+ 	"net/http"
+ 	"strings"
+ 
+@@ -38,7 +39,11 @@
+ 		}
+ 
+ 		verified, msg, err := zk.VerifyProof(req.ProofB64, req.PublicInputsB64)
+-		if err == nil {
++		if err != nil {
++			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
++			return
++		}
++		if verified || !shouldTryLegacy(msg) {
+ 			c.JSON(http.StatusOK, VerifyResponse{
+ 				RunID:    req.RunID,
+ 				Verified: verified,
+@@ -49,7 +54,7 @@
+ 
+ 		verified, msg, err = verifyLegacyStub(req.RunID, req.ProofB64, req.PublicInputsB64)
+ 		if err != nil {
+-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
++			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+ 			return
+ 		}
+ 		c.JSON(http.StatusOK, VerifyResponse{
+@@ -60,17 +65,26 @@
+ 	}
+ }
+ 
++func shouldTryLegacy(msg string) bool {
++	switch msg {
++	case "invalid public inputs format", "invalid proof format":
++		return true
++	default:
++		return false
++	}
++}
++
+ func verifyLegacyStub(runID, proofB64, publicInputsB64 string) (bool, string, error) {
+ 	if runID == "" {
+-		return false, "missing run_id", nil
++		return false, "missing run_id", fmt.Errorf("missing run_id")
+ 	}
+ 	proofRaw, err := base64.StdEncoding.DecodeString(proofB64)
+ 	if err != nil {
+-		return false, "invalid proof encoding", err
++		return false, "invalid proof encoding", fmt.Errorf("invalid proof encoding")
+ 	}
+ 	pubRaw, err := base64.StdEncoding.DecodeString(publicInputsB64)
+ 	if err != nil {
+-		return false, "invalid public inputs encoding", err
++		return false, "invalid public inputs encoding", fmt.Errorf("invalid public inputs encoding")
+ 	}
+ 	expectedProof := "stub_proof_" + runID
+ 	expectedPub := "stub_inputs_" + runID
+
+file update:
+diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
+index 33fc29dbed5de2d7250041f408fca0f7dfea0320..ede7399b4113f79a9bcde7b4bec6a5a265179eab
+--- a/backend/internal/verify/handler.go
++++ b/backend/internal/verify/handler.go
+@@ -2,6 +2,7 @@
+ 
+ import (
+ 	"encoding/base64"
++	"fmt"
+ 	"net/http"
+ 	"strings"
+ 
+@@ -38,7 +39,11 @@
+ 		}
+ 
+ 		verified, msg, err := zk.VerifyProof(req.ProofB64, req.PublicInputsB64)
+-		if err == nil {
++		if err != nil {
++			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
++			return
++		}
++		if verified || !shouldTryLegacy(msg) {
+ 			c.JSON(http.StatusOK, VerifyResponse{
+ 				RunID:    req.RunID,
+ 				Verified: verified,
+@@ -49,7 +54,7 @@
+ 
+ 		verified, msg, err = verifyLegacyStub(req.RunID, req.ProofB64, req.PublicInputsB64)
+ 		if err != nil {
+-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
++			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+ 			return
+ 		}
+ 		c.JSON(http.StatusOK, VerifyResponse{
+@@ -60,17 +65,26 @@
+ 	}
+ }
+ 
++func shouldTryLegacy(msg string) bool {
++	switch msg {
++	case "invalid public inputs format", "invalid proof format":
++		return true
++	default:
++		return false
++	}
++}
++
+ func verifyLegacyStub(runID, proofB64, publicInputsB64 string) (bool, string, error) {
+ 	if runID == "" {
+-		return false, "missing run_id", nil
++		return false, "missing run_id", fmt.Errorf("missing run_id")
+ 	}
+ 	proofRaw, err := base64.StdEncoding.DecodeString(proofB64)
+ 	if err != nil {
+-		return false, "invalid proof encoding", err
++		return false, "invalid proof encoding", fmt.Errorf("invalid proof encoding")
+ 	}
+ 	pubRaw, err := base64.StdEncoding.DecodeString(publicInputsB64)
+ 	if err != nil {
+-		return false, "invalid public inputs encoding", err
++		return false, "invalid public inputs encoding", fmt.Errorf("invalid public inputs encoding")
+ 	}
+ 	expectedProof := "stub_proof_" + runID
+ 	expectedPub := "stub_inputs_" + runID
+
+
+thinking
+**Adding comprehensive handler tests**
+
+Preparing handler_test.go with verify endpoint tests using gin and httptest, covering valid requests, invalid base64 input, and missing run_id error cases with structured response parsing.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && cat <<'EOF' > internal/verify/handler_test.go
+package verify
+
+import (
+	\"encoding/base64\"
+	\"encoding/json\"
+	\"net/http\"
+	\"net/http/httptest\"
+	\"strings\"
+	\"testing\"
+
+	\"github.com/gin-gonic/gin\"
+)
+
+type errorResponse struct {
+	Error string "'`json:"error"`
+}
+
+func setupRouter() *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.POST("/api/verify", Handler())
+	return r
+}
+
+func TestVerifyHandlerLegacyFallback(t *testing.T) {
+	r := setupRouter()
+	body := `{"run_id":"abc","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("stub_proof_abc")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("stub_inputs_abc")) + `"}`
+
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	var resp VerifyResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.Verified {
+		t.Fatalf("expected legacy proof to verify")
+	}
+	if resp.Message != "legacy stub verifier" {
+		t.Fatalf("expected legacy message, got %q", resp.Message)
+	}
+}
+
+func TestVerifyHandlerInvalidBase64Returns400(t *testing.T) {
+	r := setupRouter()
+	body := `{"run_id":"abc","proof_b64":"%%%","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("stub_inputs_abc")) + `"}`
+
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", w.Code)
+	}
+
+	var resp errorResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Error != "invalid proof encoding" {
+		t.Fatalf("expected invalid proof encoding, got %q", resp.Error)
+	}
+}
+
+func TestVerifyHandlerLegacyMissingRunIDReturns400(t *testing.T) {
+	r := setupRouter()
+	body := `{"run_id":"","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("stub_proof_")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("stub_inputs_")) + `"}`
+
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", w.Code)
+	}
+
+	var resp errorResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Error != "missing run_id" {
+		t.Fatalf("expected missing run_id, got %q", resp.Error)
+	}
+}
+EOF' in /Users/yani/Noema/backend succeeded in 51ms:
+
+file update:
+diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
+index 33fc29dbed5de2d7250041f408fca0f7dfea0320..ede7399b4113f79a9bcde7b4bec6a5a265179eab
+--- a/backend/internal/verify/handler.go
++++ b/backend/internal/verify/handler.go
+@@ -2,6 +2,7 @@
+ 
+ import (
+ 	"encoding/base64"
++	"fmt"
+ 	"net/http"
+ 	"strings"
+ 
+@@ -38,7 +39,11 @@
+ 		}
+ 
+ 		verified, msg, err := zk.VerifyProof(req.ProofB64, req.PublicInputsB64)
+-		if err == nil {
++		if err != nil {
++			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
++			return
++		}
++		if verified || !shouldTryLegacy(msg) {
+ 			c.JSON(http.StatusOK, VerifyResponse{
+ 				RunID:    req.RunID,
+ 				Verified: verified,
+@@ -49,7 +54,7 @@
+ 
+ 		verified, msg, err = verifyLegacyStub(req.RunID, req.ProofB64, req.PublicInputsB64)
+ 		if err != nil {
+-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
++			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+ 			return
+ 		}
+ 		c.JSON(http.StatusOK, VerifyResponse{
+@@ -60,17 +65,26 @@
+ 	}
+ }
+ 
++func shouldTryLegacy(msg string) bool {
++	switch msg {
++	case "invalid public inputs format", "invalid proof format":
++		return true
++	default:
++		return false
++	}
++}
++
+ func verifyLegacyStub(runID, proofB64, publicInputsB64 string) (bool, string, error) {
+ 	if runID == "" {
+-		return false, "missing run_id", nil
++		return false, "missing run_id", fmt.Errorf("missing run_id")
+ 	}
+ 	proofRaw, err := base64.StdEncoding.DecodeString(proofB64)
+ 	if err != nil {
+-		return false, "invalid proof encoding", err
++		return false, "invalid proof encoding", fmt.Errorf("invalid proof encoding")
+ 	}
+ 	pubRaw, err := base64.StdEncoding.DecodeString(publicInputsB64)
+ 	if err != nil {
+-		return false, "invalid public inputs encoding", err
++		return false, "invalid public inputs encoding", fmt.Errorf("invalid public inputs encoding")
+ 	}
+ 	expectedProof := "stub_proof_" + runID
+ 	expectedPub := "stub_inputs_" + runID
+
+
+thinking
+**Running full test suite**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 867ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	0.021s
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
+index 33fc29dbed5de2d7250041f408fca0f7dfea0320..ede7399b4113f79a9bcde7b4bec6a5a265179eab
+--- a/backend/internal/verify/handler.go
++++ b/backend/internal/verify/handler.go
+@@ -2,6 +2,7 @@
+ 
+ import (
+ 	"encoding/base64"
++	"fmt"
+ 	"net/http"
+ 	"strings"
+ 
+@@ -38,7 +39,11 @@
+ 		}
+ 
+ 		verified, msg, err := zk.VerifyProof(req.ProofB64, req.PublicInputsB64)
+-		if err == nil {
++		if err != nil {
++			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
++			return
++		}
++		if verified || !shouldTryLegacy(msg) {
+ 			c.JSON(http.StatusOK, VerifyResponse{
+ 				RunID:    req.RunID,
+ 				Verified: verified,
+@@ -49,7 +54,7 @@
+ 
+ 		verified, msg, err = verifyLegacyStub(req.RunID, req.ProofB64, req.PublicInputsB64)
+ 		if err != nil {
+-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
++			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+ 			return
+ 		}
+ 		c.JSON(http.StatusOK, VerifyResponse{
+@@ -60,17 +65,26 @@
+ 	}
+ }
+ 
++func shouldTryLegacy(msg string) bool {
++	switch msg {
++	case "invalid public inputs format", "invalid proof format":
++		return true
++	default:
++		return false
++	}
++}
++
+ func verifyLegacyStub(runID, proofB64, publicInputsB64 string) (bool, string, error) {
+ 	if runID == "" {
+-		return false, "missing run_id", nil
++		return false, "missing run_id", fmt.Errorf("missing run_id")
+ 	}
+ 	proofRaw, err := base64.StdEncoding.DecodeString(proofB64)
+ 	if err != nil {
+-		return false, "invalid proof encoding", err
++		return false, "invalid proof encoding", fmt.Errorf("invalid proof encoding")
+ 	}
+ 	pubRaw, err := base64.StdEncoding.DecodeString(publicInputsB64)
+ 	if err != nil {
+-		return false, "invalid public inputs encoding", err
++		return false, "invalid public inputs encoding", fmt.Errorf("invalid public inputs encoding")
+ 	}
+ 	expectedProof := "stub_proof_" + runID
+ 	expectedPub := "stub_inputs_" + runID
+
+
+thinking
+**Summarizing changes and tests**
+
+I’m preparing a summary of what changed, listing affected file paths, and detailing tests run; no immediate next steps are identified.
+codex
+What I changed:
+- Tightened `/api/verify` fallback logic to only try legacy verification on format-mismatch responses and to return clean 400s for invalid input, including missing `run_id`. Updated `internal/verify/handler.go`.
+- Added handler tests covering legacy fallback success and bad-request cases. Added `internal/verify/handler_test.go`.
+
+Tests run:
+- `go test ./...`
+
+If you want, I can also add a small test for the non-legacy verifier path to lock in current behavior.
+file update:
+diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
+index 33fc29dbed5de2d7250041f408fca0f7dfea0320..ede7399b4113f79a9bcde7b4bec6a5a265179eab
+--- a/backend/internal/verify/handler.go
++++ b/backend/internal/verify/handler.go
+@@ -2,6 +2,7 @@
+ 
+ import (
+ 	"encoding/base64"
++	"fmt"
+ 	"net/http"
+ 	"strings"
+ 
+@@ -38,7 +39,11 @@
+ 		}
+ 
+ 		verified, msg, err := zk.VerifyProof(req.ProofB64, req.PublicInputsB64)
+-		if err == nil {
++		if err != nil {
++			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
++			return
++		}
++		if verified || !shouldTryLegacy(msg) {
+ 			c.JSON(http.StatusOK, VerifyResponse{
+ 				RunID:    req.RunID,
+ 				Verified: verified,
+@@ -49,7 +54,7 @@
+ 
+ 		verified, msg, err = verifyLegacyStub(req.RunID, req.ProofB64, req.PublicInputsB64)
+ 		if err != nil {
+-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
++			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+ 			return
+ 		}
+ 		c.JSON(http.StatusOK, VerifyResponse{
+@@ -60,17 +65,26 @@
+ 	}
+ }
+ 
++func shouldTryLegacy(msg string) bool {
++	switch msg {
++	case "invalid public inputs format", "invalid proof format":
++		return true
++	default:
++		return false
++	}
++}
++
+ func verifyLegacyStub(runID, proofB64, publicInputsB64 string) (bool, string, error) {
+ 	if runID == "" {
+-		return false, "missing run_id", nil
++		return false, "missing run_id", fmt.Errorf("missing run_id")
+ 	}
+ 	proofRaw, err := base64.StdEncoding.DecodeString(proofB64)
+ 	if err != nil {
+-		return false, "invalid proof encoding", err
++		return false, "invalid proof encoding", fmt.Errorf("invalid proof encoding")
+ 	}
+ 	pubRaw, err := base64.StdEncoding.DecodeString(publicInputsB64)
+ 	if err != nil {
+-		return false, "invalid public inputs encoding", err
++		return false, "invalid public inputs encoding", fmt.Errorf("invalid public inputs encoding")
+ 	}
+ 	expectedProof := "stub_proof_" + runID
+ 	expectedPub := "stub_inputs_" + runID
+
+tokens used
+24,309
+What I changed:
+- Tightened `/api/verify` fallback logic to only try legacy verification on format-mismatch responses and to return clean 400s for invalid input, including missing `run_id`. Updated `internal/verify/handler.go`.
+- Added handler tests covering legacy fallback success and bad-request cases. Added `internal/verify/handler_test.go`.
+
+Tests run:
+- `go test ./...`
+
+If you want, I can also add a small test for the non-legacy verifier path to lock in current behavior.
