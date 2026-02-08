@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 
+	"noema/internal/config"
+	"noema/internal/httputil"
 	"noema/internal/zk"
 
 	"github.com/gin-gonic/gin"
@@ -28,8 +30,14 @@ type VerifyResponse struct {
 // Handler handles POST /api/verify. Stub verifier for now.
 func Handler() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxVerifyBytes)
+
 		var req VerifyRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
+			if httputil.IsBodyTooLarge(err) {
+				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+				return
+			}
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
 			return
 		}

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"noema/internal/config"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -122,5 +124,31 @@ func TestVerifyHandlerMissingRunIDReturns400(t *testing.T) {
 	}
 	if resp.Error != "missing run_id" {
 		t.Fatalf("expected missing run_id, got %q", resp.Error)
+	}
+}
+
+func TestVerifyHandlerBodyTooLargeReturns413(t *testing.T) {
+	r := setupRouter()
+	largeRunID := strings.Repeat("a", config.MaxVerifyBytes)
+	body := `{"run_id":"` + largeRunID + `","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}`
+
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected status 413, got %d", w.Code)
+	}
+
+	var resp errorResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Error != "request body too large" {
+		t.Fatalf("expected request body too large, got %q", resp.Error)
 	}
 }

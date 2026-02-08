@@ -1,0 +1,1071 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3c9e-e638-7211-b3c1-c4fb5ed35829
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Running tests first**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 92ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Prioritizing reliability improvements**
+
+I'm focusing on enhancing reliability with a meaningful change across up to three files by inspecting backend code for TODOs or error handling gaps.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME|panic|must" internal' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/parse.go:39:			return fmt.Errorf("constraint id must be non-empty")
+internal/evaluate/parse.go:42:			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
+internal/evaluate/parse.go:47:			return fmt.Errorf("custom_constraint id must be non-empty")
+internal/evaluate/parse.go:50:			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
+internal/evaluate/parse.go:75:			return nil, nil, fmt.Errorf("image filenames must be unique")
+internal/evaluate/parse.go:79:			return nil, nil, fmt.Errorf("each image must be at most %s", formatBytes(int64(config.MaxImageBytes)))
+internal/evaluate/parse.go:110:			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
+internal/evaluate/dataset.go:41:		return nil, Dataset{}, fmt.Errorf("dataset must be valid JSON")
+internal/evaluate/dataset.go:44:		return nil, Dataset{}, fmt.Errorf("dataset must be a single JSON value")
+internal/evaluate/dataset.go:51:		return nil, Dataset{}, fmt.Errorf("dataset must match schema")
+internal/evaluate/dataset.go:54:		return nil, Dataset{}, fmt.Errorf("dataset.items must be a non-empty array")
+internal/evaluate/dataset.go:65:			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
+internal/evaluate/policy.go:31:		return nil, fmt.Errorf("at least one constraint must be enabled")
+internal/zk/zk.go:86:		return nil, fmt.Errorf("policy threshold must be 0..2")
+internal/zk/zk.go:89:		return nil, fmt.Errorf("max severity must be 0..2")
+internal/zk/zk.go:125:				return PublicInputs{}, fmt.Errorf("policy threshold must be 0..2")
+internal/zk/zk.go:135:				return PublicInputs{}, fmt.Errorf("max severity must be 0..2")
+internal/zk/zk.go:145:				return PublicInputs{}, fmt.Errorf("overall pass must be 0 or 1")
+internal/zk/zk.go:154:				return PublicInputs{}, fmt.Errorf("commitment must have 0x prefix")
+internal/zk/zk.go:157:				return PublicInputs{}, fmt.Errorf("commitment must be hex")
+
+thinking
+**Inspecting dataset image validation**
+
+I'm checking the code for possible improvements on dataset image validation and error handling, focusing on the httputil module next.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "error|err" internal/httputil internal/session internal/verify' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/httputil/body_test.go:4:	"errors"
+internal/httputil/body_test.go:12:		err  error
+internal/httputil/body_test.go:15:		{name: "nil", err: nil, want: false},
+internal/httputil/body_test.go:16:		{name: "max bytes error", err: &http.MaxBytesError{Limit: 1}, want: true},
+internal/httputil/body_test.go:17:		{name: "http too large string", err: errors.New("http: request body too large"), want: true},
+internal/httputil/body_test.go:18:		{name: "multipart too large string", err: errors.New("multipart: message too large"), want: true},
+internal/httputil/body_test.go:19:		{name: "other error", err: errors.New("boom"), want: false},
+internal/httputil/body_test.go:24:			if got := IsBodyTooLarge(tc.err); got != tc.want {
+internal/httputil/body_test.go:25:				t.Fatalf("IsBodyTooLarge(%v) = %v, want %v", tc.err, got, tc.want)
+internal/session/session.go:31:	sig, err := hex.DecodeString(sigHex)
+internal/session/session.go:32:	if err != nil || len(sig) != sha256.Size {
+internal/session/session.go:35:	raw, err := base64.StdEncoding.DecodeString(encoded)
+internal/session/session.go:36:	if err != nil {
+internal/verify/handler_test.go:14:type errorResponse struct {
+internal/verify/handler_test.go:15:	Error string `json:"error"`
+internal/verify/handler_test.go:30:	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
+internal/verify/handler_test.go:31:	if err != nil {
+internal/verify/handler_test.go:32:		t.Fatalf("new request: %v", err)
+internal/verify/handler_test.go:42:	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+internal/verify/handler_test.go:43:		t.Fatalf("decode response: %v", err)
+
+thinking
+**Verifying error handling for large request bodies**
+
+Planning to confirm if ShouldBindJSON returns an error specifically for oversized bodies or if this is handled by HTTP middleware, to refine error handling accordingly.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,140p' internal/verify/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package verify
+
+import (
+	"encoding/base64"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+// VerifyRequest is the JSON body for POST /api/verify.
+type VerifyRequest struct {
+	RunID           string `json:"run_id"`
+	ProofB64        string `json:"proof_b64"`
+	PublicInputsB64 string `json:"public_inputs_b64"`
+}
+
+
+thinking
+**Considering input validation improvements**
+
+I'm thinking about trimming spaces and rejecting large base64 inputs during session parsing to enhance validation robustness.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/session/session.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package session
+
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"strings"
+)
+
+const CookieName = "noema_judge"
+
+// Sign produces a signed cookie value for the given payload (e.g. judge key).
+// Format: base64(payload) + "." + hex(HMAC-SHA256(secret, payload)).
+func Sign(secret, payload string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(payload))
+	sig := hex.EncodeToString(mac.Sum(nil))
+	encoded := base64.StdEncoding.EncodeToString([]byte(payload))
+
+thinking
+**Considering security enhancements**
+
+Reviewing potential improvements like adding `SameSite=Strict` and stricter verification checks, but deciding these might not be necessary now; leaving some checks open for future refinement.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/httputil/body.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package httputil
+
+import (
+	"errors"
+	"net/http"
+	"strings"
+)
+
+// IsBodyTooLarge reports whether the error indicates the request body exceeded MaxBytesReader.
+func IsBodyTooLarge(err error) bool {
+	if err == nil {
+		return false
+	}
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "request body too large") ||
+		strings.Contains(msg, "multipart: message too large")
+
+thinking
+**Considering error handling improvements**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"strings"
+
+	"noema/internal/config"
+)
+
+func parseSpec(form *multipart.Form) (Spec, error) {
+	specStrs := form.Value["spec"]
+	if len(specStrs) == 0 || specStrs[0] == "" {
+		return Spec{}, fmt.Errorf("missing field: spec")
+	}
+	if len(specStrs) > 1 {
+		return Spec{}, fmt.Errorf("only one spec value allowed")
+	}
+
+thinking
+**Evaluating request size and error handling**
+
+Considering adding validation for non-empty dataset items and improving parseSpec error messages with potentially DisallowUnknownFields. Also exploring safeguards against large base64-decoded data, possibly by checking decoded length or upstream request body size limits like MaxBody in the config.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "MaxBytes|MaxBody|Body" internal' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/handler_integration_test.go:45:		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+internal/evaluate/handler_integration_test.go:49:	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+internal/evaluate/handler_integration_test.go:89:		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+internal/evaluate/handler_integration_test.go:93:	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+internal/evaluate/handler_integration_test.go:127:		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+internal/evaluate/handler_integration_test.go:158:		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+internal/evaluate/handler_integration_test.go:189:		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+internal/evaluate/handler_integration_test.go:223:		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+internal/evaluate/handler.go:49:		maxBody := int64(config.MaxDatasetBytes) + int64(config.MaxImages*config.MaxImageBytes) + multipartOverhead
+internal/evaluate/handler.go:50:		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBody)
+internal/evaluate/handler.go:55:			if httputil.IsBodyTooLarge(err) {
+internal/web/upload.go:34:	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
+internal/web/upload.go:37:		if httputil.IsBodyTooLarge(err) {
+internal/verify/handler_test.go:42:	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+internal/verify/handler_test.go:70:	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+internal/verify/handler_test.go:95:	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+internal/verify/handler_test.go:120:	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+internal/httputil/body_test.go:9:func TestIsBodyTooLarge(t *testing.T) {
+internal/httputil/body_test.go:16:		{name: "max bytes error", err: &http.MaxBytesError{Limit: 1}, want: true},
+internal/httputil/body_test.go:24:			if got := IsBodyTooLarge(tc.err); got != tc.want {
+
+thinking
+**Evaluating need for MaxBytesReader in verify handler**
+
+Checking if verify handler requires MaxBytesReader to limit JSON size for reliability, since evaluate and web handlers use it; next step is to examine config for max size settings.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "Max.*Verify|Max.*JSON|Max.*Body|UploadBytes" internal config' in /Users/yani/Noema/backend exited 2 in 51ms:
+rg: config: No such file or directory (os error 2)
+internal/evaluate/handler.go:50:		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBody)
+internal/web/upload.go:34:	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
+internal/web/upload.go:51:	if file.Size > config.MaxUploadBytes {
+internal/config/limits.go:7:	MaxUploadBytes     = 50 * 1024 * 1024 // 50MB
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/config/limits.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package config
+
+const (
+	MaxDatasetBytes    = 50 * 1024 * 1024 // 50MB
+	MaxImageBytes      = 5 * 1024 * 1024  // 5MB
+	MaxImages          = 10
+	MaxUploadBytes     = 50 * 1024 * 1024 // 50MB
+	MaxMultipartMemory = 100 << 20        // 100MB for evaluate (dataset + images)
+)
+
+thinking
+**Planning size limit for verify handler**
+
+I'm deciding to add a new MaxVerifyBytes constant (around 1MB) in config/limits.go and update the verify handler to set MaxBytesReader with proper 413 error handling like the evaluate handler, then add a test ensuring large bodies return 413, keeping total changed files to three.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+thinking
+**Adding MaxBytesReader to verify handler**
+
+I'm planning to add a MaxBytesReader with a 5MB limit to the verify handler to safely handle potentially large base64 proof data, updating config limits and adding tests to enforce request size restrictions.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/verify/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package verify
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+)
+
+type errorResponse struct {
+	Error string `json:"error"`
+}
+
+func setupRouter() *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+
+
+thinking
+**Adding request size limit to verify handler**
+
+Planning to enforce a 5MB limit on verify requests by adding MaxVerifyBytes in config and wrapping the request body with MaxBytesReader before binding JSON, returning a 413 if exceeded. This adds reliability without risking breaking legitimate larger payloads.
+thinking
+**Planning 413 error response and test for oversized requests**
+
+I'll implement returning a 413 with a clear error message when the request exceeds the size limit and add tests that construct JSON bodies just over the 5MB limit using repeated strings, verifying the handler correctly rejects them.
+file update
+M /Users/yani/Noema/backend/internal/config/limits.go
+@@ -7,2 +7,3 @@
+ 	MaxUploadBytes     = 50 * 1024 * 1024 // 50MB
++	MaxVerifyBytes     = 5 * 1024 * 1024  // 5MB
+ 	MaxMultipartMemory = 100 << 20        // 100MB for evaluate (dataset + images)
+apply_patch(auto_approved=true) exited 0 in 29ms:
+Success. Updated the following files:
+M internal/config/limits.go
+file update:
+diff --git a/backend/internal/config/limits.go b/backend/internal/config/limits.go
+index 6354cc9b4ee3ef9033318679c70e77128e05d817..36fef2df8b0f5f58ecc2aace1ebb97ac8d8a6e3d
+--- a/backend/internal/config/limits.go
++++ b/backend/internal/config/limits.go
+@@ -5,5 +5,6 @@
+ 	MaxImageBytes      = 5 * 1024 * 1024  // 5MB
+ 	MaxImages          = 10
+ 	MaxUploadBytes     = 50 * 1024 * 1024 // 50MB
++	MaxVerifyBytes     = 5 * 1024 * 1024  // 5MB
+ 	MaxMultipartMemory = 100 << 20        // 100MB for evaluate (dataset + images)
+ )
+
+file update:
+diff --git a/backend/internal/config/limits.go b/backend/internal/config/limits.go
+index 6354cc9b4ee3ef9033318679c70e77128e05d817..36fef2df8b0f5f58ecc2aace1ebb97ac8d8a6e3d
+--- a/backend/internal/config/limits.go
++++ b/backend/internal/config/limits.go
+@@ -5,5 +5,6 @@
+ 	MaxImageBytes      = 5 * 1024 * 1024  // 5MB
+ 	MaxImages          = 10
+ 	MaxUploadBytes     = 50 * 1024 * 1024 // 50MB
++	MaxVerifyBytes     = 5 * 1024 * 1024  // 5MB
+ 	MaxMultipartMemory = 100 << 20        // 100MB for evaluate (dataset + images)
+ )
+
+
+thinking
+**Switching to patch-based edits**
+
+I'm shifting to use apply_patch for modifications and planning to update the verify handler to include MaxBytesReader and handle oversized input properly.
+file update
+M /Users/yani/Noema/backend/internal/verify/handler.go
+@@ -8,2 +8,4 @@
+ 
++	"noema/internal/config"
++	"noema/internal/httputil"
+ 	"noema/internal/zk"
+@@ -30,4 +32,10 @@
+ 	return func(c *gin.Context) {
++		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxVerifyBytes)
++
+ 		var req VerifyRequest
+ 		if err := c.ShouldBindJSON(&req); err != nil {
++			if httputil.IsBodyTooLarge(err) {
++				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
++				return
++			}
+ 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+apply_patch(auto_approved=true) exited 0 in 33ms:
+Success. Updated the following files:
+M internal/verify/handler.go
+file update:
+diff --git a/backend/internal/config/limits.go b/backend/internal/config/limits.go
+index 6354cc9b4ee3ef9033318679c70e77128e05d817..36fef2df8b0f5f58ecc2aace1ebb97ac8d8a6e3d
+--- a/backend/internal/config/limits.go
++++ b/backend/internal/config/limits.go
+@@ -5,5 +5,6 @@
+ 	MaxImageBytes      = 5 * 1024 * 1024  // 5MB
+ 	MaxImages          = 10
+ 	MaxUploadBytes     = 50 * 1024 * 1024 // 50MB
++	MaxVerifyBytes     = 5 * 1024 * 1024  // 5MB
+ 	MaxMultipartMemory = 100 << 20        // 100MB for evaluate (dataset + images)
+ )
+diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
+index 6a34468479ec72bad5f8aa8a3b8c7eba507acde5..39c184b62287ffc29d9b263102c755a981aa6306
+--- a/backend/internal/verify/handler.go
++++ b/backend/internal/verify/handler.go
+@@ -6,6 +6,8 @@
+ 	"net/http"
+ 	"strings"
+ 
++	"noema/internal/config"
++	"noema/internal/httputil"
+ 	"noema/internal/zk"
+ 
+ 	"github.com/gin-gonic/gin"
+@@ -28,8 +30,14 @@
+ // Handler handles POST /api/verify. Stub verifier for now.
+ func Handler() gin.HandlerFunc {
+ 	return func(c *gin.Context) {
++		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxVerifyBytes)
++
+ 		var req VerifyRequest
+ 		if err := c.ShouldBindJSON(&req); err != nil {
++			if httputil.IsBodyTooLarge(err) {
++				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
++				return
++			}
+ 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+ 			return
+ 		}
+
+file update:
+diff --git a/backend/internal/config/limits.go b/backend/internal/config/limits.go
+index 6354cc9b4ee3ef9033318679c70e77128e05d817..36fef2df8b0f5f58ecc2aace1ebb97ac8d8a6e3d
+--- a/backend/internal/config/limits.go
++++ b/backend/internal/config/limits.go
+@@ -5,5 +5,6 @@
+ 	MaxImageBytes      = 5 * 1024 * 1024  // 5MB
+ 	MaxImages          = 10
+ 	MaxUploadBytes     = 50 * 1024 * 1024 // 50MB
++	MaxVerifyBytes     = 5 * 1024 * 1024  // 5MB
+ 	MaxMultipartMemory = 100 << 20        // 100MB for evaluate (dataset + images)
+ )
+diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
+index 6a34468479ec72bad5f8aa8a3b8c7eba507acde5..39c184b62287ffc29d9b263102c755a981aa6306
+--- a/backend/internal/verify/handler.go
++++ b/backend/internal/verify/handler.go
+@@ -6,6 +6,8 @@
+ 	"net/http"
+ 	"strings"
+ 
++	"noema/internal/config"
++	"noema/internal/httputil"
+ 	"noema/internal/zk"
+ 
+ 	"github.com/gin-gonic/gin"
+@@ -28,8 +30,14 @@
+ // Handler handles POST /api/verify. Stub verifier for now.
+ func Handler() gin.HandlerFunc {
+ 	return func(c *gin.Context) {
++		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxVerifyBytes)
++
+ 		var req VerifyRequest
+ 		if err := c.ShouldBindJSON(&req); err != nil {
++			if httputil.IsBodyTooLarge(err) {
++				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
++				return
++			}
+ 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+ 			return
+ 		}
+
+
+thinking
+**Adding body size limit test**
+
+I'm creating a test in handler_test.go to send a JSON payload just over the configured max body size (5MB), verifying that it triggers a 413 error due to Gin's MaxBytesReader limiting the request, and checking the error message for "request body too large."
+file update
+M /Users/yani/Noema/backend/internal/verify/handler_test.go
+@@ -10,2 +10,4 @@
+ 
++	"noema/internal/config"
++
+ 	"github.com/gin-gonic/gin"
+@@ -126 +128,27 @@
+ }
++
++func TestVerifyHandlerBodyTooLargeReturns413(t *testing.T) {
++	r := setupRouter()
++	largeRunID := strings.Repeat("a", config.MaxVerifyBytes)
++	body := `{"run_id":"` + largeRunID + `","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}` 
++
++	w := httptest.NewRecorder()
++	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
++	if err != nil {
++		t.Fatalf("new request: %v", err)
++	}
++	req.Header.Set("Content-Type", "application/json")
++	r.ServeHTTP(w, req)
++
++	if w.Code != http.StatusRequestEntityTooLarge {
++		t.Fatalf("expected status 413, got %d", w.Code)
++	}
++
++	var resp errorResponse
++	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
++		t.Fatalf("decode response: %v", err)
++	}
++	if resp.Error != "request body too large" {
++		t.Fatalf("expected request body too large, got %q", resp.Error)
++	}
++}
+apply_patch(auto_approved=true) exited 0 in 39ms:
+Success. Updated the following files:
+M internal/verify/handler_test.go
+file update:
+diff --git a/backend/internal/config/limits.go b/backend/internal/config/limits.go
+index 6354cc9b4ee3ef9033318679c70e77128e05d817..36fef2df8b0f5f58ecc2aace1ebb97ac8d8a6e3d
+--- a/backend/internal/config/limits.go
++++ b/backend/internal/config/limits.go
+@@ -5,5 +5,6 @@
+ 	MaxImageBytes      = 5 * 1024 * 1024  // 5MB
+ 	MaxImages          = 10
+ 	MaxUploadBytes     = 50 * 1024 * 1024 // 50MB
++	MaxVerifyBytes     = 5 * 1024 * 1024  // 5MB
+ 	MaxMultipartMemory = 100 << 20        // 100MB for evaluate (dataset + images)
+ )
+diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
+index 6a34468479ec72bad5f8aa8a3b8c7eba507acde5..39c184b62287ffc29d9b263102c755a981aa6306
+--- a/backend/internal/verify/handler.go
++++ b/backend/internal/verify/handler.go
+@@ -6,6 +6,8 @@
+ 	"net/http"
+ 	"strings"
+ 
++	"noema/internal/config"
++	"noema/internal/httputil"
+ 	"noema/internal/zk"
+ 
+ 	"github.com/gin-gonic/gin"
+@@ -28,8 +30,14 @@
+ // Handler handles POST /api/verify. Stub verifier for now.
+ func Handler() gin.HandlerFunc {
+ 	return func(c *gin.Context) {
++		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxVerifyBytes)
++
+ 		var req VerifyRequest
+ 		if err := c.ShouldBindJSON(&req); err != nil {
++			if httputil.IsBodyTooLarge(err) {
++				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
++				return
++			}
+ 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+ 			return
+ 		}
+diff --git a/backend/internal/verify/handler_test.go b/backend/internal/verify/handler_test.go
+index 1e1f62e7efdc102f95eba9dafb24beab988b6d42..809e21ae459d0b2a5c9a2a2f6cbc0210f5100d81
+--- a/backend/internal/verify/handler_test.go
++++ b/backend/internal/verify/handler_test.go
+@@ -8,6 +8,8 @@
+ 	"strings"
+ 	"testing"
+ 
++	"noema/internal/config"
++
+ 	"github.com/gin-gonic/gin"
+ )
+ 
+@@ -124,3 +126,29 @@
+ 		t.Fatalf("expected missing run_id, got %q", resp.Error)
+ 	}
+ }
++
++func TestVerifyHandlerBodyTooLargeReturns413(t *testing.T) {
++	r := setupRouter()
++	largeRunID := strings.Repeat("a", config.MaxVerifyBytes)
++	body := `{"run_id":"` + largeRunID + `","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}` 
++
++	w := httptest.NewRecorder()
++	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
++	if err != nil {
++		t.Fatalf("new request: %v", err)
++	}
++	req.Header.Set("Content-Type", "application/json")
++	r.ServeHTTP(w, req)
++
++	if w.Code != http.StatusRequestEntityTooLarge {
++		t.Fatalf("expected status 413, got %d", w.Code)
++	}
++
++	var resp errorResponse
++	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
++		t.Fatalf("decode response: %v", err)
++	}
++	if resp.Error != "request body too large" {
++		t.Fatalf("expected request body too large, got %q", resp.Error)
++	}
++}
+
+file update:
+diff --git a/backend/internal/config/limits.go b/backend/internal/config/limits.go
+index 6354cc9b4ee3ef9033318679c70e77128e05d817..36fef2df8b0f5f58ecc2aace1ebb97ac8d8a6e3d
+--- a/backend/internal/config/limits.go
++++ b/backend/internal/config/limits.go
+@@ -5,5 +5,6 @@
+ 	MaxImageBytes      = 5 * 1024 * 1024  // 5MB
+ 	MaxImages          = 10
+ 	MaxUploadBytes     = 50 * 1024 * 1024 // 50MB
++	MaxVerifyBytes     = 5 * 1024 * 1024  // 5MB
+ 	MaxMultipartMemory = 100 << 20        // 100MB for evaluate (dataset + images)
+ )
+diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
+index 6a34468479ec72bad5f8aa8a3b8c7eba507acde5..39c184b62287ffc29d9b263102c755a981aa6306
+--- a/backend/internal/verify/handler.go
++++ b/backend/internal/verify/handler.go
+@@ -6,6 +6,8 @@
+ 	"net/http"
+ 	"strings"
+ 
++	"noema/internal/config"
++	"noema/internal/httputil"
+ 	"noema/internal/zk"
+ 
+ 	"github.com/gin-gonic/gin"
+@@ -28,8 +30,14 @@
+ // Handler handles POST /api/verify. Stub verifier for now.
+ func Handler() gin.HandlerFunc {
+ 	return func(c *gin.Context) {
++		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxVerifyBytes)
++
+ 		var req VerifyRequest
+ 		if err := c.ShouldBindJSON(&req); err != nil {
++			if httputil.IsBodyTooLarge(err) {
++				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
++				return
++			}
+ 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+ 			return
+ 		}
+diff --git a/backend/internal/verify/handler_test.go b/backend/internal/verify/handler_test.go
+index 1e1f62e7efdc102f95eba9dafb24beab988b6d42..809e21ae459d0b2a5c9a2a2f6cbc0210f5100d81
+--- a/backend/internal/verify/handler_test.go
++++ b/backend/internal/verify/handler_test.go
+@@ -8,6 +8,8 @@
+ 	"strings"
+ 	"testing"
+ 
++	"noema/internal/config"
++
+ 	"github.com/gin-gonic/gin"
+ )
+ 
+@@ -124,3 +126,29 @@
+ 		t.Fatalf("expected missing run_id, got %q", resp.Error)
+ 	}
+ }
++
++func TestVerifyHandlerBodyTooLargeReturns413(t *testing.T) {
++	r := setupRouter()
++	largeRunID := strings.Repeat("a", config.MaxVerifyBytes)
++	body := `{"run_id":"` + largeRunID + `","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}` 
++
++	w := httptest.NewRecorder()
++	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
++	if err != nil {
++		t.Fatalf("new request: %v", err)
++	}
++	req.Header.Set("Content-Type", "application/json")
++	r.ServeHTTP(w, req)
++
++	if w.Code != http.StatusRequestEntityTooLarge {
++		t.Fatalf("expected status 413, got %d", w.Code)
++	}
++
++	var resp errorResponse
++	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
++		t.Fatalf("decode response: %v", err)
++	}
++	if resp.Error != "request body too large" {
++		t.Fatalf("expected request body too large, got %q", resp.Error)
++	}
++}
+
+
+thinking
+**Removing trailing space before backtick**
+
+I'm fixing a trailing space in a body string line before a backtick by applying a small patch.
+file update
+M /Users/yani/Noema/backend/internal/verify/handler_test.go
+@@ -132,3 +132,3 @@
+ 	largeRunID := strings.Repeat("a", config.MaxVerifyBytes)
+-	body := `{"run_id":"` + largeRunID + `","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}` 
++	body := `{"run_id":"` + largeRunID + `","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}`
+ 
+apply_patch(auto_approved=true) exited 0 in 47ms:
+Success. Updated the following files:
+M internal/verify/handler_test.go
+file update:
+diff --git a/backend/internal/config/limits.go b/backend/internal/config/limits.go
+index 6354cc9b4ee3ef9033318679c70e77128e05d817..36fef2df8b0f5f58ecc2aace1ebb97ac8d8a6e3d
+--- a/backend/internal/config/limits.go
++++ b/backend/internal/config/limits.go
+@@ -5,5 +5,6 @@
+ 	MaxImageBytes      = 5 * 1024 * 1024  // 5MB
+ 	MaxImages          = 10
+ 	MaxUploadBytes     = 50 * 1024 * 1024 // 50MB
++	MaxVerifyBytes     = 5 * 1024 * 1024  // 5MB
+ 	MaxMultipartMemory = 100 << 20        // 100MB for evaluate (dataset + images)
+ )
+diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
+index 6a34468479ec72bad5f8aa8a3b8c7eba507acde5..39c184b62287ffc29d9b263102c755a981aa6306
+--- a/backend/internal/verify/handler.go
++++ b/backend/internal/verify/handler.go
+@@ -6,6 +6,8 @@
+ 	"net/http"
+ 	"strings"
+ 
++	"noema/internal/config"
++	"noema/internal/httputil"
+ 	"noema/internal/zk"
+ 
+ 	"github.com/gin-gonic/gin"
+@@ -28,8 +30,14 @@
+ // Handler handles POST /api/verify. Stub verifier for now.
+ func Handler() gin.HandlerFunc {
+ 	return func(c *gin.Context) {
++		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxVerifyBytes)
++
+ 		var req VerifyRequest
+ 		if err := c.ShouldBindJSON(&req); err != nil {
++			if httputil.IsBodyTooLarge(err) {
++				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
++				return
++			}
+ 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+ 			return
+ 		}
+diff --git a/backend/internal/verify/handler_test.go b/backend/internal/verify/handler_test.go
+index 1e1f62e7efdc102f95eba9dafb24beab988b6d42..900f6759e30fc3df51d9676c6f834bf38c187ddd
+--- a/backend/internal/verify/handler_test.go
++++ b/backend/internal/verify/handler_test.go
+@@ -8,6 +8,8 @@
+ 	"strings"
+ 	"testing"
+ 
++	"noema/internal/config"
++
+ 	"github.com/gin-gonic/gin"
+ )
+ 
+@@ -124,3 +126,29 @@
+ 		t.Fatalf("expected missing run_id, got %q", resp.Error)
+ 	}
+ }
++
++func TestVerifyHandlerBodyTooLargeReturns413(t *testing.T) {
++	r := setupRouter()
++	largeRunID := strings.Repeat("a", config.MaxVerifyBytes)
++	body := `{"run_id":"` + largeRunID + `","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}`
++
++	w := httptest.NewRecorder()
++	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
++	if err != nil {
++		t.Fatalf("new request: %v", err)
++	}
++	req.Header.Set("Content-Type", "application/json")
++	r.ServeHTTP(w, req)
++
++	if w.Code != http.StatusRequestEntityTooLarge {
++		t.Fatalf("expected status 413, got %d", w.Code)
++	}
++
++	var resp errorResponse
++	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
++		t.Fatalf("decode response: %v", err)
++	}
++	if resp.Error != "request body too large" {
++		t.Fatalf("expected request body too large, got %q", resp.Error)
++	}
++}
+
+file update:
+diff --git a/backend/internal/config/limits.go b/backend/internal/config/limits.go
+index 6354cc9b4ee3ef9033318679c70e77128e05d817..36fef2df8b0f5f58ecc2aace1ebb97ac8d8a6e3d
+--- a/backend/internal/config/limits.go
++++ b/backend/internal/config/limits.go
+@@ -5,5 +5,6 @@
+ 	MaxImageBytes      = 5 * 1024 * 1024  // 5MB
+ 	MaxImages          = 10
+ 	MaxUploadBytes     = 50 * 1024 * 1024 // 50MB
++	MaxVerifyBytes     = 5 * 1024 * 1024  // 5MB
+ 	MaxMultipartMemory = 100 << 20        // 100MB for evaluate (dataset + images)
+ )
+diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
+index 6a34468479ec72bad5f8aa8a3b8c7eba507acde5..39c184b62287ffc29d9b263102c755a981aa6306
+--- a/backend/internal/verify/handler.go
++++ b/backend/internal/verify/handler.go
+@@ -6,6 +6,8 @@
+ 	"net/http"
+ 	"strings"
+ 
++	"noema/internal/config"
++	"noema/internal/httputil"
+ 	"noema/internal/zk"
+ 
+ 	"github.com/gin-gonic/gin"
+@@ -28,8 +30,14 @@
+ // Handler handles POST /api/verify. Stub verifier for now.
+ func Handler() gin.HandlerFunc {
+ 	return func(c *gin.Context) {
++		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxVerifyBytes)
++
+ 		var req VerifyRequest
+ 		if err := c.ShouldBindJSON(&req); err != nil {
++			if httputil.IsBodyTooLarge(err) {
++				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
++				return
++			}
+ 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+ 			return
+ 		}
+diff --git a/backend/internal/verify/handler_test.go b/backend/internal/verify/handler_test.go
+index 1e1f62e7efdc102f95eba9dafb24beab988b6d42..900f6759e30fc3df51d9676c6f834bf38c187ddd
+--- a/backend/internal/verify/handler_test.go
++++ b/backend/internal/verify/handler_test.go
+@@ -8,6 +8,8 @@
+ 	"strings"
+ 	"testing"
+ 
++	"noema/internal/config"
++
+ 	"github.com/gin-gonic/gin"
+ )
+ 
+@@ -124,3 +126,29 @@
+ 		t.Fatalf("expected missing run_id, got %q", resp.Error)
+ 	}
+ }
++
++func TestVerifyHandlerBodyTooLargeReturns413(t *testing.T) {
++	r := setupRouter()
++	largeRunID := strings.Repeat("a", config.MaxVerifyBytes)
++	body := `{"run_id":"` + largeRunID + `","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}`
++
++	w := httptest.NewRecorder()
++	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
++	if err != nil {
++		t.Fatalf("new request: %v", err)
++	}
++	req.Header.Set("Content-Type", "application/json")
++	r.ServeHTTP(w, req)
++
++	if w.Code != http.StatusRequestEntityTooLarge {
++		t.Fatalf("expected status 413, got %d", w.Code)
++	}
++
++	var resp errorResponse
++	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
++		t.Fatalf("decode response: %v", err)
++	}
++	if resp.Error != "request body too large" {
++		t.Fatalf("expected request body too large, got %q", resp.Error)
++	}
++}
+
+
+thinking
+**Verifying formatting and tests**
+
+Checked that gofmt handles import ordering automatically and confirmed adding config imports alphabetically isn’t needed manually. Planning to run all tests next as required.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 503ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	0.019s
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/config/limits.go b/backend/internal/config/limits.go
+index 6354cc9b4ee3ef9033318679c70e77128e05d817..36fef2df8b0f5f58ecc2aace1ebb97ac8d8a6e3d
+--- a/backend/internal/config/limits.go
++++ b/backend/internal/config/limits.go
+@@ -5,5 +5,6 @@
+ 	MaxImageBytes      = 5 * 1024 * 1024  // 5MB
+ 	MaxImages          = 10
+ 	MaxUploadBytes     = 50 * 1024 * 1024 // 50MB
++	MaxVerifyBytes     = 5 * 1024 * 1024  // 5MB
+ 	MaxMultipartMemory = 100 << 20        // 100MB for evaluate (dataset + images)
+ )
+diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
+index 6a34468479ec72bad5f8aa8a3b8c7eba507acde5..39c184b62287ffc29d9b263102c755a981aa6306
+--- a/backend/internal/verify/handler.go
++++ b/backend/internal/verify/handler.go
+@@ -6,6 +6,8 @@
+ 	"net/http"
+ 	"strings"
+ 
++	"noema/internal/config"
++	"noema/internal/httputil"
+ 	"noema/internal/zk"
+ 
+ 	"github.com/gin-gonic/gin"
+@@ -28,8 +30,14 @@
+ // Handler handles POST /api/verify. Stub verifier for now.
+ func Handler() gin.HandlerFunc {
+ 	return func(c *gin.Context) {
++		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxVerifyBytes)
++
+ 		var req VerifyRequest
+ 		if err := c.ShouldBindJSON(&req); err != nil {
++			if httputil.IsBodyTooLarge(err) {
++				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
++				return
++			}
+ 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+ 			return
+ 		}
+diff --git a/backend/internal/verify/handler_test.go b/backend/internal/verify/handler_test.go
+index 1e1f62e7efdc102f95eba9dafb24beab988b6d42..900f6759e30fc3df51d9676c6f834bf38c187ddd
+--- a/backend/internal/verify/handler_test.go
++++ b/backend/internal/verify/handler_test.go
+@@ -8,6 +8,8 @@
+ 	"strings"
+ 	"testing"
+ 
++	"noema/internal/config"
++
+ 	"github.com/gin-gonic/gin"
+ )
+ 
+@@ -124,3 +126,29 @@
+ 		t.Fatalf("expected missing run_id, got %q", resp.Error)
+ 	}
+ }
++
++func TestVerifyHandlerBodyTooLargeReturns413(t *testing.T) {
++	r := setupRouter()
++	largeRunID := strings.Repeat("a", config.MaxVerifyBytes)
++	body := `{"run_id":"` + largeRunID + `","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}`
++
++	w := httptest.NewRecorder()
++	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
++	if err != nil {
++		t.Fatalf("new request: %v", err)
++	}
++	req.Header.Set("Content-Type", "application/json")
++	r.ServeHTTP(w, req)
++
++	if w.Code != http.StatusRequestEntityTooLarge {
++		t.Fatalf("expected status 413, got %d", w.Code)
++	}
++
++	var resp errorResponse
++	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
++		t.Fatalf("decode response: %v", err)
++	}
++	if resp.Error != "request body too large" {
++		t.Fatalf("expected request body too large, got %q", resp.Error)
++	}
++}
+
+codex
+What I changed (short)
+- Added a size limit for `/api/verify` JSON bodies with a clear 413 response on overflow.
+- Added a test to assert the 413 behavior.
+- Added `config.MaxVerifyBytes` to centralize the limit.
+
+Tests run
+- `go test ./...`
+file update:
+diff --git a/backend/internal/config/limits.go b/backend/internal/config/limits.go
+index 6354cc9b4ee3ef9033318679c70e77128e05d817..36fef2df8b0f5f58ecc2aace1ebb97ac8d8a6e3d
+--- a/backend/internal/config/limits.go
++++ b/backend/internal/config/limits.go
+@@ -5,5 +5,6 @@
+ 	MaxImageBytes      = 5 * 1024 * 1024  // 5MB
+ 	MaxImages          = 10
+ 	MaxUploadBytes     = 50 * 1024 * 1024 // 50MB
++	MaxVerifyBytes     = 5 * 1024 * 1024  // 5MB
+ 	MaxMultipartMemory = 100 << 20        // 100MB for evaluate (dataset + images)
+ )
+diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
+index 6a34468479ec72bad5f8aa8a3b8c7eba507acde5..39c184b62287ffc29d9b263102c755a981aa6306
+--- a/backend/internal/verify/handler.go
++++ b/backend/internal/verify/handler.go
+@@ -6,6 +6,8 @@
+ 	"net/http"
+ 	"strings"
+ 
++	"noema/internal/config"
++	"noema/internal/httputil"
+ 	"noema/internal/zk"
+ 
+ 	"github.com/gin-gonic/gin"
+@@ -28,8 +30,14 @@
+ // Handler handles POST /api/verify. Stub verifier for now.
+ func Handler() gin.HandlerFunc {
+ 	return func(c *gin.Context) {
++		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxVerifyBytes)
++
+ 		var req VerifyRequest
+ 		if err := c.ShouldBindJSON(&req); err != nil {
++			if httputil.IsBodyTooLarge(err) {
++				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
++				return
++			}
+ 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+ 			return
+ 		}
+diff --git a/backend/internal/verify/handler_test.go b/backend/internal/verify/handler_test.go
+index 1e1f62e7efdc102f95eba9dafb24beab988b6d42..900f6759e30fc3df51d9676c6f834bf38c187ddd
+--- a/backend/internal/verify/handler_test.go
++++ b/backend/internal/verify/handler_test.go
+@@ -8,6 +8,8 @@
+ 	"strings"
+ 	"testing"
+ 
++	"noema/internal/config"
++
+ 	"github.com/gin-gonic/gin"
+ )
+ 
+@@ -124,3 +126,29 @@
+ 		t.Fatalf("expected missing run_id, got %q", resp.Error)
+ 	}
+ }
++
++func TestVerifyHandlerBodyTooLargeReturns413(t *testing.T) {
++	r := setupRouter()
++	largeRunID := strings.Repeat("a", config.MaxVerifyBytes)
++	body := `{"run_id":"` + largeRunID + `","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}`
++
++	w := httptest.NewRecorder()
++	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
++	if err != nil {
++		t.Fatalf("new request: %v", err)
++	}
++	req.Header.Set("Content-Type", "application/json")
++	r.ServeHTTP(w, req)
++
++	if w.Code != http.StatusRequestEntityTooLarge {
++		t.Fatalf("expected status 413, got %d", w.Code)
++	}
++
++	var resp errorResponse
++	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
++		t.Fatalf("decode response: %v", err)
++	}
++	if resp.Error != "request body too large" {
++		t.Fatalf("expected request body too large, got %q", resp.Error)
++	}
++}
+
+tokens used
+45,253
+What I changed (short)
+- Added a size limit for `/api/verify` JSON bodies with a clear 413 response on overflow.
+- Added a test to assert the 413 behavior.
+- Added `config.MaxVerifyBytes` to centralize the limit.
+
+Tests run
+- `go test ./...`
