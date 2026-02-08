@@ -134,7 +134,17 @@ func Handler(runsDir string, maxRuns int) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "proof generation failed"})
 			return
 		}
-		verified, _, _ := zk.VerifyProof(proof.ProofB64, proof.PublicInputsB64)
+		verified, reason, err := zk.VerifyProof(proof.ProofB64, proof.PublicInputsB64)
+		if err != nil {
+			log.Printf("proof verify error: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "proof verification failed"})
+			return
+		}
+		if !verified {
+			log.Printf("proof verify failed: %s", reason)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "proof verification failed"})
+			return
+		}
 
 		cleanupRun = false
 		if err := updateRunsIndex(runsDir, config.RunsIndexLimit(), RunIndexEntry{
