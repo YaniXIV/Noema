@@ -7,7 +7,7 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3c86-6899-7451-ac28-789c04aecb09
+session id: 019c3ecd-565a-7f70-8d50-9341e457679d
 --------
 user
 You are an autonomous coding agent polishing the Noema repository.
@@ -18,8 +18,9 @@ Hard rules:
 - Keep changes small: max 3 files per iteration.
 - No cosmetic-only edits.
 - No new dependencies unless absolutely necessary.
+- keep all the same ui functionality, the end user should be able to do the same stuff but the experiance and design should be better.
 
-Goal: continuously improve production quality.
+Goal: continuously improve production quality. continuously improve front end quality and polish.
 
 Iteration:
 1) Run: cd backend && go test ./...
@@ -29,7 +30,7 @@ Iteration:
 Pick the highest-value improvement:
 A) Reliability/correctness: validation, error handling, run persistence, verify robustness
 B) Tests: add/strengthen tests for the change you made
-C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+C) upgrading the user interface so that it looks better.
 D) Maintainability: reduce duplication with tiny refactors
 E) UX: wizard/results/verify clarity (small, safe changes)
 F) Docs: README/DEPLOYMENT polish
@@ -41,24 +42,25 @@ Finish with:
 mcp startup: no servers
 
 thinking
-**Running tests**
+**Preparing to run tests**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 206ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 212ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
 ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
 
 thinking
-**Preparing for targeted improvement**
+**Preparing for targeted frontend improvement**
 
-I'm planning to inspect the repo with ripgrep to identify key areas for a meaningful change limited to three files.
+Tests are passing, so I'll inspect the repo structure next to identify up to three relevant frontend files for a meaningful UI enhancement.
 exec
 /bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
 cmd
@@ -67,713 +69,342 @@ go.mod
 go.sum
 internal
 main
-server
 web
 
 thinking
-**Searching for TODOs and error handling**
+**Planning frontend investigation**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME|XXX"' in /Users/yani/Noema/backend exited 1 in 51ms:
-
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web' in /Users/yani/Noema/backend succeeded in 52ms:
+static
+templates
 
 thinking
-**Searching error handling code**
-
-I'm searching for panic calls and error handling patterns to better understand how the code manages exceptions and failures. Next, I'll check session or evaluate components for ignored errors.
+**Checking templates**
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"panic\\(\" internal" in /Users/yani/Noema/backend exited 1 in 51ms:
-
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/templates' in /Users/yani/Noema/backend succeeded in 51ms:
+app.html
+app_new.html
+app_results.html
+index.html
+partial_header_app.html
+partial_header_public.html
+partial_header_upload.html
+partial_orb.html
+upload.html
+verify.html
+verify_results.html
 
 thinking
-**Reviewing TODOs and internal modules**
+**Planning minor UX improvement**
 
-I'm checking for TODO comments related to errors and inspecting the internal/gemini directory for relevant leads.
+I'm identifying CSS files in the web/static directory to locate where to apply a small user experience enhancement. Next, I'll list and review relevant styles.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal' in /Users/yani/Noema/backend succeeded in 51ms:
-auth
-config
-crypto
-evaluate
-gemini
-session
-verify
-web
-zk
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/static' in /Users/yani/Noema/backend succeeded in 51ms:
+app.js
+constraints.js
+results.js
+styles.css
+upload.js
+verify.js
+wizard.js
 
 thinking
-**Exploring internal/web directory**
+**Preparing for style polish**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "err != nil" internal/web internal/session internal/verify internal/evaluate internal/gemini' in /Users/yani/Noema/backend succeeded in 52ms:
-internal/session/session.go:32:	if err != nil || len(sig) != sha256.Size {
-internal/session/session.go:36:	if err != nil {
-internal/evaluate/handler_integration_test.go:49:	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-internal/evaluate/handler_integration_test.go:93:	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-internal/evaluate/handler_integration_test.go:193:	if err != nil {
-internal/evaluate/handler_integration_test.go:234:	if err != nil {
-internal/evaluate/handler_integration_test.go:237:	if err := writer.WriteField("spec", string(specRaw)); err != nil {
-internal/evaluate/handler_integration_test.go:243:		if err != nil {
-internal/evaluate/handler_integration_test.go:246:		if err := writer.WriteField("eval_output", string(evalRaw)); err != nil {
-internal/evaluate/handler_integration_test.go:252:	if err != nil {
-internal/evaluate/handler_integration_test.go:255:	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello"}]}`)); err != nil {
-internal/evaluate/handler_integration_test.go:259:	if err := writer.Close(); err != nil {
-internal/evaluate/handler_integration_test.go:273:	if err != nil {
-internal/evaluate/handler_integration_test.go:276:	if err := writer.WriteField("spec", string(specRaw)); err != nil {
-internal/evaluate/handler_integration_test.go:281:	if err != nil {
-internal/evaluate/handler_integration_test.go:284:	if _, err := part.Write([]byte(datasetJSON)); err != nil {
-internal/evaluate/handler_integration_test.go:288:	if err := writer.Close(); err != nil {
-internal/evaluate/handler_integration_test.go:302:	if err != nil {
-internal/evaluate/handler_integration_test.go:305:	if err := writer.WriteField("spec", string(specRaw)); err != nil {
-internal/evaluate/handler_integration_test.go:310:	if err != nil {
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap');
 
-thinking
-**Reviewing upload handling for validation**
-
-I'm checking the upload handler to see if it currently validates file size and to plan adding such checks if missing.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"encoding/json"
-	"log"
-	"mime/multipart"
-	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
-	"time"
-
-	"noema/internal/config"
-	"noema/internal/zk"
-
-	"github.com/gin-gonic/gin"
-)
-
-// EvaluateResponse is the JSON response for POST /api/evaluate.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
-	if err := validateEvalOutput(out, enabled); err != nil {
-		return EvalOutput{}, err
-	}
-	return out, nil
+:root {
+  --bg: #05060a;
+  --bg-card: rgba(9, 12, 18, 0.9);
+  --text: #f4f6fb;
+  --text-muted: #9aa3b2;
+  --accent: #45d4ff;
+  --accent-strong: #2c7bff;
+  --accent-glow: rgba(69, 212, 255, 0.35);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(69, 212, 255, 0.4);
+  --error: #f87171;
+  --success: #22c55e;
+  --warning: #fbbf24;
+  --shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
 }
 
-func stubEvalOutput(enabled map[string]ConstraintRule) EvalOutput {
-	out := EvalOutput{
-		SchemaVersion: 1,
-		Constraints:   make([]EvalConstraintResult, 0, len(enabled)),
-		MaxSeverity:   0,
-	}
-	for id := range enabled {
-		out.Constraints = append(out.Constraints, EvalConstraintResult{
-			ID:        id,
-			Severity:  0,
-			Rationale: "stub",
-		})
-	}
-	sort.Slice(out.Constraints, func(i, j int) bool {
-
-thinking
-**Noting potential error handling and timestamp improvements**
-
-Considering continuing on errors in pruneRuns and possibly using stable timestamps; also planning to check parseUploads for similar issues.
+*,
+*::before,
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '240,520p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
 
-import (
-	"encoding/json"
-	"fmt"
-	"mime/multipart"
-	"strings"
-
-	"noema/internal/config"
-)
-
-func parseSpec(form *multipart.Form) (Spec, error) {
-	specStrs := form.Value["spec"]
-	if len(specStrs) == 0 || specStrs[0] == "" {
-		return Spec{}, fmt.Errorf("missing field: spec")
-	}
-	var spec Spec
-	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
-		return Spec{}, fmt.Errorf("invalid spec JSON")
-	}
-
-thinking
-**Planning validation improvements**
-
-I'm considering adding duplicate checks for image filenames and verifying dataset items aren't empty. Next, I'll inspect internal/web/upload.go to explore related upload logic.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/web/upload.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package web
-
-import (
-	"fmt"
-	"io"
-	"net/http"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
-
-	"noema/internal/config"
-
-	"github.com/gin-gonic/gin"
-)
-
-// UploadData is passed to the upload template.
-type UploadData struct {
-	Error    string
-	Success  bool
-
-thinking
-**Identifying validation improvements**
-
-I'm considering stricter checks like verifying upload directory existence, enforcing file extension limits, and validating content types minimally. Also, parseUploads should error on multiple dataset files and duplicate image filenames to avoid ambiguity, and the dataset JSON should be checked for required item IDs. I'll review dataset handling code next.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io"
-	"mime/multipart"
-)
-
-type Dataset struct {
-	Items []DatasetItem `json:"items"`
+.label {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text);
 }
 
-type DatasetItem struct {
-	ID       string         `json:"id"`
-	Text     string         `json:"text"`
-	Metadata map[string]any `json:"metadata,omitempty"`
-	ImageRef string         `json:"image_ref,omitempty"`
+.form-hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
 }
 
-thinking
-**Planning duplicate filename check**
-
-I'm considering adding duplicate image filename detection to dataset JSON validation for error handling, and I'll check existing tests around that validation to plan additions.
+.input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border);
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"mime/multipart"
-	"net/textproto"
-	"os"
-	"path/filepath"
-	"sort"
-	"testing"
-	"time"
-)
-
-type formFile struct {
-	field       string
-	filename    string
-	contentType string
-	content     []byte
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
-	form := buildMultipartForm(t, []formFile{
-		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-	})
-	datasetFile := form.File["dataset"][0]
-	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-		t.Fatalf("expected error for duplicate dataset ids")
-	}
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '520,1040p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+  font-size: 0.82rem;
+  color: var(--text-muted);
 }
 
-func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
-	spec := Spec{
-		SchemaVersion: 1,
-		Constraints: []Constraint{
-			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
-			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
-		},
-	}
-	if err := validateSpec(spec); err == nil {
-		t.Fatalf("expected error for empty constraint id")
-	}
+.upload-hint {
+  margin-top: 0.65rem;
+}
+
+/* ===== Wizard ===== */
+.main-wizard {
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.wizard-card {
+  max-width: 980px;
+}
+
+.stepper {
+  display: flex;
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1040,1320p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .stepper-sep {
+    width: 100%;
+  }
+
+  .constraint-row {
+    grid-template-columns: 1fr;
+    gap: 0.6rem;
+  }
+
+  .wizard-nav {
+    flex-direction: column;
+  }
+
+  .upload-details {
+    flex-direction: column;
+    align-items: flex-start;
 
 
 thinking
-**Planning duplicate filename and multiple dataset file checks**
+**Evaluating UX improvements versus cosmetic-only changes**
 
-I'm adding checks in parseUploads to reject multiple dataset files and detect duplicate image filenames, with errors that are test-deterministic. I'll add corresponding tests in handler_test by crafting multipart forms with multiple dataset files and duplicate image names to ensure the new validations trigger correctly.
+I'm considering functional UX improvements like enhancing keyboard focus styles and unifying duplicated reduced-motion CSS for maintainability. Small layout or accessibility tweaks (like sticky headers or improved outlines) might improve experience without altering core functionality, fitting the non-cosmetic criteria.
 thinking
-**Positioning duplicate filename check before dataset validation**
+**Planning functional readability and accessibility tweaks**
 
-I'm moving the duplicate image filename check ahead of validateDatasetJSON in parseUploads and will test with a form having a dataset plus two images with the same filename to confirm it errors properly.
+I'm targeting improvements like adding `tab-size` or `word-break` for better text wrapping to enhance readability without breaking code formatting and enriching keyboard focus styles on interactive elements for accessibility gains. Next, I'll verify element roles in templates to apply these focus-visible enhancements properly.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "stepper-step|segmented-btn|verify-row|upload-zone" web/templates' in /Users/yani/Noema/backend succeeded in 52ms:
+web/templates/upload.html:18:        <label class="upload-zone" for="file-input" id="drop-zone">
+web/templates/app_new.html:18:        <button type="button" class="stepper-step active" data-step="1" aria-selected="true">Dataset</button>
+web/templates/app_new.html:20:        <button type="button" class="stepper-step" data-step="2">Policy</button>
+web/templates/app_new.html:22:        <button type="button" class="stepper-step" data-step="3">Review & Run</button>
+web/templates/app_new.html:31:            <button type="button" class="segmented-btn active" data-source="file" aria-selected="true">Upload file</button>
+web/templates/app_new.html:32:            <button type="button" class="segmented-btn" data-source="paste" aria-selected="false">Paste JSON</button>
+
+
+thinking
+**Planning CSS accessibility improvements**
+
+I'm preparing to enhance keyboard navigation by adding `:focus-visible` styles to several interactive elements purely via CSS to improve accessibility without adding JS. I'll modify `web/static/styles.css` to add focus rings for elements like `.stepper-step`, `.segmented-btn`, `.severity-select`, and others as a meaningful UX upgrade.
+thinking
+**Expanding focus-visible styles with switch and anchors**
+
+I'm updating the CSS to add `.focus-visible` styles for more elements including `.stepper-step`, `.severity-select`, `.upload-zone`, `.verify-run-id`, `.logo`, and links like `.recent-run-item`, plus a box-shadow ring for `.switch input:focus-visible + .switch-track` to enhance keyboard focus visibility consistently.
 file update
-M /Users/yani/Noema/backend/internal/evaluate/parse.go
-@@ -51,2 +51,5 @@
- 	}
-+	if len(datasetFiles) > 1 {
-+		return nil, nil, fmt.Errorf("only one dataset file allowed")
-+	}
- 	datasetFile := datasetFiles[0]
-@@ -59,3 +62,8 @@
- 	}
-+	seenImageNames := make(map[string]struct{}, len(imageFiles))
- 	for _, f := range imageFiles {
-+		if _, exists := seenImageNames[f.Filename]; exists {
-+			return nil, nil, fmt.Errorf("image filenames must be unique")
-+		}
-+		seenImageNames[f.Filename] = struct{}{}
- 		if f.Size > config.MaxImageBytes {
-apply_patch(auto_approved=true) exited 0 in 31ms:
+M /Users/yani/Noema/backend/web/static/styles.css
+@@ -344,3 +344,10 @@
+ .input:focus-visible,
+-.segmented-btn:focus-visible {
++.segmented-btn:focus-visible,
++.stepper-step:focus-visible,
++.severity-select:focus-visible,
++.upload-zone:focus-visible,
++.recent-run-item:focus-visible,
++.verify-run-id:focus-visible,
++.logo:focus-visible,
++.constraint-details summary:focus-visible {
+   outline: 2px solid var(--accent);
+@@ -349,2 +356,6 @@
+ 
++.switch input:focus-visible + .switch-track {
++  box-shadow: 0 0 0 3px var(--accent-glow);
++}
++
+ /* ===== Dashboard ===== */
+apply_patch(auto_approved=true) exited 0 in 30ms:
 Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/parse.go
+M /Users/yani/Noema/backend/web/static/styles.css
 file update:
-diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
-index f104c4565a7f911ac198d0e3df4857285f7b47bb..e0245ab5f0766803235fb31405e5c90a03ed180d
---- a/backend/internal/evaluate/parse.go
-+++ b/backend/internal/evaluate/parse.go
-@@ -49,6 +49,9 @@
- 	if len(datasetFiles) == 0 {
- 		return nil, nil, fmt.Errorf("missing required file: dataset")
- 	}
-+	if len(datasetFiles) > 1 {
-+		return nil, nil, fmt.Errorf("only one dataset file allowed")
-+	}
- 	datasetFile := datasetFiles[0]
- 	if datasetFile.Size > config.MaxDatasetBytes {
- 		return nil, nil, fmt.Errorf("dataset exceeds 50MB limit")
-@@ -57,7 +60,12 @@
- 	if len(imageFiles) > config.MaxImages {
- 		return nil, nil, fmt.Errorf("maximum 10 images allowed")
- 	}
-+	seenImageNames := make(map[string]struct{}, len(imageFiles))
- 	for _, f := range imageFiles {
-+		if _, exists := seenImageNames[f.Filename]; exists {
-+			return nil, nil, fmt.Errorf("image filenames must be unique")
-+		}
-+		seenImageNames[f.Filename] = struct{}{}
- 		if f.Size > config.MaxImageBytes {
- 			return nil, nil, fmt.Errorf("each image must be at most 5MB")
- 		}
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 67e01e13dfcef59fbaf7f1ce12fb5b3a0d3370d1..dc8f3c9acfe5d85820d2bab4503941f7f52db1d8
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -342,11 +342,22 @@
+ .btn:focus-visible,
+ .nav-link:focus-visible,
+ .input:focus-visible,
+-.segmented-btn:focus-visible {
++.segmented-btn:focus-visible,
++.stepper-step:focus-visible,
++.severity-select:focus-visible,
++.upload-zone:focus-visible,
++.recent-run-item:focus-visible,
++.verify-run-id:focus-visible,
++.logo:focus-visible,
++.constraint-details summary:focus-visible {
+   outline: 2px solid var(--accent);
+   outline-offset: 2px;
+ }
+ 
++.switch input:focus-visible + .switch-track {
++  box-shadow: 0 0 0 3px var(--accent-glow);
++}
++
+ /* ===== Dashboard ===== */
+ .main-dashboard {
+   align-items: flex-start;
 
 file update:
-diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
-index f104c4565a7f911ac198d0e3df4857285f7b47bb..e0245ab5f0766803235fb31405e5c90a03ed180d
---- a/backend/internal/evaluate/parse.go
-+++ b/backend/internal/evaluate/parse.go
-@@ -49,6 +49,9 @@
- 	if len(datasetFiles) == 0 {
- 		return nil, nil, fmt.Errorf("missing required file: dataset")
- 	}
-+	if len(datasetFiles) > 1 {
-+		return nil, nil, fmt.Errorf("only one dataset file allowed")
-+	}
- 	datasetFile := datasetFiles[0]
- 	if datasetFile.Size > config.MaxDatasetBytes {
- 		return nil, nil, fmt.Errorf("dataset exceeds 50MB limit")
-@@ -57,7 +60,12 @@
- 	if len(imageFiles) > config.MaxImages {
- 		return nil, nil, fmt.Errorf("maximum 10 images allowed")
- 	}
-+	seenImageNames := make(map[string]struct{}, len(imageFiles))
- 	for _, f := range imageFiles {
-+		if _, exists := seenImageNames[f.Filename]; exists {
-+			return nil, nil, fmt.Errorf("image filenames must be unique")
-+		}
-+		seenImageNames[f.Filename] = struct{}{}
- 		if f.Size > config.MaxImageBytes {
- 			return nil, nil, fmt.Errorf("each image must be at most 5MB")
- 		}
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 67e01e13dfcef59fbaf7f1ce12fb5b3a0d3370d1..dc8f3c9acfe5d85820d2bab4503941f7f52db1d8
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -342,11 +342,22 @@
+ .btn:focus-visible,
+ .nav-link:focus-visible,
+ .input:focus-visible,
+-.segmented-btn:focus-visible {
++.segmented-btn:focus-visible,
++.stepper-step:focus-visible,
++.severity-select:focus-visible,
++.upload-zone:focus-visible,
++.recent-run-item:focus-visible,
++.verify-run-id:focus-visible,
++.logo:focus-visible,
++.constraint-details summary:focus-visible {
+   outline: 2px solid var(--accent);
+   outline-offset: 2px;
+ }
+ 
++.switch input:focus-visible + .switch-track {
++  box-shadow: 0 0 0 3px var(--accent-glow);
++}
++
+ /* ===== Dashboard ===== */
+ .main-dashboard {
+   align-items: flex-start;
 
 
 thinking
-**Adding tests for patch application**
-file update
-M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
-@@ -228,2 +228,25 @@
- 
-+func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
-+	dataset := `{"items":[{"id":"1","text":"hello"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+		{field: "dataset", filename: "dataset2.json", contentType: "application/json", content: []byte(dataset)},
-+	})
-+	if _, _, err := parseUploads(form); err == nil {
-+		t.Fatalf("expected error for multiple dataset files")
-+	}
-+}
-+
-+func TestParseUploads_RejectsDuplicateImageNames(t *testing.T) {
-+	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"img.png"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
-+		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
-+	})
-+	if _, _, err := parseUploads(form); err == nil {
-+		t.Fatalf("expected error for duplicate image filenames")
-+	}
-+}
-+
- func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
-apply_patch(auto_approved=true) exited 0 in 40ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
-file update:
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 04ae8fb90312924973356edf9c52a91c2cc93bc5..b6941809a407e6a02f82a1c512ca50e67d2611fb
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -226,6 +226,29 @@
- 	}
- }
- 
-+func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
-+	dataset := `{"items":[{"id":"1","text":"hello"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+		{field: "dataset", filename: "dataset2.json", contentType: "application/json", content: []byte(dataset)},
-+	})
-+	if _, _, err := parseUploads(form); err == nil {
-+		t.Fatalf("expected error for multiple dataset files")
-+	}
-+}
-+
-+func TestParseUploads_RejectsDuplicateImageNames(t *testing.T) {
-+	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"img.png"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
-+		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
-+	})
-+	if _, _, err := parseUploads(form); err == nil {
-+		t.Fatalf("expected error for duplicate image filenames")
-+	}
-+}
-+
- func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
- 	spec := Spec{
- 		SchemaVersion: 1,
-diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
-index f104c4565a7f911ac198d0e3df4857285f7b47bb..e0245ab5f0766803235fb31405e5c90a03ed180d
---- a/backend/internal/evaluate/parse.go
-+++ b/backend/internal/evaluate/parse.go
-@@ -49,6 +49,9 @@
- 	if len(datasetFiles) == 0 {
- 		return nil, nil, fmt.Errorf("missing required file: dataset")
- 	}
-+	if len(datasetFiles) > 1 {
-+		return nil, nil, fmt.Errorf("only one dataset file allowed")
-+	}
- 	datasetFile := datasetFiles[0]
- 	if datasetFile.Size > config.MaxDatasetBytes {
- 		return nil, nil, fmt.Errorf("dataset exceeds 50MB limit")
-@@ -57,7 +60,12 @@
- 	if len(imageFiles) > config.MaxImages {
- 		return nil, nil, fmt.Errorf("maximum 10 images allowed")
- 	}
-+	seenImageNames := make(map[string]struct{}, len(imageFiles))
- 	for _, f := range imageFiles {
-+		if _, exists := seenImageNames[f.Filename]; exists {
-+			return nil, nil, fmt.Errorf("image filenames must be unique")
-+		}
-+		seenImageNames[f.Filename] = struct{}{}
- 		if f.Size > config.MaxImageBytes {
- 			return nil, nil, fmt.Errorf("each image must be at most 5MB")
- 		}
-
-file update:
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 04ae8fb90312924973356edf9c52a91c2cc93bc5..b6941809a407e6a02f82a1c512ca50e67d2611fb
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -226,6 +226,29 @@
- 	}
- }
- 
-+func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
-+	dataset := `{"items":[{"id":"1","text":"hello"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+		{field: "dataset", filename: "dataset2.json", contentType: "application/json", content: []byte(dataset)},
-+	})
-+	if _, _, err := parseUploads(form); err == nil {
-+		t.Fatalf("expected error for multiple dataset files")
-+	}
-+}
-+
-+func TestParseUploads_RejectsDuplicateImageNames(t *testing.T) {
-+	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"img.png"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
-+		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
-+	})
-+	if _, _, err := parseUploads(form); err == nil {
-+		t.Fatalf("expected error for duplicate image filenames")
-+	}
-+}
-+
- func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
- 	spec := Spec{
- 		SchemaVersion: 1,
-diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
-index f104c4565a7f911ac198d0e3df4857285f7b47bb..e0245ab5f0766803235fb31405e5c90a03ed180d
---- a/backend/internal/evaluate/parse.go
-+++ b/backend/internal/evaluate/parse.go
-@@ -49,6 +49,9 @@
- 	if len(datasetFiles) == 0 {
- 		return nil, nil, fmt.Errorf("missing required file: dataset")
- 	}
-+	if len(datasetFiles) > 1 {
-+		return nil, nil, fmt.Errorf("only one dataset file allowed")
-+	}
- 	datasetFile := datasetFiles[0]
- 	if datasetFile.Size > config.MaxDatasetBytes {
- 		return nil, nil, fmt.Errorf("dataset exceeds 50MB limit")
-@@ -57,7 +60,12 @@
- 	if len(imageFiles) > config.MaxImages {
- 		return nil, nil, fmt.Errorf("maximum 10 images allowed")
- 	}
-+	seenImageNames := make(map[string]struct{}, len(imageFiles))
- 	for _, f := range imageFiles {
-+		if _, exists := seenImageNames[f.Filename]; exists {
-+			return nil, nil, fmt.Errorf("image filenames must be unique")
-+		}
-+		seenImageNames[f.Filename] = struct{}{}
- 		if f.Size > config.MaxImageBytes {
- 			return nil, nil, fmt.Errorf("each image must be at most 5MB")
- 		}
-
-
-thinking
-**Rerunning full Go test suite**
+**Rerunning tests after code change**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backendfile update:
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 04ae8fb90312924973356edf9c52a91c2cc93bc5..b6941809a407e6a02f82a1c512ca50e67d2611fb
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -226,6 +226,29 @@
- 	}
- }
- 
-+func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
-+	dataset := `{"items":[{"id":"1","text":"hello"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+		{field: "dataset", filename: "dataset2.json", contentType: "application/json", content: []byte(dataset)},
-+	})
-+	if _, _, err := parseUploads(form); err == nil {
-+		t.Fatalf("expected error for multiple dataset files")
-+	}
-+}
-+
-+func TestParseUploads_RejectsDuplicateImageNames(t *testing.T) {
-+	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"img.png"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
-+		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
-+	})
-+	if _, _, err := parseUploads(form); err == nil {
-+		t.Fatalf("expected error for duplicate image filenames")
-+	}
-+}
-+
- func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
- 	spec := Spec{
- 		SchemaVersion: 1,
-diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
-index f104c4565a7f911ac198d0e3df4857285f7b47bb..e0245ab5f0766803235fb31405e5c90a03ed180d
---- a/backend/internal/evaluate/parse.go
-+++ b/backend/internal/evaluate/parse.go
-@@ -49,6 +49,9 @@
- 	if len(datasetFiles) == 0 {
- 		return nil, nil, fmt.Errorf("missing required file: dataset")
- 	}
-+	if len(datasetFiles) > 1 {
-+		return nil, nil, fmt.Errorf("only one dataset file allowed")
-+	}
- 	datasetFile := datasetFiles[0]
- 	if datasetFile.Size > config.MaxDatasetBytes {
- 		return nil, nil, fmt.Errorf("dataset exceeds 50MB limit")
-@@ -57,7 +60,12 @@
- 	if len(imageFiles) > config.MaxImages {
- 		return nil, nil, fmt.Errorf("maximum 10 images allowed")
- 	}
-+	seenImageNames := make(map[string]struct{}, len(imageFiles))
- 	for _, f := range imageFiles {
-+		if _, exists := seenImageNames[f.Filename]; exists {
-+			return nil, nil, fmt.Errorf("image filenames must be unique")
-+		}
-+		seenImageNames[f.Filename] = struct{}{}
- 		if f.Size > config.MaxImageBytes {
- 			return nil, nil, fmt.Errorf("each image must be at most 5MB")
- 		}
-
- succeeded in 1.67s:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 221ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	0.030s
+ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 67e01e13dfcef59fbaf7f1ce12fb5b3a0d3370d1..dc8f3c9acfe5d85820d2bab4503941f7f52db1d8
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -342,11 +342,22 @@
+ .btn:focus-visible,
+ .nav-link:focus-visible,
+ .input:focus-visible,
+-.segmented-btn:focus-visible {
++.segmented-btn:focus-visible,
++.stepper-step:focus-visible,
++.severity-select:focus-visible,
++.upload-zone:focus-visible,
++.recent-run-item:focus-visible,
++.verify-run-id:focus-visible,
++.logo:focus-visible,
++.constraint-details summary:focus-visible {
+   outline: 2px solid var(--accent);
+   outline-offset: 2px;
+ }
+ 
++.switch input:focus-visible + .switch-track {
++  box-shadow: 0 0 0 3px var(--accent-glow);
++}
++
+ /* ===== Dashboard ===== */
+ .main-dashboard {
+   align-items: flex-start;
+
 
 thinking
-**Polling for command completion**
-file update:
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 04ae8fb90312924973356edf9c52a91c2cc93bc5..b6941809a407e6a02f82a1c512ca50e67d2611fb
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -226,6 +226,29 @@
- 	}
- }
- 
-+func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
-+	dataset := `{"items":[{"id":"1","text":"hello"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+		{field: "dataset", filename: "dataset2.json", contentType: "application/json", content: []byte(dataset)},
-+	})
-+	if _, _, err := parseUploads(form); err == nil {
-+		t.Fatalf("expected error for multiple dataset files")
-+	}
-+}
-+
-+func TestParseUploads_RejectsDuplicateImageNames(t *testing.T) {
-+	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"img.png"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
-+		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
-+	})
-+	if _, _, err := parseUploads(form); err == nil {
-+		t.Fatalf("expected error for duplicate image filenames")
-+	}
-+}
-+
- func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
- 	spec := Spec{
- 		SchemaVersion: 1,
-diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
-index f104c4565a7f911ac198d0e3df4857285f7b47bb..e0245ab5f0766803235fb31405e5c90a03ed180d
---- a/backend/internal/evaluate/parse.go
-+++ b/backend/internal/evaluate/parse.go
-@@ -49,6 +49,9 @@
- 	if len(datasetFiles) == 0 {
- 		return nil, nil, fmt.Errorf("missing required file: dataset")
- 	}
-+	if len(datasetFiles) > 1 {
-+		return nil, nil, fmt.Errorf("only one dataset file allowed")
-+	}
- 	datasetFile := datasetFiles[0]
- 	if datasetFile.Size > config.MaxDatasetBytes {
- 		return nil, nil, fmt.Errorf("dataset exceeds 50MB limit")
-@@ -57,7 +60,12 @@
- 	if len(imageFiles) > config.MaxImages {
- 		return nil, nil, fmt.Errorf("maximum 10 images allowed")
- 	}
-+	seenImageNames := make(map[string]struct{}, len(imageFiles))
- 	for _, f := range imageFiles {
-+		if _, exists := seenImageNames[f.Filename]; exists {
-+			return nil, nil, fmt.Errorf("image filenames must be unique")
-+		}
-+		seenImageNames[f.Filename] = struct{}{}
- 		if f.Size > config.MaxImageBytes {
- 			return nil, nil, fmt.Errorf("each image must be at most 5MB")
- 		}
+**Finalizing response with summary and tests**
 
+I'm preparing a concise final summary that highlights the code change, its improvements, and results of tests run on the relevant file, without referencing web.run.
 codex
 What you changed (short)
-- Added validation to reject multiple dataset files and duplicate image filenames, plus tests covering both cases. `internal/evaluate/parse.go`, `internal/evaluate/handler_test.go`
+- Added consistent keyboard focus styles for interactive UI elements and switches to improve accessibility and navigation polish in `web/static/styles.css`.
 
 Tests run
-- `go test ./...`
+1. `go test ./...`
 
-Suggestions
-1. If you want, I can add a precise error check in tests to assert the exact message for the new validations.
+If you want another iteration, I can target results readability or refine wizard stepper interactions.
 file update:
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 04ae8fb90312924973356edf9c52a91c2cc93bc5..b6941809a407e6a02f82a1c512ca50e67d2611fb
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -226,6 +226,29 @@
- 	}
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 67e01e13dfcef59fbaf7f1ce12fb5b3a0d3370d1..dc8f3c9acfe5d85820d2bab4503941f7f52db1d8
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -342,11 +342,22 @@
+ .btn:focus-visible,
+ .nav-link:focus-visible,
+ .input:focus-visible,
+-.segmented-btn:focus-visible {
++.segmented-btn:focus-visible,
++.stepper-step:focus-visible,
++.severity-select:focus-visible,
++.upload-zone:focus-visible,
++.recent-run-item:focus-visible,
++.verify-run-id:focus-visible,
++.logo:focus-visible,
++.constraint-details summary:focus-visible {
+   outline: 2px solid var(--accent);
+   outline-offset: 2px;
  }
  
-+func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
-+	dataset := `{"items":[{"id":"1","text":"hello"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+		{field: "dataset", filename: "dataset2.json", contentType: "application/json", content: []byte(dataset)},
-+	})
-+	if _, _, err := parseUploads(form); err == nil {
-+		t.Fatalf("expected error for multiple dataset files")
-+	}
++.switch input:focus-visible + .switch-track {
++  box-shadow: 0 0 0 3px var(--accent-glow);
 +}
 +
-+func TestParseUploads_RejectsDuplicateImageNames(t *testing.T) {
-+	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"img.png"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
-+		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
-+	})
-+	if _, _, err := parseUploads(form); err == nil {
-+		t.Fatalf("expected error for duplicate image filenames")
-+	}
-+}
-+
- func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
- 	spec := Spec{
- 		SchemaVersion: 1,
-diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
-index f104c4565a7f911ac198d0e3df4857285f7b47bb..e0245ab5f0766803235fb31405e5c90a03ed180d
---- a/backend/internal/evaluate/parse.go
-+++ b/backend/internal/evaluate/parse.go
-@@ -49,6 +49,9 @@
- 	if len(datasetFiles) == 0 {
- 		return nil, nil, fmt.Errorf("missing required file: dataset")
- 	}
-+	if len(datasetFiles) > 1 {
-+		return nil, nil, fmt.Errorf("only one dataset file allowed")
-+	}
- 	datasetFile := datasetFiles[0]
- 	if datasetFile.Size > config.MaxDatasetBytes {
- 		return nil, nil, fmt.Errorf("dataset exceeds 50MB limit")
-@@ -57,7 +60,12 @@
- 	if len(imageFiles) > config.MaxImages {
- 		return nil, nil, fmt.Errorf("maximum 10 images allowed")
- 	}
-+	seenImageNames := make(map[string]struct{}, len(imageFiles))
- 	for _, f := range imageFiles {
-+		if _, exists := seenImageNames[f.Filename]; exists {
-+			return nil, nil, fmt.Errorf("image filenames must be unique")
-+		}
-+		seenImageNames[f.Filename] = struct{}{}
- 		if f.Size > config.MaxImageBytes {
- 			return nil, nil, fmt.Errorf("each image must be at most 5MB")
- 		}
+ /* ===== Dashboard ===== */
+ .main-dashboard {
+   align-items: flex-start;
 
 tokens used
-28,171
+20,119
 What you changed (short)
-- Added validation to reject multiple dataset files and duplicate image filenames, plus tests covering both cases. `internal/evaluate/parse.go`, `internal/evaluate/handler_test.go`
+- Added consistent keyboard focus styles for interactive UI elements and switches to improve accessibility and navigation polish in `web/static/styles.css`.
 
 Tests run
-- `go test ./...`
+1. `go test ./...`
 
-Suggestions
-1. If you want, I can add a precise error check in tests to assert the exact message for the new validations.
+If you want another iteration, I can target results readability or refine wizard stepper interactions.

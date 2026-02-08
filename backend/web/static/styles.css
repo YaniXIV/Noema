@@ -342,9 +342,20 @@ pre,
 .btn:focus-visible,
 .nav-link:focus-visible,
 .input:focus-visible,
-.segmented-btn:focus-visible {
+.segmented-btn:focus-visible,
+.stepper-step:focus-visible,
+.severity-select:focus-visible,
+.upload-zone:focus-visible,
+.recent-run-item:focus-visible,
+.verify-run-id:focus-visible,
+.logo:focus-visible,
+.constraint-details summary:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+.switch input:focus-visible + .switch-track {
+  box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
 /* ===== Dashboard ===== */
