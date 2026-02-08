@@ -43,6 +43,7 @@
     var dot = row.querySelector('.verify-indicator');
     var label = row.querySelector('.verify-indicator-text');
     if (!dot || !label) return;
+    row.setAttribute('data-verify', state);
     dot.className = 'verify-indicator verify-indicator-' + state;
     label.textContent = text;
   }
@@ -167,6 +168,7 @@
     var verified = data && data.verified;
     var state = verified === true ? 'ok' : (verified === false ? 'fail' : 'idle');
     var label = verified === true ? 'Verified' : (verified === false ? 'Failed' : 'Not verified');
+    row.setAttribute('data-verify', state);
     indicator.className = 'verify-indicator verify-indicator-' + state;
     indicator.title = label;
 
