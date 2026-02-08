@@ -91,7 +91,8 @@ func Handler(runsDir string, maxRuns int) gin.HandlerFunc {
 		}()
 
 		if err := saveRunFiles(runPath, datasetFile, imageFiles); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			log.Printf("save run files: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save run files"})
 			return
 		}
 
