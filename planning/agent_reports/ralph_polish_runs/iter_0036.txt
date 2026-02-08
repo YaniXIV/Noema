@@ -1,0 +1,566 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3c9e-095c-74d0-a052-0499f2011738
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Planning to check instructions file**
+
+I'm preparing to search for instructions related to AGENTS using a file scan to determine next steps.
+exec
+/bin/zsh -lc ls in /Users/yani/Noema/backend succeeded in 52ms:
+cmd
+data
+go.mod
+go.sum
+internal
+main
+server
+web
+
+thinking
+**Locating AGENTS.md**
+exec
+/bin/zsh -lc "rg --files -g 'AGENTS.md'" in /Users/yani/Noema/backend exited 1 in 52ms:
+
+
+thinking
+**Running full Go test suite**
+exec
+/bin/zsh -lc 'go test ./...' in /Users/yani/Noema/backend succeeded in 110ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+?   	noema/internal/httputil	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Prioritizing reliability improvement**
+
+Tests pass, so I'm focusing on one meaningful improvement within three files and no new dependencies, targeting reliability by inspecting the code for potential issues to fix.
+exec
+/bin/zsh -lc 'rg -n "TODO|FIXME|panic|Must|unsafe" internal' in /Users/yani/Noema/backend exited 1 in 52ms:
+
+
+thinking
+**Checking error handling in HTTP utility**
+exec
+/bin/zsh -lc 'rg -n "error" internal/httputil internal/web internal/gemini' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/gemini/gemini.go:54:func newClient(ctx context.Context) (*genai.Client, error) {
+internal/gemini/gemini.go:105:func SendText(ctx context.Context, text string) (string, error) {
+internal/gemini/gemini.go:123:func Evaluate(ctx context.Context, req EvalRequest) (EvalResponse, error) {
+internal/gemini/gemini.go:141:func EvaluateStream(ctx context.Context, req EvalRequest, onChunk func(string)) (EvalResponse, error) {
+internal/web/auth.go:25:// On success: set cookie, redirect 303 to /app. On failure: re-render index with inline error.
+internal/httputil/body.go:4:	"errors"
+internal/httputil/body.go:9:// IsBodyTooLarge reports whether the error indicates the request body exceeded MaxBytesReader.
+internal/httputil/body.go:10:func IsBodyTooLarge(err error) bool {
+internal/httputil/body.go:15:	if errors.As(err, &maxBytesErr) {
+internal/web/upload.go:56:		UploadGet(c, uploadTmpl, UploadData{Error: "Server error saving file."})
+internal/web/upload.go:83:		UploadGet(c, uploadTmpl, UploadData{Error: "Server error saving file."})
+internal/web/upload.go:89:		UploadGet(c, uploadTmpl, UploadData{Error: "Server error saving file."})
+
+thinking
+**Considering improvements to body size check**
+exec
+/bin/zsh -lc "sed -n '1,160p' internal/httputil/body.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package httputil
+
+import (
+	"errors"
+	"net/http"
+	"strings"
+)
+
+// IsBodyTooLarge reports whether the error indicates the request body exceeded MaxBytesReader.
+func IsBodyTooLarge(err error) bool {
+	if err == nil {
+		return false
+	}
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		return true
+	}
+	return strings.Contains(err.Error(), "request body too large")
+}
+
+thinking
+**Considering upload size limit**
+
+Planning to use MaxBytesReader in the upload handler to restrict file size and provide an error message when the upload is too large. Next steps include verifying the current upload handling.
+exec
+/bin/zsh -lc "sed -n '1,200p' internal/web/upload.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package web
+
+import (
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+
+	"github.com/gin-gonic/gin"
+)
+
+// UploadData is passed to the upload template.
+type UploadData struct {
+	Error    string
+
+thinking
+**Reviewing multipart file size and path safety**
+
+I'm verifying multipart file size limits are enforced via MaxBytesReader and noting the existing base filename sanitization avoids path traversal risks; the extension extraction looks safe too. Considering adding more robust error detection for body-too-large cases by checking multipart-specific error strings and adding tests for improved reliability.
+exec
+/bin/zsh -lc 'rg -n "IsBodyTooLarge" -S internal' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/handler.go:55:			if httputil.IsBodyTooLarge(err) {
+internal/web/upload.go:37:		if httputil.IsBodyTooLarge(err) {
+internal/httputil/body.go:9:// IsBodyTooLarge reports whether the error indicates the request body exceeded MaxBytesReader.
+internal/httputil/body.go:10:func IsBodyTooLarge(err error) bool {
+
+thinking
+**Considering test additions and handler evaluation**
+exec
+/bin/zsh -lc "sed -n '1,140p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+thinking
+**Analyzing cleanup flow**
+
+Noticed that if updating the runs index fails, cleanupRun flag is set to false beforehand, so the run directory may persist despite an error; next, I'll verify the exact error handling and return flow to confirm this behavior.
+exec
+/bin/zsh -lc "sed -n '140,280p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
+		if err := updateRunsIndex(runsDir, config.RunsIndexLimit(), RunIndexEntry{
+			RunID:          runID,
+			Status:         status,
+			Timestamp:      time.Now().Unix(),
+			EvaluationName: spec.EvaluationName,
+		}); err != nil {
+			log.Printf("runs index update: %v", err)
+		}
+
+		if err := pruneRuns(runsDir, maxRuns); err != nil {
+			log.Printf("prune runs: %v", err)
+		}
+
+		c.JSON(http.StatusOK, EvaluateResponse{
+			RunID:  runID,
+			Status: status,
+			PublicOutput: PublicOutput{
+				OverallPass:     overallPass,
+				MaxSeverity:     maxSeverity,
+				PolicyThreshold: policyThreshold,
+
+thinking
+**Checking eval_output fallback handling**
+
+I'm noting that stubEvalOutput is used when eval_output is missing, which relates to Gemini integration correctness via deterministic fallback, so I'll review tests and the resolveEvalOutput logic next.
+exec
+/bin/zsh -lc 'rg -n "resolveEvalOutput" -n internal/evaluate' in /Users/yani/Noema/backend succeeded in 51ms:
+internal/evaluate/gemini_eval.go:15:func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
+internal/evaluate/handler.go:104:		evalOut, err := resolveEvalOutput(c.Request.Context(), form, enabled, runsDir, spec, datasetFile, imageFiles)
+exec
+/bin/zsh -lc "sed -n '1,200p' internal/evaluate/gemini_eval.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"context"
+	"log"
+	"mime/multipart"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/gemini"
+)
+
+const geminiEvalTimeout = 45 * time.Second
+
+func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
+	if out, provided, err := parseEvalOutputProvided(form, enabled); err != nil {
+		return EvalOutput{}, err
+	} else if provided {
+		return out, nil
+	}
+
+
+thinking
+**Enhancing error detection and adding tests**
+
+I'm expanding MaxBytesReader error detection to include "multipart: message too large" alongside existing checks and adding a helper to detect these errors reliably. I'll implement tests in internal/httputil/body_test.go to cover these cases for improved robustness.
+thinking
+**Creating comprehensive error detection tests**
+
+I'm designing a test table that covers nil, MaxBytesError, and error messages including "multipart: message too large" and "http: request body too large" to verify the detection function behaves correctly across these scenarios.
+file update
+M /Users/yani/Noema/backend/internal/httputil/body.go
+@@ -17,3 +17,5 @@
+ 	}
+-	return strings.Contains(err.Error(), "request body too large")
++	msg := err.Error()
++	return strings.Contains(msg, "request body too large") ||
++		strings.Contains(msg, "multipart: message too large")
+ }
+apply_patch(auto_approved=true) exited 0 in 32ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/httputil/body.go
+file update:
+diff --git a/backend/internal/httputil/body.go b/backend/internal/httputil/body.go
+index 74f68d55d203112cd0d47867fa0ee7dd7eb744c7..c271bb6ae94049f028bdd3bfb95e92e0d9a82f57
+--- a/backend/internal/httputil/body.go
++++ b/backend/internal/httputil/body.go
+@@ -15,5 +15,7 @@
+ 	if errors.As(err, &maxBytesErr) {
+ 		return true
+ 	}
+-	return strings.Contains(err.Error(), "request body too large")
++	msg := err.Error()
++	return strings.Contains(msg, "request body too large") ||
++		strings.Contains(msg, "multipart: message too large")
+ }
+
+file update:
+diff --git a/backend/internal/httputil/body.go b/backend/internal/httputil/body.go
+index 74f68d55d203112cd0d47867fa0ee7dd7eb744c7..c271bb6ae94049f028bdd3bfb95e92e0d9a82f57
+--- a/backend/internal/httputil/body.go
++++ b/backend/internal/httputil/body.go
+@@ -15,5 +15,7 @@
+ 	if errors.As(err, &maxBytesErr) {
+ 		return true
+ 	}
+-	return strings.Contains(err.Error(), "request body too large")
++	msg := err.Error()
++	return strings.Contains(msg, "request body too large") ||
++		strings.Contains(msg, "multipart: message too large")
+ }
+
+
+thinking
+**Adding test file**
+file update
+A /Users/yani/Noema/backend/internal/httputil/body_test.go
+package httputil
+
+import (
+	"errors"
+	"net/http"
+	"testing"
+)
+
+func TestIsBodyTooLarge(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{name: "max bytes error", err: &http.MaxBytesError{Limit: 1}, want: true},
+		{name: "http too large string", err: errors.New("http: request body too large"), want: true},
+		{name: "multipart too large string", err: errors.New("multipart: message too large"), want: true},
+		{name: "other error", err: errors.New("boom"), want: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsBodyTooLarge(tc.err); got != tc.want {
+				t.Fatalf("IsBodyTooLarge(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+apply_patch(auto_approved=true) exited 0 in 40ms:
+Success. Updated the following files:
+A /Users/yani/Noema/backend/internal/httputil/body_test.go
+file update:
+diff --git a/backend/internal/httputil/body.go b/backend/internal/httputil/body.go
+index 74f68d55d203112cd0d47867fa0ee7dd7eb744c7..c271bb6ae94049f028bdd3bfb95e92e0d9a82f57
+--- a/backend/internal/httputil/body.go
++++ b/backend/internal/httputil/body.go
+@@ -15,5 +15,7 @@
+ 	if errors.As(err, &maxBytesErr) {
+ 		return true
+ 	}
+-	return strings.Contains(err.Error(), "request body too large")
++	msg := err.Error()
++	return strings.Contains(msg, "request body too large") ||
++		strings.Contains(msg, "multipart: message too large")
+ }
+diff --git a/backend/internal/httputil/body_test.go b/backend/internal/httputil/body_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..12401f0de8d6e4ea331e6cba5911c716ef0e7474
+--- /dev/null
++++ b/backend/internal/httputil/body_test.go
+@@ -0,0 +1,29 @@
++package httputil
++
++import (
++	"errors"
++	"net/http"
++	"testing"
++)
++
++func TestIsBodyTooLarge(t *testing.T) {
++	tests := []struct {
++		name string
++		err  error
++		want bool
++	}{
++		{name: "nil", err: nil, want: false},
++		{name: "max bytes error", err: &http.MaxBytesError{Limit: 1}, want: true},
++		{name: "http too large string", err: errors.New("http: request body too large"), want: true},
++		{name: "multipart too large string", err: errors.New("multipart: message too large"), want: true},
++		{name: "other error", err: errors.New("boom"), want: false},
++	}
++
++	for _, tc := range tests {
++		t.Run(tc.name, func(t *testing.T) {
++			if got := IsBodyTooLarge(tc.err); got != tc.want {
++				t.Fatalf("IsBodyTooLarge(%v) = %v, want %v", tc.err, got, tc.want)
++			}
++		})
++	}
++}
+
+file update:
+diff --git a/backend/internal/httputil/body.go b/backend/internal/httputil/body.go
+index 74f68d55d203112cd0d47867fa0ee7dd7eb744c7..c271bb6ae94049f028bdd3bfb95e92e0d9a82f57
+--- a/backend/internal/httputil/body.go
++++ b/backend/internal/httputil/body.go
+@@ -15,5 +15,7 @@
+ 	if errors.As(err, &maxBytesErr) {
+ 		return true
+ 	}
+-	return strings.Contains(err.Error(), "request body too large")
++	msg := err.Error()
++	return strings.Contains(msg, "request body too large") ||
++		strings.Contains(msg, "multipart: message too large")
+ }
+diff --git a/backend/internal/httputil/body_test.go b/backend/internal/httputil/body_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..12401f0de8d6e4ea331e6cba5911c716ef0e7474
+--- /dev/null
++++ b/backend/internal/httputil/body_test.go
+@@ -0,0 +1,29 @@
++package httputil
++
++import (
++	"errors"
++	"net/http"
++	"testing"
++)
++
++func TestIsBodyTooLarge(t *testing.T) {
++	tests := []struct {
++		name string
++		err  error
++		want bool
++	}{
++		{name: "nil", err: nil, want: false},
++		{name: "max bytes error", err: &http.MaxBytesError{Limit: 1}, want: true},
++		{name: "http too large string", err: errors.New("http: request body too large"), want: true},
++		{name: "multipart too large string", err: errors.New("multipart: message too large"), want: true},
++		{name: "other error", err: errors.New("boom"), want: false},
++	}
++
++	for _, tc := range tests {
++		t.Run(tc.name, func(t *testing.T) {
++			if got := IsBodyTooLarge(tc.err); got != tc.want {
++				t.Fatalf("IsBodyTooLarge(%v) = %v, want %v", tc.err, got, tc.want)
++			}
++		})
++	}
++}
+
+
+thinking
+**Running full Go test suite**
+exec
+/bin/zsh -lc 'go test ./...' in /Users/yani/Noema/backend succeeded in 563ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.104s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	0.006s
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/httputil/body.go b/backend/internal/httputil/body.go
+index 74f68d55d203112cd0d47867fa0ee7dd7eb744c7..c271bb6ae94049f028bdd3bfb95e92e0d9a82f57
+--- a/backend/internal/httputil/body.go
++++ b/backend/internal/httputil/body.go
+@@ -15,5 +15,7 @@
+ 	if errors.As(err, &maxBytesErr) {
+ 		return true
+ 	}
+-	return strings.Contains(err.Error(), "request body too large")
++	msg := err.Error()
++	return strings.Contains(msg, "request body too large") ||
++		strings.Contains(msg, "multipart: message too large")
+ }
+diff --git a/backend/internal/httputil/body_test.go b/backend/internal/httputil/body_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..12401f0de8d6e4ea331e6cba5911c716ef0e7474
+--- /dev/null
++++ b/backend/internal/httputil/body_test.go
+@@ -0,0 +1,29 @@
++package httputil
++
++import (
++	"errors"
++	"net/http"
++	"testing"
++)
++
++func TestIsBodyTooLarge(t *testing.T) {
++	tests := []struct {
++		name string
++		err  error
++		want bool
++	}{
++		{name: "nil", err: nil, want: false},
++		{name: "max bytes error", err: &http.MaxBytesError{Limit: 1}, want: true},
++		{name: "http too large string", err: errors.New("http: request body too large"), want: true},
++		{name: "multipart too large string", err: errors.New("multipart: message too large"), want: true},
++		{name: "other error", err: errors.New("boom"), want: false},
++	}
++
++	for _, tc := range tests {
++		t.Run(tc.name, func(t *testing.T) {
++			if got := IsBodyTooLarge(tc.err); got != tc.want {
++				t.Fatalf("IsBodyTooLarge(%v) = %v, want %v", tc.err, got, tc.want)
++			}
++		})
++	}
++}
+
+codex
+What you changed (short)
+- Made `IsBodyTooLarge` recognize multipart “message too large” errors and added tests to lock in behavior.
+
+Tests run
+- `go test ./...`
+file update:
+diff --git a/backend/internal/httputil/body.go b/backend/internal/httputil/body.go
+index 74f68d55d203112cd0d47867fa0ee7dd7eb744c7..c271bb6ae94049f028bdd3bfb95e92e0d9a82f57
+--- a/backend/internal/httputil/body.go
++++ b/backend/internal/httputil/body.go
+@@ -15,5 +15,7 @@
+ 	if errors.As(err, &maxBytesErr) {
+ 		return true
+ 	}
+-	return strings.Contains(err.Error(), "request body too large")
++	msg := err.Error()
++	return strings.Contains(msg, "request body too large") ||
++		strings.Contains(msg, "multipart: message too large")
+ }
+diff --git a/backend/internal/httputil/body_test.go b/backend/internal/httputil/body_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..12401f0de8d6e4ea331e6cba5911c716ef0e7474
+--- /dev/null
++++ b/backend/internal/httputil/body_test.go
+@@ -0,0 +1,29 @@
++package httputil
++
++import (
++	"errors"
++	"net/http"
++	"testing"
++)
++
++func TestIsBodyTooLarge(t *testing.T) {
++	tests := []struct {
++		name string
++		err  error
++		want bool
++	}{
++		{name: "nil", err: nil, want: false},
++		{name: "max bytes error", err: &http.MaxBytesError{Limit: 1}, want: true},
++		{name: "http too large string", err: errors.New("http: request body too large"), want: true},
++		{name: "multipart too large string", err: errors.New("multipart: message too large"), want: true},
++		{name: "other error", err: errors.New("boom"), want: false},
++	}
++
++	for _, tc := range tests {
++		t.Run(tc.name, func(t *testing.T) {
++			if got := IsBodyTooLarge(tc.err); got != tc.want {
++				t.Fatalf("IsBodyTooLarge(%v) = %v, want %v", tc.err, got, tc.want)
++			}
++		})
++	}
++}
+
+tokens used
+10,623
+What you changed (short)
+- Made `IsBodyTooLarge` recognize multipart “message too large” errors and added tests to lock in behavior.
+
+Tests run
+- `go test ./...`

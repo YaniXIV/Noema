@@ -15,5 +15,7 @@ func IsBodyTooLarge(err error) bool {
 	if errors.As(err, &maxBytesErr) {
 		return true
 	}
-	return strings.Contains(err.Error(), "request body too large")
+	msg := err.Error()
+	return strings.Contains(msg, "request body too large") ||
+		strings.Contains(msg, "multipart: message too large")
 }
