@@ -73,6 +73,12 @@ func Handler(runsDir string, maxRuns int) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create run directory"})
 			return
 		}
+		cleanupRun := true
+		defer func() {
+			if cleanupRun {
+				_ = os.RemoveAll(runPath)
+			}
+		}()
 
 		if err := saveRunFiles(runPath, datasetFile, imageFiles); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -120,6 +126,7 @@ func Handler(runsDir string, maxRuns int) gin.HandlerFunc {
 		}
 		verified, _, _ := zk.VerifyProof(proof.ProofB64, proof.PublicInputsB64)
 
+		cleanupRun = false
 		if err := updateRunsIndex(runsDir, config.RunsIndexLimit(), RunIndexEntry{
 			RunID:          runID,
 			Status:         status,

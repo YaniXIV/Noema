@@ -6,6 +6,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -154,6 +156,47 @@ func TestEvaluateHandler_InvalidEvalOutput(t *testing.T) {
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestEvaluateHandler_CleansUpFailedRun(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	runsDir := t.TempDir()
+	router.POST("/api/evaluate", Handler(runsDir, 0))
+
+	spec := Spec{
+		SchemaVersion: 1,
+		Constraints: []Constraint{
+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+		},
+	}
+	evalOut := EvalOutput{
+		SchemaVersion: 1,
+		Constraints: []EvalConstraintResult{
+			{ID: "unknown", Severity: 2, Rationale: "bad"},
+		},
+		MaxSeverity: 2,
+	}
+
+	body, contentType := buildMultipartEvalRequest(t, spec, evalOut, true)
+	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", body)
+	req.Header.Set("Content-Type", contentType)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	entries, err := os.ReadDir(runsDir)
+	if err != nil {
+		t.Fatalf("read runs dir: %v", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), "run_") {
+			t.Fatalf("expected failed runs to be cleaned up, found %s", entry.Name())
+		}
 	}
 }
 

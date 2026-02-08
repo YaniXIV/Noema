@@ -1,0 +1,914 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3c85-3f75-7571-81b2-ffeaf4e9f6c3
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Searching for AGENTS instructions**
+
+I'm searching the codebase for any instructions or definitions related to AGENTS to determine if they contain needed skills or guidelines.
+exec
+/bin/zsh -lc ls in /Users/yani/Noema/backend succeeded in 52ms:
+cmd
+data
+go.mod
+go.sum
+internal
+main
+server
+web
+
+thinking
+**Searching for agents usage**
+exec
+/bin/zsh -lc "rg --files -g 'AGENTS.md'" in /Users/yani/Noema/backend exited 1 in 51ms:
+
+
+thinking
+**Running Go tests**
+exec
+/bin/zsh -lc 'go test ./...' in /Users/yani/Noema/backend succeeded in 200ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Planning reliability improvement**
+
+Tests are passing, so I'm focusing on enhancing reliability by inspecting the codebase for areas marked with TODO or known issues to target a meaningful improvement limited to three files.
+exec
+/bin/zsh -lc 'rg "TODO|FIXME|panic|TODO:" -n internal server cmd main' in /Users/yani/Noema/backend succeeded in 52ms:
+main: binary file matches (found "\0" byte around offset 5)
+
+thinking
+**Investigating session handling**
+
+Planning to inspect the internal/session directory next to explore error handling and session management.
+exec
+/bin/zsh -lc 'rg -n "error|err" internal/session' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/session/session.go:31:	sig, err := hex.DecodeString(sigHex)
+internal/session/session.go:32:	if err != nil || len(sig) != sha256.Size {
+internal/session/session.go:35:	raw, err := base64.StdEncoding.DecodeString(encoded)
+internal/session/session.go:36:	if err != nil {
+
+thinking
+**Considering validation improvements**
+exec
+/bin/zsh -lc "sed -n '1,200p' internal/session/session.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package session
+
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"strings"
+)
+
+const CookieName = "noema_judge"
+
+// Sign produces a signed cookie value for the given payload (e.g. judge key).
+// Format: base64(payload) + "." + hex(HMAC-SHA256(secret, payload)).
+func Sign(secret, payload string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(payload))
+	sig := hex.EncodeToString(mac.Sum(nil))
+	encoded := base64.StdEncoding.EncodeToString([]byte(payload))
+
+thinking
+**Considering validation and HTTP handlers**
+
+I'm weighing adding validation to prevent empty secrets but noting this value is used elsewhere. Next, I'll search for HTTP handlers to find relevant areas for improvement.
+exec
+/bin/zsh -lc "rg -n \"http\\.\" internal server cmd" in /Users/yani/Noema/backend succeeded in 52ms:
+internal/verify/handler_test.go:30:	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
+internal/verify/handler_test.go:37:	if w.Code != http.StatusOK {
+internal/verify/handler_test.go:58:	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
+internal/verify/handler_test.go:65:	if w.Code != http.StatusBadRequest {
+internal/verify/handler_test.go:83:	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
+internal/verify/handler_test.go:90:	if w.Code != http.StatusBadRequest {
+internal/verify/handler.go:33:			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+internal/verify/handler.go:37:			c.JSON(http.StatusBadRequest, gin.H{"error": "missing proof or public inputs"})
+internal/verify/handler.go:43:			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+internal/verify/handler.go:47:			c.JSON(http.StatusOK, VerifyResponse{
+internal/verify/handler.go:57:			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+internal/verify/handler.go:60:		c.JSON(http.StatusOK, VerifyResponse{
+internal/evaluate/handler_integration_test.go:37:	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", body)
+internal/evaluate/handler_integration_test.go:42:	if rec.Code != http.StatusOK {
+internal/evaluate/handler_integration_test.go:81:	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", body)
+internal/evaluate/handler_integration_test.go:86:	if rec.Code != http.StatusOK {
+internal/evaluate/handler_integration_test.go:119:	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", body)
+internal/evaluate/handler_integration_test.go:124:	if rec.Code != http.StatusBadRequest {
+internal/evaluate/handler_integration_test.go:150:	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", body)
+internal/evaluate/handler_integration_test.go:155:	if rec.Code != http.StatusBadRequest {
+
+thinking
+**Flagging evaluate handler reliability issue**
+exec
+/bin/zsh -lc "sed -n '1,220p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+// EvaluateResponse is the JSON response for POST /api/evaluate.
+
+
+thinking
+**Planning error cleanup for run directory**
+
+The plan is to add a deferred cleanup that removes the run directory if any error occurs after its creation, ensuring partial files aren't left behind. This involves a single-file minimal change with a cleanup flag toggled to false only on full success.
+thinking
+**Considering retention of run data on failure**
+
+There's a trade-off between deleting run data on errors for safety and retaining it for debugging failed evaluations; current errors return 400/500 and always abort. No explicit requirement to keep failures, so removing on error seems acceptable for production quality.
+exec
+/bin/zsh -lc "sed -n '220,520p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+	out := EvalOutput{
+		SchemaVersion: 1,
+		Constraints:   make([]EvalConstraintResult, 0, len(enabled)),
+		MaxSeverity:   0,
+	}
+	for id := range enabled {
+		out.Constraints = append(out.Constraints, EvalConstraintResult{
+			ID:        id,
+			Severity:  0,
+			Rationale: "stub",
+		})
+	}
+	sort.Slice(out.Constraints, func(i, j int) bool {
+		return out.Constraints[i].ID < out.Constraints[j].ID
+	})
+	return out
+}
+
+func jsonBytes(v any) ([]byte, error) {
+	return json.Marshal(v)
+
+thinking
+**Searching for saveRunFiles definition**
+exec
+/bin/zsh -lc 'rg -n "saveRunFiles|ensureRunDir|parseUploads|parseSpec|validateSpec|resolveEvalOutput" internal/evaluate' in /Users/yani/Noema/backend succeeded in 51ms:
+internal/evaluate/parse.go:12:func parseSpec(form *multipart.Form) (Spec, error) {
+internal/evaluate/parse.go:24:func validateSpec(spec Spec) error {
+internal/evaluate/parse.go:47:func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.FileHeader, error) {
+internal/evaluate/handler_test.go:237:	if err := validateSpec(spec); err == nil {
+internal/evaluate/handler_test.go:249:	if err := validateSpec(spec); err == nil {
+internal/evaluate/storage.go:28:func ensureRunDir(path string) error {
+internal/evaluate/storage.go:32:func saveRunFiles(runPath string, dataset *multipart.FileHeader, images []*multipart.FileHeader) error {
+internal/evaluate/gemini_eval.go:15:func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
+internal/evaluate/handler.go:54:		spec, err := parseSpec(form)
+internal/evaluate/handler.go:59:		if err := validateSpec(spec); err != nil {
+internal/evaluate/handler.go:64:		datasetFile, imageFiles, err := parseUploads(form)
+internal/evaluate/handler.go:72:		if err := ensureRunDir(runPath); err != nil {
+internal/evaluate/handler.go:77:		if err := saveRunFiles(runPath, datasetFile, imageFiles); err != nil {
+internal/evaluate/handler.go:88:		evalOut, err := resolveEvalOutput(c.Request.Context(), form, enabled, runsDir, spec, datasetFile, imageFiles)
+
+thinking
+**Checking image count validation**
+
+I'm verifying whether the `parseUploads` function validates the number of images uploaded, aiming to improve this aspect if missing.
+exec
+/bin/zsh -lc "sed -n '1,220p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"mime/multipart"
+	"strings"
+
+	"noema/internal/config"
+)
+
+func parseSpec(form *multipart.Form) (Spec, error) {
+	specStrs := form.Value["spec"]
+	if len(specStrs) == 0 || specStrs[0] == "" {
+		return Spec{}, fmt.Errorf("missing field: spec")
+	}
+	var spec Spec
+	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
+		return Spec{}, fmt.Errorf("invalid spec JSON")
+	}
+
+thinking
+**Planning cleanup test after run dir creation**
+
+I'm considering adding a test in handler integration to verify proper cleanup when evaluation fails after creating the run directory, aiming to improve reliability without relying on internal functions.
+exec
+/bin/zsh -lc "sed -n '1,260p' internal/evaluate/handler_integration_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+)
+
+func TestEvaluateHandler_WithEvalOutput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	runsDir := t.TempDir()
+	router.POST("/api/evaluate", Handler(runsDir, 0))
+
+	spec := Spec{
+exec
+/bin/zsh -lc "sed -n '260,560p' internal/evaluate/handler_integration_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+		t.Fatalf("marshal spec: %v", err)
+	}
+	if err := writer.WriteField("spec", string(specRaw)); err != nil {
+		t.Fatalf("write spec field: %v", err)
+	}
+
+	part, err := writer.CreateFormFile("dataset", "dataset.json")
+	if err != nil {
+		t.Fatalf("create dataset part: %v", err)
+	}
+	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello"}]}`)); err != nil {
+		t.Fatalf("write dataset: %v", err)
+	}
+
+	img1, err := writer.CreateFormFile("images", "img1.png")
+	if err != nil {
+		t.Fatalf("create image part: %v", err)
+	}
+	if _, err := img1.Write([]byte{0x89, 0x50, 0x4e, 0x47}); err != nil {
+		t.Fatalf("write image: %v", err)
+
+
+thinking
+**Planning cleanup on invalid run error**
+
+I'm clarifying that the run directory is created early before resolving eval output, so on invalid eval (e.g., unknown constraint) the run dir remains despite a 400 response. I'll add cleanup logic to remove the run directory on failure while keeping it on success, and add a test ensuring no leftover run dirs after invalid eval requests.
+thinking
+**Finalizing cleanup trigger and adding test**
+
+I'm deciding to set cleanupRun=false right before updating the runs index to ensure run directories are only preserved on full success, and planning a new test that sends invalid eval output to trigger failure and then verifies no leftover run directories remain. I'll add a helper to count run directories for the test and prepare patching the handler code accordingly.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler.go
+@@ -75,2 +75,8 @@
+ 		}
++		cleanupRun := true
++		defer func() {
++			if cleanupRun {
++				_ = os.RemoveAll(runPath)
++			}
++		}()
+ 
+@@ -122,2 +128,3 @@
+ 
++		cleanupRun = false
+ 		if err := updateRunsIndex(runsDir, config.RunsIndexLimit(), RunIndexEntry{
+apply_patch(auto_approved=true) exited 0 in 33ms:
+Success. Updated the following files:
+M internal/evaluate/handler.go
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 1dd54b55b6f8a4ce47e0087d8f4fbfa2c005eb12..62fa3bdfaaedcdeddf339acd922de262e124aa49
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -73,6 +73,12 @@
+ 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create run directory"})
+ 			return
+ 		}
++		cleanupRun := true
++		defer func() {
++			if cleanupRun {
++				_ = os.RemoveAll(runPath)
++			}
++		}()
+ 
+ 		if err := saveRunFiles(runPath, datasetFile, imageFiles); err != nil {
+ 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+@@ -120,6 +126,7 @@
+ 		}
+ 		verified, _, _ := zk.VerifyProof(proof.ProofB64, proof.PublicInputsB64)
+ 
++		cleanupRun = false
+ 		if err := updateRunsIndex(runsDir, config.RunsIndexLimit(), RunIndexEntry{
+ 			RunID:          runID,
+ 			Status:         status,
+
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 1dd54b55b6f8a4ce47e0087d8f4fbfa2c005eb12..62fa3bdfaaedcdeddf339acd922de262e124aa49
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -73,6 +73,12 @@
+ 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create run directory"})
+ 			return
+ 		}
++		cleanupRun := true
++		defer func() {
++			if cleanupRun {
++				_ = os.RemoveAll(runPath)
++			}
++		}()
+ 
+ 		if err := saveRunFiles(runPath, datasetFile, imageFiles); err != nil {
+ 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+@@ -120,6 +126,7 @@
+ 		}
+ 		verified, _, _ := zk.VerifyProof(proof.ProofB64, proof.PublicInputsB64)
+ 
++		cleanupRun = false
+ 		if err := updateRunsIndex(runsDir, config.RunsIndexLimit(), RunIndexEntry{
+ 			RunID:          runID,
+ 			Status:         status,
+
+
+thinking
+**Adding test using apply_patch**
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler_integration_test.go
+@@ -8,2 +8,4 @@
+ 	"net/http/httptest"
++	"os"
++	"strings"
+ 	"testing"
+@@ -159,2 +161,43 @@
+ 
++func TestEvaluateHandler_CleansUpFailedRun(t *testing.T) {
++	gin.SetMode(gin.TestMode)
++	router := gin.New()
++	runsDir := t.TempDir()
++	router.POST("/api/evaluate", Handler(runsDir, 0))
++
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	evalOut := EvalOutput{
++		SchemaVersion: 1,
++		Constraints: []EvalConstraintResult{
++			{ID: "unknown", Severity: 2, Rationale: "bad"},
++		},
++		MaxSeverity: 2,
++	}
++
++	body, contentType := buildMultipartEvalRequest(t, spec, evalOut, true)
++	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", body)
++	req.Header.Set("Content-Type", contentType)
++	rec := httptest.NewRecorder()
++
++	router.ServeHTTP(rec, req)
++	if rec.Code != http.StatusBadRequest {
++		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
++	}
++
++	entries, err := os.ReadDir(runsDir)
++	if err != nil {
++		t.Fatalf("read runs dir: %v", err)
++	}
++	for _, entry := range entries {
++		if entry.IsDir() && strings.HasPrefix(entry.Name(), "run_") {
++			t.Fatalf("expected failed runs to be cleaned up, found %s", entry.Name())
++		}
++	}
++}
++
+ func TestEvaluateHandler_WithImages(t *testing.T) {
+apply_patch(auto_approved=true) exited 0 in 37ms:
+Success. Updated the following files:
+M internal/evaluate/handler_integration_test.go
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 1dd54b55b6f8a4ce47e0087d8f4fbfa2c005eb12..62fa3bdfaaedcdeddf339acd922de262e124aa49
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -73,6 +73,12 @@
+ 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create run directory"})
+ 			return
+ 		}
++		cleanupRun := true
++		defer func() {
++			if cleanupRun {
++				_ = os.RemoveAll(runPath)
++			}
++		}()
+ 
+ 		if err := saveRunFiles(runPath, datasetFile, imageFiles); err != nil {
+ 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+@@ -120,6 +126,7 @@
+ 		}
+ 		verified, _, _ := zk.VerifyProof(proof.ProofB64, proof.PublicInputsB64)
+ 
++		cleanupRun = false
+ 		if err := updateRunsIndex(runsDir, config.RunsIndexLimit(), RunIndexEntry{
+ 			RunID:          runID,
+ 			Status:         status,
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index 0cadcd50c38791ab0e6b606eecec1a6c02148e79..cd5d5bf67ef02d6a14e481b366152274093e12a9
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -6,6 +6,8 @@
+ 	"mime/multipart"
+ 	"net/http"
+ 	"net/http/httptest"
++	"os"
++	"strings"
+ 	"testing"
+ 
+ 	"github.com/gin-gonic/gin"
+@@ -157,6 +159,47 @@
+ 	}
+ }
+ 
++func TestEvaluateHandler_CleansUpFailedRun(t *testing.T) {
++	gin.SetMode(gin.TestMode)
++	router := gin.New()
++	runsDir := t.TempDir()
++	router.POST("/api/evaluate", Handler(runsDir, 0))
++
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	evalOut := EvalOutput{
++		SchemaVersion: 1,
++		Constraints: []EvalConstraintResult{
++			{ID: "unknown", Severity: 2, Rationale: "bad"},
++		},
++		MaxSeverity: 2,
++	}
++
++	body, contentType := buildMultipartEvalRequest(t, spec, evalOut, true)
++	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", body)
++	req.Header.Set("Content-Type", contentType)
++	rec := httptest.NewRecorder()
++
++	router.ServeHTTP(rec, req)
++	if rec.Code != http.StatusBadRequest {
++		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
++	}
++
++	entries, err := os.ReadDir(runsDir)
++	if err != nil {
++		t.Fatalf("read runs dir: %v", err)
++	}
++	for _, entry := range entries {
++		if entry.IsDir() && strings.HasPrefix(entry.Name(), "run_") {
++			t.Fatalf("expected failed runs to be cleaned up, found %s", entry.Name())
++		}
++	}
++}
++
+ func TestEvaluateHandler_WithImages(t *testing.T) {
+ 	gin.SetMode(gin.TestMode)
+ 	router := gin.New()
+
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 1dd54b55b6f8a4ce47e0087d8f4fbfa2c005eb12..62fa3bdfaaedcdeddf339acd922de262e124aa49
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -73,6 +73,12 @@
+ 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create run directory"})
+ 			return
+ 		}
++		cleanupRun := true
++		defer func() {
++			if cleanupRun {
++				_ = os.RemoveAll(runPath)
++			}
++		}()
+ 
+ 		if err := saveRunFiles(runPath, datasetFile, imageFiles); err != nil {
+ 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+@@ -120,6 +126,7 @@
+ 		}
+ 		verified, _, _ := zk.VerifyProof(proof.ProofB64, proof.PublicInputsB64)
+ 
++		cleanupRun = false
+ 		if err := updateRunsIndex(runsDir, config.RunsIndexLimit(), RunIndexEntry{
+ 			RunID:          runID,
+ 			Status:         status,
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index 0cadcd50c38791ab0e6b606eecec1a6c02148e79..cd5d5bf67ef02d6a14e481b366152274093e12a9
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -6,6 +6,8 @@
+ 	"mime/multipart"
+ 	"net/http"
+ 	"net/http/httptest"
++	"os"
++	"strings"
+ 	"testing"
+ 
+ 	"github.com/gin-gonic/gin"
+@@ -157,6 +159,47 @@
+ 	}
+ }
+ 
++func TestEvaluateHandler_CleansUpFailedRun(t *testing.T) {
++	gin.SetMode(gin.TestMode)
++	router := gin.New()
++	runsDir := t.TempDir()
++	router.POST("/api/evaluate", Handler(runsDir, 0))
++
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	evalOut := EvalOutput{
++		SchemaVersion: 1,
++		Constraints: []EvalConstraintResult{
++			{ID: "unknown", Severity: 2, Rationale: "bad"},
++		},
++		MaxSeverity: 2,
++	}
++
++	body, contentType := buildMultipartEvalRequest(t, spec, evalOut, true)
++	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", body)
++	req.Header.Set("Content-Type", contentType)
++	rec := httptest.NewRecorder()
++
++	router.ServeHTTP(rec, req)
++	if rec.Code != http.StatusBadRequest {
++		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
++	}
++
++	entries, err := os.ReadDir(runsDir)
++	if err != nil {
++		t.Fatalf("read runs dir: %v", err)
++	}
++	for _, entry := range entries {
++		if entry.IsDir() && strings.HasPrefix(entry.Name(), "run_") {
++			t.Fatalf("expected failed runs to be cleaned up, found %s", entry.Name())
++		}
++	}
++}
++
+ func TestEvaluateHandler_WithImages(t *testing.T) {
+ 	gin.SetMode(gin.TestMode)
+ 	router := gin.New()
+
+
+thinking
+**Running all tests**
+exec
+/bin/zsh -lc 'go test ./...' in /Users/yani/Noema/backendfile update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 1dd54b55b6f8a4ce47e0087d8f4fbfa2c005eb12..62fa3bdfaaedcdeddf339acd922de262e124aa49
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -73,6 +73,12 @@
+ 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create run directory"})
+ 			return
+ 		}
++		cleanupRun := true
++		defer func() {
++			if cleanupRun {
++				_ = os.RemoveAll(runPath)
++			}
++		}()
+ 
+ 		if err := saveRunFiles(runPath, datasetFile, imageFiles); err != nil {
+ 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+@@ -120,6 +126,7 @@
+ 		}
+ 		verified, _, _ := zk.VerifyProof(proof.ProofB64, proof.PublicInputsB64)
+ 
++		cleanupRun = false
+ 		if err := updateRunsIndex(runsDir, config.RunsIndexLimit(), RunIndexEntry{
+ 			RunID:          runID,
+ 			Status:         status,
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index 0cadcd50c38791ab0e6b606eecec1a6c02148e79..cd5d5bf67ef02d6a14e481b366152274093e12a9
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -6,6 +6,8 @@
+ 	"mime/multipart"
+ 	"net/http"
+ 	"net/http/httptest"
++	"os"
++	"strings"
+ 	"testing"
+ 
+ 	"github.com/gin-gonic/gin"
+@@ -157,6 +159,47 @@
+ 	}
+ }
+ 
++func TestEvaluateHandler_CleansUpFailedRun(t *testing.T) {
++	gin.SetMode(gin.TestMode)
++	router := gin.New()
++	runsDir := t.TempDir()
++	router.POST("/api/evaluate", Handler(runsDir, 0))
++
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	evalOut := EvalOutput{
++		SchemaVersion: 1,
++		Constraints: []EvalConstraintResult{
++			{ID: "unknown", Severity: 2, Rationale: "bad"},
++		},
++		MaxSeverity: 2,
++	}
++
++	body, contentType := buildMultipartEvalRequest(t, spec, evalOut, true)
++	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", body)
++	req.Header.Set("Content-Type", contentType)
++	rec := httptest.NewRecorder()
++
++	router.ServeHTTP(rec, req)
++	if rec.Code != http.StatusBadRequest {
++		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
++	}
++
++	entries, err := os.ReadDir(runsDir)
++	if err != nil {
++		t.Fatalf("read runs dir: %v", err)
++	}
++	for _, entry := range entries {
++		if entry.IsDir() && strings.HasPrefix(entry.Name(), "run_") {
++			t.Fatalf("expected failed runs to be cleaned up, found %s", entry.Name())
++		}
++	}
++}
++
+ func TestEvaluateHandler_WithImages(t *testing.T) {
+ 	gin.SetMode(gin.TestMode)
+ 	router := gin.New()
+
+ succeeded in 2.06s:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.027s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 1dd54b55b6f8a4ce47e0087d8f4fbfa2c005eb12..62fa3bdfaaedcdeddf339acd922de262e124aa49
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -73,6 +73,12 @@
+ 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create run directory"})
+ 			return
+ 		}
++		cleanupRun := true
++		defer func() {
++			if cleanupRun {
++				_ = os.RemoveAll(runPath)
++			}
++		}()
+ 
+ 		if err := saveRunFiles(runPath, datasetFile, imageFiles); err != nil {
+ 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+@@ -120,6 +126,7 @@
+ 		}
+ 		verified, _, _ := zk.VerifyProof(proof.ProofB64, proof.PublicInputsB64)
+ 
++		cleanupRun = false
+ 		if err := updateRunsIndex(runsDir, config.RunsIndexLimit(), RunIndexEntry{
+ 			RunID:          runID,
+ 			Status:         status,
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index 0cadcd50c38791ab0e6b606eecec1a6c02148e79..cd5d5bf67ef02d6a14e481b366152274093e12a9
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -6,6 +6,8 @@
+ 	"mime/multipart"
+ 	"net/http"
+ 	"net/http/httptest"
++	"os"
++	"strings"
+ 	"testing"
+ 
+ 	"github.com/gin-gonic/gin"
+@@ -157,6 +159,47 @@
+ 	}
+ }
+ 
++func TestEvaluateHandler_CleansUpFailedRun(t *testing.T) {
++	gin.SetMode(gin.TestMode)
++	router := gin.New()
++	runsDir := t.TempDir()
++	router.POST("/api/evaluate", Handler(runsDir, 0))
++
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	evalOut := EvalOutput{
++		SchemaVersion: 1,
++		Constraints: []EvalConstraintResult{
++			{ID: "unknown", Severity: 2, Rationale: "bad"},
++		},
++		MaxSeverity: 2,
++	}
++
++	body, contentType := buildMultipartEvalRequest(t, spec, evalOut, true)
++	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", body)
++	req.Header.Set("Content-Type", contentType)
++	rec := httptest.NewRecorder()
++
++	router.ServeHTTP(rec, req)
++	if rec.Code != http.StatusBadRequest {
++		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
++	}
++
++	entries, err := os.ReadDir(runsDir)
++	if err != nil {
++		t.Fatalf("read runs dir: %v", err)
++	}
++	for _, entry := range entries {
++		if entry.IsDir() && strings.HasPrefix(entry.Name(), "run_") {
++			t.Fatalf("expected failed runs to be cleaned up, found %s", entry.Name())
++		}
++	}
++}
++
+ func TestEvaluateHandler_WithImages(t *testing.T) {
+ 	gin.SetMode(gin.TestMode)
+ 	router := gin.New()
+
+
+thinking
+**Summarizing changes and test outcomes**
+
+I will provide a concise summary including what changed, the tests run with `go test ./...`, and mention cleanup behavior and its tests, keeping the response brief and clear without unnecessary file references.
+codex
+What I changed:
+1. Added cleanup for partially created run directories when evaluation fails after the run folder is created.
+2. Added an integration test to ensure failed runs are cleaned up.
+
+Tests run:
+1. `go test ./...`
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 1dd54b55b6f8a4ce47e0087d8f4fbfa2c005eb12..62fa3bdfaaedcdeddf339acd922de262e124aa49
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -73,6 +73,12 @@
+ 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create run directory"})
+ 			return
+ 		}
++		cleanupRun := true
++		defer func() {
++			if cleanupRun {
++				_ = os.RemoveAll(runPath)
++			}
++		}()
+ 
+ 		if err := saveRunFiles(runPath, datasetFile, imageFiles); err != nil {
+ 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+@@ -120,6 +126,7 @@
+ 		}
+ 		verified, _, _ := zk.VerifyProof(proof.ProofB64, proof.PublicInputsB64)
+ 
++		cleanupRun = false
+ 		if err := updateRunsIndex(runsDir, config.RunsIndexLimit(), RunIndexEntry{
+ 			RunID:          runID,
+ 			Status:         status,
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index 0cadcd50c38791ab0e6b606eecec1a6c02148e79..cd5d5bf67ef02d6a14e481b366152274093e12a9
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -6,6 +6,8 @@
+ 	"mime/multipart"
+ 	"net/http"
+ 	"net/http/httptest"
++	"os"
++	"strings"
+ 	"testing"
+ 
+ 	"github.com/gin-gonic/gin"
+@@ -157,6 +159,47 @@
+ 	}
+ }
+ 
++func TestEvaluateHandler_CleansUpFailedRun(t *testing.T) {
++	gin.SetMode(gin.TestMode)
++	router := gin.New()
++	runsDir := t.TempDir()
++	router.POST("/api/evaluate", Handler(runsDir, 0))
++
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	evalOut := EvalOutput{
++		SchemaVersion: 1,
++		Constraints: []EvalConstraintResult{
++			{ID: "unknown", Severity: 2, Rationale: "bad"},
++		},
++		MaxSeverity: 2,
++	}
++
++	body, contentType := buildMultipartEvalRequest(t, spec, evalOut, true)
++	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", body)
++	req.Header.Set("Content-Type", contentType)
++	rec := httptest.NewRecorder()
++
++	router.ServeHTTP(rec, req)
++	if rec.Code != http.StatusBadRequest {
++		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
++	}
++
++	entries, err := os.ReadDir(runsDir)
++	if err != nil {
++		t.Fatalf("read runs dir: %v", err)
++	}
++	for _, entry := range entries {
++		if entry.IsDir() && strings.HasPrefix(entry.Name(), "run_") {
++			t.Fatalf("expected failed runs to be cleaned up, found %s", entry.Name())
++		}
++	}
++}
++
+ func TestEvaluateHandler_WithImages(t *testing.T) {
+ 	gin.SetMode(gin.TestMode)
+ 	router := gin.New()
+
+tokens used
+28,386
+What I changed:
+1. Added cleanup for partially created run directories when evaluation fails after the run folder is created.
+2. Added an integration test to ensure failed runs are cleaned up.
+
+Tests run:
+1. `go test ./...`
