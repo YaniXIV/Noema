@@ -1,0 +1,966 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3caa-01a6-76c3-b5ce-ef67e7e0d270
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Planning test execution**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 93ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Planning small test improvement**
+
+Tests pass but need a minor reliability enhancement limited to three files, so I'll inspect the repo for TODOs or other easy targets to improve.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME|panic|TODO:"' in /Users/yani/Noema/backend exited 1 in 51ms:
+
+
+thinking
+**Checking project structure**
+
+No search results found, so I'll list the project directory tree to understand the file layout and confirm where to look next.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
+cmd
+data
+go.mod
+go.sum
+internal
+main
+server
+web
+
+thinking
+**Investigating error handling scope**
+
+I'm narrowing focus to error handling by searching for "error" and exploring internal areas like internal/evaluate and internal/httputil to identify key error management logic.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "strconv.Atoi|ParseInt|ParseFloat|time.Parse" internal' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/config/config.go:62:		if n, err := strconv.Atoi(v); err == nil {
+internal/config/config.go:72:		if n, err := strconv.Atoi(v); err == nil {
+internal/config/config.go:83:		if parsed, err := strconv.Atoi(v); err == nil {
+internal/zk/zk.go:120:			v, err := strconv.Atoi(kv[1])
+internal/zk/zk.go:130:			v, err := strconv.Atoi(kv[1])
+internal/zk/zk.go:140:			v, err := strconv.Atoi(kv[1])
+
+thinking
+**Considering config validation**
+
+Thinking about ignoring invalid config values and possibly logging those, but no logger is available; planning to inspect the config handling next.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,140p' internal/config/config.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package config
+
+import (
+	"os"
+	"strconv"
+
+	"github.com/joho/godotenv"
+)
+
+const devCookieSecret = "dev-secret-change-in-production"
+
+// Load reads .env from the current directory and sets env vars.
+// Safe to call multiple times; existing env vars are not overwritten.
+func Load() error {
+	return godotenv.Load()
+}
+
+// JudgeKey returns the judge key used to gate protected routes.
+func JudgeKey() string {
+	return os.Getenv("JUDGE_KEY")
+
+thinking
+**Considering validation for negative config values**
+
+I'm planning to add validation to avoid issues from negative values during config reading and checking how config values are used to determine the best fallback strategy.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "SampleItemsLimit|RunsIndexLimit|RunsMax" -S' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/gemini_eval.go:36:	sampleLimit := config.SampleItemsLimit()
+internal/evaluate/handler.go:140:		if err := updateRunsIndex(runsDir, config.RunsIndexLimit(), RunIndexEntry{
+internal/config/config.go:59:// SampleItemsLimit returns the max number of dataset items sent to Gemini.
+internal/config/config.go:60:func SampleItemsLimit() int {
+internal/config/config.go:69:// RunsIndexLimit returns the max number of runs kept in index.json.
+internal/config/config.go:70:func RunsIndexLimit() int {
+internal/config/config.go:79:// RunsMax returns the maximum number of run artifacts to retain.
+internal/config/config.go:81:func RunsMax() int {
+cmd/server/main.go:93:		apiCookie.POST("/evaluate", evaluate.Handler(config.RunsDir(), config.RunsMax()))
+
+thinking
+**Checking evaluation files**
+
+I'm examining the evaluate and gemini_eval files to understand their structure and relevance for the current task.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/gemini_eval.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"context"
+	"log"
+	"mime/multipart"
+	"os"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/gemini"
+)
+
+const geminiEvalTimeout = 45 * time.Second
+
+func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
+	if out, provided, err := parseEvalOutputProvided(form, enabled); err != nil {
+		return EvalOutput{}, err
+	} else if provided {
+		return out, nil
+
+thinking
+**Inspecting sampleDataset implementation**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "sampleDataset" -S internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/dataset.go:76:func sampleDataset(ds Dataset, limit int) Dataset {
+internal/evaluate/gemini_eval.go:53:	sampled := sampleDataset(ds, sampleLimit)
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"strings"
+)
+
+type Dataset struct {
+	Items []DatasetItem `json:"items"`
+}
+
+type DatasetItem struct {
+	ID       string         `json:"id"`
+	Text     string         `json:"text"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+	ImageRef string         `json:"image_ref,omitempty"`
+
+thinking
+**Reviewing dataset sampling and validation**
+
+Noted that sampling returns first items deterministically, which is acceptable but could be randomized later; also considered validating the limit parameter but deemed unnecessary. Observed that dataset file reading allows unknown fields without checks, which is currently permitted. Next, I'll inspect error handling in the evaluate handler.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+thinking
+**Inspecting runs index code**
+
+I'm about to review the internal evaluate runs_index.go file to understand how run indexing and updates are managed, focusing on handling missing runs directories.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/runs_index.go" in /Users/yani/Noema/backend exited 1 in 52ms:
+sed: internal/evaluate/runs_index.go: No such file or directory
+
+thinking
+**Exploring internal evaluate directory**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/evaluate' in /Users/yani/Noema/backend succeeded in 51ms:
+cache.go
+commitment.go
+dataset.go
+gemini_eval.go
+handler.go
+handler_integration_test.go
+handler_test.go
+images.go
+output.go
+parse.go
+policy.go
+prompt.go
+schema.go
+spec.go
+storage.go
+
+thinking
+**Identifying updateRunsIndex location**
+
+I'm checking the storage.go file to find the updateRunsIndex function for insight on its role and usage.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math/big"
+	"mime/multipart"
+	"os"
+	"path/filepath"
+	"strconv"
+	"sync/atomic"
+	"time"
+)
+
+var runIDCounter uint64
+
+func genRunID() string {
+	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
+
+
+thinking
+**Noticing config limit edge cases**
+
+I reviewed how negative config limits affect sampling and pruning, noting they often bypass limits or default silently; clamping to positive or defaulting negative values would improve correctness. I'll add small tests for these edge cases in the config to prevent surprising behavior.
+thinking
+**Defining env var parsing with validation**
+
+I'm implementing env var parsing for config limits with clamping: SampleItemsLimit and RunsIndexLimit fallback to default if <=0 or invalid; RunsMax allows zero to disable pruning but negatives default to 50. I'll add helper code and detailed tests using t.Setenv to avoid env interference.
+file update
+M /Users/yani/Noema/backend/internal/config/config.go
+@@ -61,3 +61,3 @@
+ 	if v := os.Getenv("NOEMA_SAMPLE_ITEMS"); v != "" {
+-		if n, err := strconv.Atoi(v); err == nil {
++		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+ 			return n
+@@ -71,3 +71,3 @@
+ 	if v := os.Getenv("NOEMA_RUNS_INDEX_LIMIT"); v != "" {
+-		if n, err := strconv.Atoi(v); err == nil {
++		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+ 			return n
+@@ -82,3 +82,3 @@
+ 	if v := os.Getenv("NOEMA_RUNS_MAX"); v != "" {
+-		if parsed, err := strconv.Atoi(v); err == nil {
++		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
+ 			return parsed
+apply_patch(auto_approved=true) exited 0 in 30ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/config/config.go
+file update:
+diff --git a/backend/internal/config/config.go b/backend/internal/config/config.go
+index 530725b0f09a89b09a167cbc75b8dcc9b0cf2c4e..44535477c96d2a50de8389a9e9620f2802aba7a0
+--- a/backend/internal/config/config.go
++++ b/backend/internal/config/config.go
+@@ -59,7 +59,7 @@
+ // SampleItemsLimit returns the max number of dataset items sent to Gemini.
+ func SampleItemsLimit() int {
+ 	if v := os.Getenv("NOEMA_SAMPLE_ITEMS"); v != "" {
+-		if n, err := strconv.Atoi(v); err == nil {
++		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+ 			return n
+ 		}
+ 	}
+@@ -69,7 +69,7 @@
+ // RunsIndexLimit returns the max number of runs kept in index.json.
+ func RunsIndexLimit() int {
+ 	if v := os.Getenv("NOEMA_RUNS_INDEX_LIMIT"); v != "" {
+-		if n, err := strconv.Atoi(v); err == nil {
++		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+ 			return n
+ 		}
+ 	}
+@@ -80,7 +80,7 @@
+ // If unset or invalid, defaults to 50. Set to 0 to disable pruning.
+ func RunsMax() int {
+ 	if v := os.Getenv("NOEMA_RUNS_MAX"); v != "" {
+-		if parsed, err := strconv.Atoi(v); err == nil {
++		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
+ 			return parsed
+ 		}
+ 	}
+
+file update:
+diff --git a/backend/internal/config/config.go b/backend/internal/config/config.go
+index 530725b0f09a89b09a167cbc75b8dcc9b0cf2c4e..44535477c96d2a50de8389a9e9620f2802aba7a0
+--- a/backend/internal/config/config.go
++++ b/backend/internal/config/config.go
+@@ -59,7 +59,7 @@
+ // SampleItemsLimit returns the max number of dataset items sent to Gemini.
+ func SampleItemsLimit() int {
+ 	if v := os.Getenv("NOEMA_SAMPLE_ITEMS"); v != "" {
+-		if n, err := strconv.Atoi(v); err == nil {
++		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+ 			return n
+ 		}
+ 	}
+@@ -69,7 +69,7 @@
+ // RunsIndexLimit returns the max number of runs kept in index.json.
+ func RunsIndexLimit() int {
+ 	if v := os.Getenv("NOEMA_RUNS_INDEX_LIMIT"); v != "" {
+-		if n, err := strconv.Atoi(v); err == nil {
++		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+ 			return n
+ 		}
+ 	}
+@@ -80,7 +80,7 @@
+ // If unset or invalid, defaults to 50. Set to 0 to disable pruning.
+ func RunsMax() int {
+ 	if v := os.Getenv("NOEMA_RUNS_MAX"); v != "" {
+-		if parsed, err := strconv.Atoi(v); err == nil {
++		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
+ 			return parsed
+ 		}
+ 	}
+
+
+thinking
+**Adding tests**
+file update
+A /Users/yani/Noema/backend/internal/config/config_test.go
+package config
+
+import "testing"
+
+func TestSampleItemsLimit(t *testing.T) {
+	t.Setenv("NOEMA_SAMPLE_ITEMS", "")
+	if got := SampleItemsLimit(); got != 100 {
+		t.Fatalf("expected default 100, got %d", got)
+	}
+
+	t.Setenv("NOEMA_SAMPLE_ITEMS", "25")
+	if got := SampleItemsLimit(); got != 25 {
+		t.Fatalf("expected 25, got %d", got)
+	}
+
+	t.Setenv("NOEMA_SAMPLE_ITEMS", "0")
+	if got := SampleItemsLimit(); got != 100 {
+		t.Fatalf("expected default 100 for 0, got %d", got)
+	}
+
+	t.Setenv("NOEMA_SAMPLE_ITEMS", "-5")
+	if got := SampleItemsLimit(); got != 100 {
+		t.Fatalf("expected default 100 for negative, got %d", got)
+	}
+
+	t.Setenv("NOEMA_SAMPLE_ITEMS", "nope")
+	if got := SampleItemsLimit(); got != 100 {
+		t.Fatalf("expected default 100 for invalid, got %d", got)
+	}
+}
+
+func TestRunsIndexLimit(t *testing.T) {
+	t.Setenv("NOEMA_RUNS_INDEX_LIMIT", "")
+	if got := RunsIndexLimit(); got != 50 {
+		t.Fatalf("expected default 50, got %d", got)
+	}
+
+	t.Setenv("NOEMA_RUNS_INDEX_LIMIT", "12")
+	if got := RunsIndexLimit(); got != 12 {
+		t.Fatalf("expected 12, got %d", got)
+	}
+
+	t.Setenv("NOEMA_RUNS_INDEX_LIMIT", "0")
+	if got := RunsIndexLimit(); got != 50 {
+		t.Fatalf("expected default 50 for 0, got %d", got)
+	}
+
+	t.Setenv("NOEMA_RUNS_INDEX_LIMIT", "-1")
+	if got := RunsIndexLimit(); got != 50 {
+		t.Fatalf("expected default 50 for negative, got %d", got)
+	}
+}
+
+func TestRunsMax(t *testing.T) {
+	t.Setenv("NOEMA_RUNS_MAX", "")
+	if got := RunsMax(); got != 50 {
+		t.Fatalf("expected default 50, got %d", got)
+	}
+
+	t.Setenv("NOEMA_RUNS_MAX", "0")
+	if got := RunsMax(); got != 0 {
+		t.Fatalf("expected 0 to disable pruning, got %d", got)
+	}
+
+	t.Setenv("NOEMA_RUNS_MAX", "200")
+	if got := RunsMax(); got != 200 {
+		t.Fatalf("expected 200, got %d", got)
+	}
+
+	t.Setenv("NOEMA_RUNS_MAX", "-2")
+	if got := RunsMax(); got != 50 {
+		t.Fatalf("expected default 50 for negative, got %d", got)
+	}
+
+	t.Setenv("NOEMA_RUNS_MAX", "nope")
+	if got := RunsMax(); got != 50 {
+		t.Fatalf("expected default 50 for invalid, got %d", got)
+	}
+}
+apply_patch(auto_approved=true) exited 0 in 42ms:
+Success. Updated the following files:
+A /Users/yani/Noema/backend/internal/config/config_test.go
+file update:
+diff --git a/backend/internal/config/config.go b/backend/internal/config/config.go
+index 530725b0f09a89b09a167cbc75b8dcc9b0cf2c4e..44535477c96d2a50de8389a9e9620f2802aba7a0
+--- a/backend/internal/config/config.go
++++ b/backend/internal/config/config.go
+@@ -59,7 +59,7 @@
+ // SampleItemsLimit returns the max number of dataset items sent to Gemini.
+ func SampleItemsLimit() int {
+ 	if v := os.Getenv("NOEMA_SAMPLE_ITEMS"); v != "" {
+-		if n, err := strconv.Atoi(v); err == nil {
++		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+ 			return n
+ 		}
+ 	}
+@@ -69,7 +69,7 @@
+ // RunsIndexLimit returns the max number of runs kept in index.json.
+ func RunsIndexLimit() int {
+ 	if v := os.Getenv("NOEMA_RUNS_INDEX_LIMIT"); v != "" {
+-		if n, err := strconv.Atoi(v); err == nil {
++		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+ 			return n
+ 		}
+ 	}
+@@ -80,7 +80,7 @@
+ // If unset or invalid, defaults to 50. Set to 0 to disable pruning.
+ func RunsMax() int {
+ 	if v := os.Getenv("NOEMA_RUNS_MAX"); v != "" {
+-		if parsed, err := strconv.Atoi(v); err == nil {
++		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
+ 			return parsed
+ 		}
+ 	}
+diff --git a/backend/internal/config/config_test.go b/backend/internal/config/config_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..f4011e98bf8be4b4690a3bd0dd28008d80b75033
+--- /dev/null
++++ b/backend/internal/config/config_test.go
+@@ -0,0 +1,79 @@
++package config
++
++import "testing"
++
++func TestSampleItemsLimit(t *testing.T) {
++	t.Setenv("NOEMA_SAMPLE_ITEMS", "")
++	if got := SampleItemsLimit(); got != 100 {
++		t.Fatalf("expected default 100, got %d", got)
++	}
++
++	t.Setenv("NOEMA_SAMPLE_ITEMS", "25")
++	if got := SampleItemsLimit(); got != 25 {
++		t.Fatalf("expected 25, got %d", got)
++	}
++
++	t.Setenv("NOEMA_SAMPLE_ITEMS", "0")
++	if got := SampleItemsLimit(); got != 100 {
++		t.Fatalf("expected default 100 for 0, got %d", got)
++	}
++
++	t.Setenv("NOEMA_SAMPLE_ITEMS", "-5")
++	if got := SampleItemsLimit(); got != 100 {
++		t.Fatalf("expected default 100 for negative, got %d", got)
++	}
++
++	t.Setenv("NOEMA_SAMPLE_ITEMS", "nope")
++	if got := SampleItemsLimit(); got != 100 {
++		t.Fatalf("expected default 100 for invalid, got %d", got)
++	}
++}
++
++func TestRunsIndexLimit(t *testing.T) {
++	t.Setenv("NOEMA_RUNS_INDEX_LIMIT", "")
++	if got := RunsIndexLimit(); got != 50 {
++		t.Fatalf("expected default 50, got %d", got)
++	}
++
++	t.Setenv("NOEMA_RUNS_INDEX_LIMIT", "12")
++	if got := RunsIndexLimit(); got != 12 {
++		t.Fatalf("expected 12, got %d", got)
++	}
++
++	t.Setenv("NOEMA_RUNS_INDEX_LIMIT", "0")
++	if got := RunsIndexLimit(); got != 50 {
++		t.Fatalf("expected default 50 for 0, got %d", got)
++	}
++
++	t.Setenv("NOEMA_RUNS_INDEX_LIMIT", "-1")
++	if got := RunsIndexLimit(); got != 50 {
++		t.Fatalf("expected default 50 for negative, got %d", got)
++	}
++}
++
++func TestRunsMax(t *testing.T) {
++	t.Setenv("NOEMA_RUNS_MAX", "")
++	if got := RunsMax(); got != 50 {
++		t.Fatalf("expected default 50, got %d", got)
++	}
++
++	t.Setenv("NOEMA_RUNS_MAX", "0")
++	if got := RunsMax(); got != 0 {
++		t.Fatalf("expected 0 to disable pruning, got %d", got)
++	}
++
++	t.Setenv("NOEMA_RUNS_MAX", "200")
++	if got := RunsMax(); got != 200 {
++		t.Fatalf("expected 200, got %d", got)
++	}
++
++	t.Setenv("NOEMA_RUNS_MAX", "-2")
++	if got := RunsMax(); got != 50 {
++		t.Fatalf("expected default 50 for negative, got %d", got)
++	}
++
++	t.Setenv("NOEMA_RUNS_MAX", "nope")
++	if got := RunsMax(); got != 50 {
++		t.Fatalf("expected default 50 for invalid, got %d", got)
++	}
++}
+
+file update:
+diff --git a/backend/internal/config/config.go b/backend/internal/config/config.go
+index 530725b0f09a89b09a167cbc75b8dcc9b0cf2c4e..44535477c96d2a50de8389a9e9620f2802aba7a0
+--- a/backend/internal/config/config.go
++++ b/backend/internal/config/config.go
+@@ -59,7 +59,7 @@
+ // SampleItemsLimit returns the max number of dataset items sent to Gemini.
+ func SampleItemsLimit() int {
+ 	if v := os.Getenv("NOEMA_SAMPLE_ITEMS"); v != "" {
+-		if n, err := strconv.Atoi(v); err == nil {
++		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+ 			return n
+ 		}
+ 	}
+@@ -69,7 +69,7 @@
+ // RunsIndexLimit returns the max number of runs kept in index.json.
+ func RunsIndexLimit() int {
+ 	if v := os.Getenv("NOEMA_RUNS_INDEX_LIMIT"); v != "" {
+-		if n, err := strconv.Atoi(v); err == nil {
++		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+ 			return n
+ 		}
+ 	}
+@@ -80,7 +80,7 @@
+ // If unset or invalid, defaults to 50. Set to 0 to disable pruning.
+ func RunsMax() int {
+ 	if v := os.Getenv("NOEMA_RUNS_MAX"); v != "" {
+-		if parsed, err := strconv.Atoi(v); err == nil {
++		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
+ 			return parsed
+ 		}
+ 	}
+diff --git a/backend/internal/config/config_test.go b/backend/internal/config/config_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..f4011e98bf8be4b4690a3bd0dd28008d80b75033
+--- /dev/null
++++ b/backend/internal/config/config_test.go
+@@ -0,0 +1,79 @@
++package config
++
++import "testing"
++
++func TestSampleItemsLimit(t *testing.T) {
++	t.Setenv("NOEMA_SAMPLE_ITEMS", "")
++	if got := SampleItemsLimit(); got != 100 {
++		t.Fatalf("expected default 100, got %d", got)
++	}
++
++	t.Setenv("NOEMA_SAMPLE_ITEMS", "25")
++	if got := SampleItemsLimit(); got != 25 {
++		t.Fatalf("expected 25, got %d", got)
++	}
++
++	t.Setenv("NOEMA_SAMPLE_ITEMS", "0")
++	if got := SampleItemsLimit(); got != 100 {
++		t.Fatalf("expected default 100 for 0, got %d", got)
++	}
++
++	t.Setenv("NOEMA_SAMPLE_ITEMS", "-5")
++	if got := SampleItemsLimit(); got != 100 {
++		t.Fatalf("expected default 100 for negative, got %d", got)
++	}
++
++	t.Setenv("NOEMA_SAMPLE_ITEMS", "nope")
++	if got := SampleItemsLimit(); got != 100 {
++		t.Fatalf("expected default 100 for invalid, got %d", got)
++	}
++}
++
++func TestRunsIndexLimit(t *testing.T) {
++	t.Setenv("NOEMA_RUNS_INDEX_LIMIT", "")
++	if got := RunsIndexLimit(); got != 50 {
++		t.Fatalf("expected default 50, got %d", got)
++	}
++
++	t.Setenv("NOEMA_RUNS_INDEX_LIMIT", "12")
++	if got := RunsIndexLimit(); got != 12 {
++		t.Fatalf("expected 12, got %d", got)
++	}
++
++	t.Setenv("NOEMA_RUNS_INDEX_LIMIT", "0")
++	if got := RunsIndexLimit(); got != 50 {
++		t.Fatalf("expected default 50 for 0, got %d", got)
++	}
++
++	t.Setenv("NOEMA_RUNS_INDEX_LIMIT", "-1")
++	if got := RunsIndexLimit(); got != 50 {
++		t.Fatalf("expected default 50 for negative, got %d", got)
++	}
++}
++
++func TestRunsMax(t *testing.T) {
++	t.Setenv("NOEMA_RUNS_MAX", "")
++	if got := RunsMax(); got != 50 {
++		t.Fatalf("expected default 50, got %d", got)
++	}
++
++	t.Setenv("NOEMA_RUNS_MAX", "0")
++	if got := RunsMax(); got != 0 {
++		t.Fatalf("expected 0 to disable pruning, got %d", got)
++	}
++
++	t.Setenv("NOEMA_RUNS_MAX", "200")
++	if got := RunsMax(); got != 200 {
++		t.Fatalf("expected 200, got %d", got)
++	}
++
++	t.Setenv("NOEMA_RUNS_MAX", "-2")
++	if got := RunsMax(); got != 50 {
++		t.Fatalf("expected default 50 for negative, got %d", got)
++	}
++
++	t.Setenv("NOEMA_RUNS_MAX", "nope")
++	if got := RunsMax(); got != 50 {
++		t.Fatalf("expected default 50 for invalid, got %d", got)
++	}
++}
+
+
+thinking
+**Running Go tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 619ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+ok  	noema/internal/config	0.005s
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.104s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/config/config.go b/backend/internal/config/config.go
+index 530725b0f09a89b09a167cbc75b8dcc9b0cf2c4e..44535477c96d2a50de8389a9e9620f2802aba7a0
+--- a/backend/internal/config/config.go
++++ b/backend/internal/config/config.go
+@@ -59,7 +59,7 @@
+ // SampleItemsLimit returns the max number of dataset items sent to Gemini.
+ func SampleItemsLimit() int {
+ 	if v := os.Getenv("NOEMA_SAMPLE_ITEMS"); v != "" {
+-		if n, err := strconv.Atoi(v); err == nil {
++		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+ 			return n
+ 		}
+ 	}
+@@ -69,7 +69,7 @@
+ // RunsIndexLimit returns the max number of runs kept in index.json.
+ func RunsIndexLimit() int {
+ 	if v := os.Getenv("NOEMA_RUNS_INDEX_LIMIT"); v != "" {
+-		if n, err := strconv.Atoi(v); err == nil {
++		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+ 			return n
+ 		}
+ 	}
+@@ -80,7 +80,7 @@
+ // If unset or invalid, defaults to 50. Set to 0 to disable pruning.
+ func RunsMax() int {
+ 	if v := os.Getenv("NOEMA_RUNS_MAX"); v != "" {
+-		if parsed, err := strconv.Atoi(v); err == nil {
++		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
+ 			return parsed
+ 		}
+ 	}
+diff --git a/backend/internal/config/config_test.go b/backend/internal/config/config_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..f4011e98bf8be4b4690a3bd0dd28008d80b75033
+--- /dev/null
++++ b/backend/internal/config/config_test.go
+@@ -0,0 +1,79 @@
++package config
++
++import "testing"
++
++func TestSampleItemsLimit(t *testing.T) {
++	t.Setenv("NOEMA_SAMPLE_ITEMS", "")
++	if got := SampleItemsLimit(); got != 100 {
++		t.Fatalf("expected default 100, got %d", got)
++	}
++
++	t.Setenv("NOEMA_SAMPLE_ITEMS", "25")
++	if got := SampleItemsLimit(); got != 25 {
++		t.Fatalf("expected 25, got %d", got)
++	}
++
++	t.Setenv("NOEMA_SAMPLE_ITEMS", "0")
++	if got := SampleItemsLimit(); got != 100 {
++		t.Fatalf("expected default 100 for 0, got %d", got)
++	}
++
++	t.Setenv("NOEMA_SAMPLE_ITEMS", "-5")
++	if got := SampleItemsLimit(); got != 100 {
++		t.Fatalf("expected default 100 for negative, got %d", got)
++	}
++
++	t.Setenv("NOEMA_SAMPLE_ITEMS", "nope")
++	if got := SampleItemsLimit(); got != 100 {
++		t.Fatalf("expected default 100 for invalid, got %d", got)
++	}
++}
++
++func TestRunsIndexLimit(t *testing.T) {
++	t.Setenv("NOEMA_RUNS_INDEX_LIMIT", "")
++	if got := RunsIndexLimit(); got != 50 {
++		t.Fatalf("expected default 50, got %d", got)
++	}
++
++	t.Setenv("NOEMA_RUNS_INDEX_LIMIT", "12")
++	if got := RunsIndexLimit(); got != 12 {
++		t.Fatalf("expected 12, got %d", got)
++	}
++
++	t.Setenv("NOEMA_RUNS_INDEX_LIMIT", "0")
++	if got := RunsIndexLimit(); got != 50 {
++		t.Fatalf("expected default 50 for 0, got %d", got)
++	}
++
++	t.Setenv("NOEMA_RUNS_INDEX_LIMIT", "-1")
++	if got := RunsIndexLimit(); got != 50 {
++		t.Fatalf("expected default 50 for negative, got %d", got)
++	}
++}
++
++func TestRunsMax(t *testing.T) {
++	t.Setenv("NOEMA_RUNS_MAX", "")
++	if got := RunsMax(); got != 50 {
++		t.Fatalf("expected default 50, got %d", got)
++	}
++
++	t.Setenv("NOEMA_RUNS_MAX", "0")
++	if got := RunsMax(); got != 0 {
++		t.Fatalf("expected 0 to disable pruning, got %d", got)
++	}
++
++	t.Setenv("NOEMA_RUNS_MAX", "200")
++	if got := RunsMax(); got != 200 {
++		t.Fatalf("expected 200, got %d", got)
++	}
++
++	t.Setenv("NOEMA_RUNS_MAX", "-2")
++	if got := RunsMax(); got != 50 {
++		t.Fatalf("expected default 50 for negative, got %d", got)
++	}
++
++	t.Setenv("NOEMA_RUNS_MAX", "nope")
++	if got := RunsMax(); got != 50 {
++		t.Fatalf("expected default 50 for invalid, got %d", got)
++	}
++}
+
+codex
+What I changed (short)
+- Clamped config env overrides so negative/zero values fall back to defaults (except `NOEMA_RUNS_MAX=0` which still disables pruning).
+- Added tests for config limit parsing and defaults.
+
+Tests run
+- `go test ./...`
+
+Suggestions
+1. Run a quick smoke test of the evaluate endpoint with `NOEMA_SAMPLE_ITEMS=0` and `NOEMA_RUNS_INDEX_LIMIT=-1` to confirm behavior aligns with expectations.
+file update:
+diff --git a/backend/internal/config/config.go b/backend/internal/config/config.go
+index 530725b0f09a89b09a167cbc75b8dcc9b0cf2c4e..44535477c96d2a50de8389a9e9620f2802aba7a0
+--- a/backend/internal/config/config.go
++++ b/backend/internal/config/config.go
+@@ -59,7 +59,7 @@
+ // SampleItemsLimit returns the max number of dataset items sent to Gemini.
+ func SampleItemsLimit() int {
+ 	if v := os.Getenv("NOEMA_SAMPLE_ITEMS"); v != "" {
+-		if n, err := strconv.Atoi(v); err == nil {
++		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+ 			return n
+ 		}
+ 	}
+@@ -69,7 +69,7 @@
+ // RunsIndexLimit returns the max number of runs kept in index.json.
+ func RunsIndexLimit() int {
+ 	if v := os.Getenv("NOEMA_RUNS_INDEX_LIMIT"); v != "" {
+-		if n, err := strconv.Atoi(v); err == nil {
++		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+ 			return n
+ 		}
+ 	}
+@@ -80,7 +80,7 @@
+ // If unset or invalid, defaults to 50. Set to 0 to disable pruning.
+ func RunsMax() int {
+ 	if v := os.Getenv("NOEMA_RUNS_MAX"); v != "" {
+-		if parsed, err := strconv.Atoi(v); err == nil {
++		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
+ 			return parsed
+ 		}
+ 	}
+diff --git a/backend/internal/config/config_test.go b/backend/internal/config/config_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..f4011e98bf8be4b4690a3bd0dd28008d80b75033
+--- /dev/null
++++ b/backend/internal/config/config_test.go
+@@ -0,0 +1,79 @@
++package config
++
++import "testing"
++
++func TestSampleItemsLimit(t *testing.T) {
++	t.Setenv("NOEMA_SAMPLE_ITEMS", "")
++	if got := SampleItemsLimit(); got != 100 {
++		t.Fatalf("expected default 100, got %d", got)
++	}
++
++	t.Setenv("NOEMA_SAMPLE_ITEMS", "25")
++	if got := SampleItemsLimit(); got != 25 {
++		t.Fatalf("expected 25, got %d", got)
++	}
++
++	t.Setenv("NOEMA_SAMPLE_ITEMS", "0")
++	if got := SampleItemsLimit(); got != 100 {
++		t.Fatalf("expected default 100 for 0, got %d", got)
++	}
++
++	t.Setenv("NOEMA_SAMPLE_ITEMS", "-5")
++	if got := SampleItemsLimit(); got != 100 {
++		t.Fatalf("expected default 100 for negative, got %d", got)
++	}
++
++	t.Setenv("NOEMA_SAMPLE_ITEMS", "nope")
++	if got := SampleItemsLimit(); got != 100 {
++		t.Fatalf("expected default 100 for invalid, got %d", got)
++	}
++}
++
++func TestRunsIndexLimit(t *testing.T) {
++	t.Setenv("NOEMA_RUNS_INDEX_LIMIT", "")
++	if got := RunsIndexLimit(); got != 50 {
++		t.Fatalf("expected default 50, got %d", got)
++	}
++
++	t.Setenv("NOEMA_RUNS_INDEX_LIMIT", "12")
++	if got := RunsIndexLimit(); got != 12 {
++		t.Fatalf("expected 12, got %d", got)
++	}
++
++	t.Setenv("NOEMA_RUNS_INDEX_LIMIT", "0")
++	if got := RunsIndexLimit(); got != 50 {
++		t.Fatalf("expected default 50 for 0, got %d", got)
++	}
++
++	t.Setenv("NOEMA_RUNS_INDEX_LIMIT", "-1")
++	if got := RunsIndexLimit(); got != 50 {
++		t.Fatalf("expected default 50 for negative, got %d", got)
++	}
++}
++
++func TestRunsMax(t *testing.T) {
++	t.Setenv("NOEMA_RUNS_MAX", "")
++	if got := RunsMax(); got != 50 {
++		t.Fatalf("expected default 50, got %d", got)
++	}
++
++	t.Setenv("NOEMA_RUNS_MAX", "0")
++	if got := RunsMax(); got != 0 {
++		t.Fatalf("expected 0 to disable pruning, got %d", got)
++	}
++
++	t.Setenv("NOEMA_RUNS_MAX", "200")
++	if got := RunsMax(); got != 200 {
++		t.Fatalf("expected 200, got %d", got)
++	}
++
++	t.Setenv("NOEMA_RUNS_MAX", "-2")
++	if got := RunsMax(); got != 50 {
++		t.Fatalf("expected default 50 for negative, got %d", got)
++	}
++
++	t.Setenv("NOEMA_RUNS_MAX", "nope")
++	if got := RunsMax(); got != 50 {
++		t.Fatalf("expected default 50 for invalid, got %d", got)
++	}
++}
+
+tokens used
+15,553
+What I changed (short)
+- Clamped config env overrides so negative/zero values fall back to defaults (except `NOEMA_RUNS_MAX=0` which still disables pruning).
+- Added tests for config limit parsing and defaults.
+
+Tests run
+- `go test ./...`
+
+Suggestions
+1. Run a quick smoke test of the evaluate endpoint with `NOEMA_SAMPLE_ITEMS=0` and `NOEMA_RUNS_INDEX_LIMIT=-1` to confirm behavior aligns with expectations.

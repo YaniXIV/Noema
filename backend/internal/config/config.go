@@ -59,7 +59,7 @@ func RunsDir() string {
 // SampleItemsLimit returns the max number of dataset items sent to Gemini.
 func SampleItemsLimit() int {
 	if v := os.Getenv("NOEMA_SAMPLE_ITEMS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			return n
 		}
 	}
@@ -69,7 +69,7 @@ func SampleItemsLimit() int {
 // RunsIndexLimit returns the max number of runs kept in index.json.
 func RunsIndexLimit() int {
 	if v := os.Getenv("NOEMA_RUNS_INDEX_LIMIT"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			return n
 		}
 	}
@@ -80,7 +80,7 @@ func RunsIndexLimit() int {
 // If unset or invalid, defaults to 50. Set to 0 to disable pruning.
 func RunsMax() int {
 	if v := os.Getenv("NOEMA_RUNS_MAX"); v != "" {
-		if parsed, err := strconv.Atoi(v); err == nil {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
 			return parsed
 		}
 	}
