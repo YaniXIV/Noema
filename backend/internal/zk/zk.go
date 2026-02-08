@@ -106,6 +106,10 @@ func DecodePublicInputs(pub []byte) (PublicInputs, error) {
 	}
 	fields := strings.Split(strings.TrimPrefix(s, publicInputsPrefix), "|")
 	out := PublicInputs{}
+	seenPT := false
+	seenMS := false
+	seenOP := false
+	seenC := false
 	for _, f := range fields {
 		kv := strings.SplitN(f, "=", 2)
 		if len(kv) != 2 {
@@ -117,24 +121,49 @@ func DecodePublicInputs(pub []byte) (PublicInputs, error) {
 			if err != nil {
 				return PublicInputs{}, fmt.Errorf("invalid policy threshold")
 			}
+			if v < 0 || v > 2 {
+				return PublicInputs{}, fmt.Errorf("policy threshold must be 0..2")
+			}
 			out.PolicyThreshold = v
+			seenPT = true
 		case "ms":
 			v, err := strconv.Atoi(kv[1])
 			if err != nil {
 				return PublicInputs{}, fmt.Errorf("invalid max severity")
 			}
+			if v < 0 || v > 2 {
+				return PublicInputs{}, fmt.Errorf("max severity must be 0..2")
+			}
 			out.MaxSeverity = v
+			seenMS = true
 		case "op":
 			v, err := strconv.Atoi(kv[1])
 			if err != nil {
 				return PublicInputs{}, fmt.Errorf("invalid overall pass")
 			}
+			if v != 0 && v != 1 {
+				return PublicInputs{}, fmt.Errorf("overall pass must be 0 or 1")
+			}
 			out.OverallPass = v == 1
+			seenOP = true
 		case "c":
+			if kv[1] == "" {
+				return PublicInputs{}, fmt.Errorf("commitment required")
+			}
+			if !strings.HasPrefix(kv[1], "0x") {
+				return PublicInputs{}, fmt.Errorf("commitment must have 0x prefix")
+			}
+			if _, err := hex.DecodeString(strings.TrimPrefix(kv[1], "0x")); err != nil {
+				return PublicInputs{}, fmt.Errorf("commitment must be hex")
+			}
 			out.Commitment = kv[1]
+			seenC = true
 		default:
 			return PublicInputs{}, fmt.Errorf("unknown public inputs field")
 		}
+	}
+	if !seenPT || !seenMS || !seenOP || !seenC {
+		return PublicInputs{}, fmt.Errorf("missing public inputs field")
 	}
 	return out, nil
 }

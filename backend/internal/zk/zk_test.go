@@ -74,3 +74,20 @@ func TestEncodePublicInputsValidation(t *testing.T) {
 		t.Fatalf("expected validation error for commitment")
 	}
 }
+
+func TestDecodePublicInputsValidation(t *testing.T) {
+	_, err := DecodePublicInputs([]byte("noema_public_inputs_v1|pt=1|ms=1|op=1|c=not-hex"))
+	if err == nil {
+		t.Fatalf("expected validation error for commitment format")
+	}
+
+	_, err = DecodePublicInputs([]byte("noema_public_inputs_v1|pt=3|ms=1|op=1|c=0xabc123"))
+	if err == nil {
+		t.Fatalf("expected validation error for policy threshold range")
+	}
+
+	_, err = DecodePublicInputs([]byte("noema_public_inputs_v1|pt=1|ms=1|c=0xabc123"))
+	if err == nil {
+		t.Fatalf("expected validation error for missing fields")
+	}
+}

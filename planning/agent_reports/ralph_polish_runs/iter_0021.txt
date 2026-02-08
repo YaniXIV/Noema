@@ -1,0 +1,885 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3c8f-138c-7850-817a-5d6b92aac69a
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 92ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Preparing to identify maintainability improvement**
+
+I'm inspecting the repo to find a focused area for a small reliability or maintainability enhancement before finalizing changes.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 51ms:
+cmd
+data
+go.mod
+go.sum
+internal
+main
+server
+web
+
+thinking
+**Exploring TODOs for improvements**
+
+I'm searching for TODO comments in internal/verify and evaluate to identify small improvements to pick and implement.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME|panic|unsafe" internal' in /Users/yani/Noema/backend exited 1 in 52ms:
+
+
+thinking
+**Inspecting error handling prospects**
+
+No matches were found with initial searches, so I'll check internal/evaluate and internal/session files to verify error handling related to "Must" usage or missing context.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal' in /Users/yani/Noema/backend succeeded in 52ms:
+auth
+config
+crypto
+evaluate
+gemini
+session
+verify
+web
+zk
+
+thinking
+**Inspecting session persistence**
+
+I'm checking the internal/session module to understand how session persistence is handled and to identify potential improvements.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/session' in /Users/yani/Noema/backend succeeded in 52ms:
+session.go
+session_test.go
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/session/session.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package session
+
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"strings"
+)
+
+const CookieName = "noema_judge"
+
+// Sign produces a signed cookie value for the given payload (e.g. judge key).
+// Format: base64(payload) + "." + hex(HMAC-SHA256(secret, payload)).
+func Sign(secret, payload string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(payload))
+	sig := hex.EncodeToString(mac.Sum(nil))
+	encoded := base64.StdEncoding.EncodeToString([]byte(payload))
+
+thinking
+**Considering safer encoding for cookies**
+
+I'm evaluating switching to base64.RawURLEncoding for signing and verifying cookies to avoid problematic characters like "=" and "+", aiming for safer cookie values and planning to adjust tests accordingly after reviewing session tests.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/session/session_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package session
+
+import (
+	"encoding/hex"
+	"strings"
+	"testing"
+)
+
+func TestSignVerifyRoundTrip(t *testing.T) {
+	secret := "s3cr3t"
+	payload := "judge-key-123"
+
+	signed := Sign(secret, payload)
+	got, ok := Verify(secret, signed)
+	if !ok {
+		t.Fatalf("expected verify ok")
+	}
+	if got != payload {
+		t.Fatalf("expected payload %q, got %q", payload, got)
+	}
+
+thinking
+**Considering encoding improvements**
+
+Noticed switching to RawURLEncoding would avoid unsafe cookie characters and padding, but could break existing signed cookies; need to weigh backward compatibility versus robustness before changing encoding.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/verify/verify.go" in /Users/yani/Noema/backend exited 1 in 51ms:
+sed: internal/verify/verify.go: No such file or directory
+
+thinking
+**Listing internal modules for verification**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/verify' in /Users/yani/Noema/backend succeeded in 51ms:
+handler.go
+handler_test.go
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/verify/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package verify
+
+import (
+	"encoding/base64"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+// VerifyRequest is the JSON body for POST /api/verify.
+type VerifyRequest struct {
+	RunID           string `json:"run_id"`
+	ProofB64        string `json:"proof_b64"`
+	PublicInputsB64 string `json:"public_inputs_b64"`
+}
+
+
+thinking
+**Considering base64 encoding variants**
+
+I'm evaluating whether base64 decoding should require padding or accept URL-safe encoding, noting current use of standard encoding without padding checks; this may affect legacy verification flow and warrants checking internal verification modules for consistency.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/zk/verify.go" in /Users/yani/Noema/backend exited 1 in 52ms:
+sed: internal/zk/verify.go: No such file or directory
+
+thinking
+**Listing internal/zk directory**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/zk' in /Users/yani/Noema/backend succeeded in 52ms:
+FORMAT.md
+zk.go
+zk_test.go
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package zk
+
+import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+const (
+	ProofSystem = "groth16"
+	ProofCurve  = "bn254"
+
+	publicInputsPrefix = "noema_public_inputs_v1|"
+	proofPrefix        = "noema_stub_proof_v1|"
+)
+
+// PublicInputs define the public inputs for policy aggregation.
+
+thinking
+**Planning validation enhancement**
+
+I'm planning to add presence and format validation for required fields in DecodePublicInputs to prevent accepting missing or invalid values, and next I'll inspect zk_test to identify existing coverage and prepare new tests.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/zk/zk_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package zk
+
+import "testing"
+
+func TestStubProofRoundTrip(t *testing.T) {
+	pi := PublicInputs{
+		PolicyThreshold: 1,
+		MaxSeverity:     1,
+		OverallPass:     true,
+		Commitment:      "0xabc123",
+	}
+	proof, err := GenerateProof(pi)
+	if err != nil {
+		t.Fatalf("GenerateProof error: %v", err)
+	}
+	ok, _, err := VerifyProof(proof.ProofB64, proof.PublicInputsB64)
+	if err != nil {
+		t.Fatalf("VerifyProof error: %v", err)
+	}
+	if !ok {
+
+
+thinking
+**Planning DecodePublicInputs validation and tests**
+
+I'm adding field presence checks and range/format validation in DecodePublicInputs, including hex format for commitments with 0x prefix. I'll add new tests in zk_test since none exist yet, improving reliability without changing EncodePublicInputs yet.
+thinking
+**Adding hex validation and test for DecodePublicInputs**
+
+I'll use the existing hex.DecodeString in DecodePublicInputs for commitment format checks and add a new TestDecodePublicInputsValidation to cover missing fields and invalid values.
+file update
+M /Users/yani/Noema/backend/internal/zk/zk.go
+@@ -108,2 +108,6 @@
+ 	out := PublicInputs{}
++	seenPT := false
++	seenMS := false
++	seenOP := false
++	seenC := false
+ 	for _, f := range fields {
+@@ -119,3 +123,7 @@
+ 			}
++			if v < 0 || v > 2 {
++				return PublicInputs{}, fmt.Errorf("policy threshold must be 0..2")
++			}
+ 			out.PolicyThreshold = v
++			seenPT = true
+ 		case "ms":
+@@ -125,3 +133,7 @@
+ 			}
++			if v < 0 || v > 2 {
++				return PublicInputs{}, fmt.Errorf("max severity must be 0..2")
++			}
+ 			out.MaxSeverity = v
++			seenMS = true
+ 		case "op":
+@@ -131,5 +143,19 @@
+ 			}
++			if v != 0 && v != 1 {
++				return PublicInputs{}, fmt.Errorf("overall pass must be 0 or 1")
++			}
+ 			out.OverallPass = v == 1
++			seenOP = true
+ 		case "c":
++			if kv[1] == "" {
++				return PublicInputs{}, fmt.Errorf("commitment required")
++			}
++			if !strings.HasPrefix(kv[1], "0x") {
++				return PublicInputs{}, fmt.Errorf("commitment must have 0x prefix")
++			}
++			if _, err := hex.DecodeString(strings.TrimPrefix(kv[1], "0x")); err != nil {
++				return PublicInputs{}, fmt.Errorf("commitment must be hex")
++			}
+ 			out.Commitment = kv[1]
++			seenC = true
+ 		default:
+@@ -138,2 +164,5 @@
+ 	}
++	if !seenPT || !seenMS || !seenOP || !seenC {
++		return PublicInputs{}, fmt.Errorf("missing public inputs field")
++	}
+ 	return out, nil
+apply_patch(auto_approved=true) exited 0 in 31ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/zk/zk.go
+file update:
+diff --git a/backend/internal/zk/zk.go b/backend/internal/zk/zk.go
+index 39d35aac7acf6d7a87d7cd8af578684776e360d8..90f0757dfa9114b33f06395f32dc64b99704741a
+--- a/backend/internal/zk/zk.go
++++ b/backend/internal/zk/zk.go
+@@ -106,6 +106,10 @@
+ 	}
+ 	fields := strings.Split(strings.TrimPrefix(s, publicInputsPrefix), "|")
+ 	out := PublicInputs{}
++	seenPT := false
++	seenMS := false
++	seenOP := false
++	seenC := false
+ 	for _, f := range fields {
+ 		kv := strings.SplitN(f, "=", 2)
+ 		if len(kv) != 2 {
+@@ -117,25 +121,50 @@
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid policy threshold")
+ 			}
++			if v < 0 || v > 2 {
++				return PublicInputs{}, fmt.Errorf("policy threshold must be 0..2")
++			}
+ 			out.PolicyThreshold = v
++			seenPT = true
+ 		case "ms":
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid max severity")
+ 			}
++			if v < 0 || v > 2 {
++				return PublicInputs{}, fmt.Errorf("max severity must be 0..2")
++			}
+ 			out.MaxSeverity = v
++			seenMS = true
+ 		case "op":
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid overall pass")
+ 			}
++			if v != 0 && v != 1 {
++				return PublicInputs{}, fmt.Errorf("overall pass must be 0 or 1")
++			}
+ 			out.OverallPass = v == 1
++			seenOP = true
+ 		case "c":
++			if kv[1] == "" {
++				return PublicInputs{}, fmt.Errorf("commitment required")
++			}
++			if !strings.HasPrefix(kv[1], "0x") {
++				return PublicInputs{}, fmt.Errorf("commitment must have 0x prefix")
++			}
++			if _, err := hex.DecodeString(strings.TrimPrefix(kv[1], "0x")); err != nil {
++				return PublicInputs{}, fmt.Errorf("commitment must be hex")
++			}
+ 			out.Commitment = kv[1]
++			seenC = true
+ 		default:
+ 			return PublicInputs{}, fmt.Errorf("unknown public inputs field")
+ 		}
+ 	}
++	if !seenPT || !seenMS || !seenOP || !seenC {
++		return PublicInputs{}, fmt.Errorf("missing public inputs field")
++	}
+ 	return out, nil
+ }
+ 
+
+file update:
+diff --git a/backend/internal/zk/zk.go b/backend/internal/zk/zk.go
+index 39d35aac7acf6d7a87d7cd8af578684776e360d8..90f0757dfa9114b33f06395f32dc64b99704741a
+--- a/backend/internal/zk/zk.go
++++ b/backend/internal/zk/zk.go
+@@ -106,6 +106,10 @@
+ 	}
+ 	fields := strings.Split(strings.TrimPrefix(s, publicInputsPrefix), "|")
+ 	out := PublicInputs{}
++	seenPT := false
++	seenMS := false
++	seenOP := false
++	seenC := false
+ 	for _, f := range fields {
+ 		kv := strings.SplitN(f, "=", 2)
+ 		if len(kv) != 2 {
+@@ -117,25 +121,50 @@
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid policy threshold")
+ 			}
++			if v < 0 || v > 2 {
++				return PublicInputs{}, fmt.Errorf("policy threshold must be 0..2")
++			}
+ 			out.PolicyThreshold = v
++			seenPT = true
+ 		case "ms":
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid max severity")
+ 			}
++			if v < 0 || v > 2 {
++				return PublicInputs{}, fmt.Errorf("max severity must be 0..2")
++			}
+ 			out.MaxSeverity = v
++			seenMS = true
+ 		case "op":
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid overall pass")
+ 			}
++			if v != 0 && v != 1 {
++				return PublicInputs{}, fmt.Errorf("overall pass must be 0 or 1")
++			}
+ 			out.OverallPass = v == 1
++			seenOP = true
+ 		case "c":
++			if kv[1] == "" {
++				return PublicInputs{}, fmt.Errorf("commitment required")
++			}
++			if !strings.HasPrefix(kv[1], "0x") {
++				return PublicInputs{}, fmt.Errorf("commitment must have 0x prefix")
++			}
++			if _, err := hex.DecodeString(strings.TrimPrefix(kv[1], "0x")); err != nil {
++				return PublicInputs{}, fmt.Errorf("commitment must be hex")
++			}
+ 			out.Commitment = kv[1]
++			seenC = true
+ 		default:
+ 			return PublicInputs{}, fmt.Errorf("unknown public inputs field")
+ 		}
+ 	}
++	if !seenPT || !seenMS || !seenOP || !seenC {
++		return PublicInputs{}, fmt.Errorf("missing public inputs field")
++	}
+ 	return out, nil
+ }
+ 
+
+
+thinking
+**Adding and updating tests**
+file update
+M /Users/yani/Noema/backend/internal/zk/zk_test.go
+@@ -76 +76,18 @@
+ }
++
++func TestDecodePublicInputsValidation(t *testing.T) {
++	_, err := DecodePublicInputs([]byte("noema_public_inputs_v1|pt=1|ms=1|op=1|c=not-hex"))
++	if err == nil {
++		t.Fatalf("expected validation error for commitment format")
++	}
++
++	_, err = DecodePublicInputs([]byte("noema_public_inputs_v1|pt=3|ms=1|op=1|c=0xabc123"))
++	if err == nil {
++		t.Fatalf("expected validation error for policy threshold range")
++	}
++
++	_, err = DecodePublicInputs([]byte("noema_public_inputs_v1|pt=1|ms=1|c=0xabc123"))
++	if err == nil {
++		t.Fatalf("expected validation error for missing fields")
++	}
++}
+apply_patch(auto_approved=true) exited 0 in 36ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/zk/zk_test.go
+file update:
+diff --git a/backend/internal/zk/zk.go b/backend/internal/zk/zk.go
+index 39d35aac7acf6d7a87d7cd8af578684776e360d8..90f0757dfa9114b33f06395f32dc64b99704741a
+--- a/backend/internal/zk/zk.go
++++ b/backend/internal/zk/zk.go
+@@ -106,6 +106,10 @@
+ 	}
+ 	fields := strings.Split(strings.TrimPrefix(s, publicInputsPrefix), "|")
+ 	out := PublicInputs{}
++	seenPT := false
++	seenMS := false
++	seenOP := false
++	seenC := false
+ 	for _, f := range fields {
+ 		kv := strings.SplitN(f, "=", 2)
+ 		if len(kv) != 2 {
+@@ -117,25 +121,50 @@
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid policy threshold")
+ 			}
++			if v < 0 || v > 2 {
++				return PublicInputs{}, fmt.Errorf("policy threshold must be 0..2")
++			}
+ 			out.PolicyThreshold = v
++			seenPT = true
+ 		case "ms":
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid max severity")
+ 			}
++			if v < 0 || v > 2 {
++				return PublicInputs{}, fmt.Errorf("max severity must be 0..2")
++			}
+ 			out.MaxSeverity = v
++			seenMS = true
+ 		case "op":
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid overall pass")
+ 			}
++			if v != 0 && v != 1 {
++				return PublicInputs{}, fmt.Errorf("overall pass must be 0 or 1")
++			}
+ 			out.OverallPass = v == 1
++			seenOP = true
+ 		case "c":
++			if kv[1] == "" {
++				return PublicInputs{}, fmt.Errorf("commitment required")
++			}
++			if !strings.HasPrefix(kv[1], "0x") {
++				return PublicInputs{}, fmt.Errorf("commitment must have 0x prefix")
++			}
++			if _, err := hex.DecodeString(strings.TrimPrefix(kv[1], "0x")); err != nil {
++				return PublicInputs{}, fmt.Errorf("commitment must be hex")
++			}
+ 			out.Commitment = kv[1]
++			seenC = true
+ 		default:
+ 			return PublicInputs{}, fmt.Errorf("unknown public inputs field")
+ 		}
+ 	}
++	if !seenPT || !seenMS || !seenOP || !seenC {
++		return PublicInputs{}, fmt.Errorf("missing public inputs field")
++	}
+ 	return out, nil
+ }
+ 
+diff --git a/backend/internal/zk/zk_test.go b/backend/internal/zk/zk_test.go
+index e72301748c0714c23e7219b949de873b24dedcc8..e59c7e24a7db5105982458a31b58cb11f3d7106a
+--- a/backend/internal/zk/zk_test.go
++++ b/backend/internal/zk/zk_test.go
+@@ -74,3 +74,20 @@
+ 		t.Fatalf("expected validation error for commitment")
+ 	}
+ }
++
++func TestDecodePublicInputsValidation(t *testing.T) {
++	_, err := DecodePublicInputs([]byte("noema_public_inputs_v1|pt=1|ms=1|op=1|c=not-hex"))
++	if err == nil {
++		t.Fatalf("expected validation error for commitment format")
++	}
++
++	_, err = DecodePublicInputs([]byte("noema_public_inputs_v1|pt=3|ms=1|op=1|c=0xabc123"))
++	if err == nil {
++		t.Fatalf("expected validation error for policy threshold range")
++	}
++
++	_, err = DecodePublicInputs([]byte("noema_public_inputs_v1|pt=1|ms=1|c=0xabc123"))
++	if err == nil {
++		t.Fatalf("expected validation error for missing fields")
++	}
++}
+
+file update:
+diff --git a/backend/internal/zk/zk.go b/backend/internal/zk/zk.go
+index 39d35aac7acf6d7a87d7cd8af578684776e360d8..90f0757dfa9114b33f06395f32dc64b99704741a
+--- a/backend/internal/zk/zk.go
++++ b/backend/internal/zk/zk.go
+@@ -106,6 +106,10 @@
+ 	}
+ 	fields := strings.Split(strings.TrimPrefix(s, publicInputsPrefix), "|")
+ 	out := PublicInputs{}
++	seenPT := false
++	seenMS := false
++	seenOP := false
++	seenC := false
+ 	for _, f := range fields {
+ 		kv := strings.SplitN(f, "=", 2)
+ 		if len(kv) != 2 {
+@@ -117,25 +121,50 @@
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid policy threshold")
+ 			}
++			if v < 0 || v > 2 {
++				return PublicInputs{}, fmt.Errorf("policy threshold must be 0..2")
++			}
+ 			out.PolicyThreshold = v
++			seenPT = true
+ 		case "ms":
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid max severity")
+ 			}
++			if v < 0 || v > 2 {
++				return PublicInputs{}, fmt.Errorf("max severity must be 0..2")
++			}
+ 			out.MaxSeverity = v
++			seenMS = true
+ 		case "op":
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid overall pass")
+ 			}
++			if v != 0 && v != 1 {
++				return PublicInputs{}, fmt.Errorf("overall pass must be 0 or 1")
++			}
+ 			out.OverallPass = v == 1
++			seenOP = true
+ 		case "c":
++			if kv[1] == "" {
++				return PublicInputs{}, fmt.Errorf("commitment required")
++			}
++			if !strings.HasPrefix(kv[1], "0x") {
++				return PublicInputs{}, fmt.Errorf("commitment must have 0x prefix")
++			}
++			if _, err := hex.DecodeString(strings.TrimPrefix(kv[1], "0x")); err != nil {
++				return PublicInputs{}, fmt.Errorf("commitment must be hex")
++			}
+ 			out.Commitment = kv[1]
++			seenC = true
+ 		default:
+ 			return PublicInputs{}, fmt.Errorf("unknown public inputs field")
+ 		}
+ 	}
++	if !seenPT || !seenMS || !seenOP || !seenC {
++		return PublicInputs{}, fmt.Errorf("missing public inputs field")
++	}
+ 	return out, nil
+ }
+ 
+diff --git a/backend/internal/zk/zk_test.go b/backend/internal/zk/zk_test.go
+index e72301748c0714c23e7219b949de873b24dedcc8..e59c7e24a7db5105982458a31b58cb11f3d7106a
+--- a/backend/internal/zk/zk_test.go
++++ b/backend/internal/zk/zk_test.go
+@@ -74,3 +74,20 @@
+ 		t.Fatalf("expected validation error for commitment")
+ 	}
+ }
++
++func TestDecodePublicInputsValidation(t *testing.T) {
++	_, err := DecodePublicInputs([]byte("noema_public_inputs_v1|pt=1|ms=1|op=1|c=not-hex"))
++	if err == nil {
++		t.Fatalf("expected validation error for commitment format")
++	}
++
++	_, err = DecodePublicInputs([]byte("noema_public_inputs_v1|pt=3|ms=1|op=1|c=0xabc123"))
++	if err == nil {
++		t.Fatalf("expected validation error for policy threshold range")
++	}
++
++	_, err = DecodePublicInputs([]byte("noema_public_inputs_v1|pt=1|ms=1|c=0xabc123"))
++	if err == nil {
++		t.Fatalf("expected validation error for missing fields")
++	}
++}
+
+
+thinking
+**Running tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 476ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.014s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	0.009s
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	0.004s
+file update:
+diff --git a/backend/internal/zk/zk.go b/backend/internal/zk/zk.go
+index 39d35aac7acf6d7a87d7cd8af578684776e360d8..90f0757dfa9114b33f06395f32dc64b99704741a
+--- a/backend/internal/zk/zk.go
++++ b/backend/internal/zk/zk.go
+@@ -106,6 +106,10 @@
+ 	}
+ 	fields := strings.Split(strings.TrimPrefix(s, publicInputsPrefix), "|")
+ 	out := PublicInputs{}
++	seenPT := false
++	seenMS := false
++	seenOP := false
++	seenC := false
+ 	for _, f := range fields {
+ 		kv := strings.SplitN(f, "=", 2)
+ 		if len(kv) != 2 {
+@@ -117,25 +121,50 @@
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid policy threshold")
+ 			}
++			if v < 0 || v > 2 {
++				return PublicInputs{}, fmt.Errorf("policy threshold must be 0..2")
++			}
+ 			out.PolicyThreshold = v
++			seenPT = true
+ 		case "ms":
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid max severity")
+ 			}
++			if v < 0 || v > 2 {
++				return PublicInputs{}, fmt.Errorf("max severity must be 0..2")
++			}
+ 			out.MaxSeverity = v
++			seenMS = true
+ 		case "op":
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid overall pass")
+ 			}
++			if v != 0 && v != 1 {
++				return PublicInputs{}, fmt.Errorf("overall pass must be 0 or 1")
++			}
+ 			out.OverallPass = v == 1
++			seenOP = true
+ 		case "c":
++			if kv[1] == "" {
++				return PublicInputs{}, fmt.Errorf("commitment required")
++			}
++			if !strings.HasPrefix(kv[1], "0x") {
++				return PublicInputs{}, fmt.Errorf("commitment must have 0x prefix")
++			}
++			if _, err := hex.DecodeString(strings.TrimPrefix(kv[1], "0x")); err != nil {
++				return PublicInputs{}, fmt.Errorf("commitment must be hex")
++			}
+ 			out.Commitment = kv[1]
++			seenC = true
+ 		default:
+ 			return PublicInputs{}, fmt.Errorf("unknown public inputs field")
+ 		}
+ 	}
++	if !seenPT || !seenMS || !seenOP || !seenC {
++		return PublicInputs{}, fmt.Errorf("missing public inputs field")
++	}
+ 	return out, nil
+ }
+ 
+diff --git a/backend/internal/zk/zk_test.go b/backend/internal/zk/zk_test.go
+index e72301748c0714c23e7219b949de873b24dedcc8..e59c7e24a7db5105982458a31b58cb11f3d7106a
+--- a/backend/internal/zk/zk_test.go
++++ b/backend/internal/zk/zk_test.go
+@@ -74,3 +74,20 @@
+ 		t.Fatalf("expected validation error for commitment")
+ 	}
+ }
++
++func TestDecodePublicInputsValidation(t *testing.T) {
++	_, err := DecodePublicInputs([]byte("noema_public_inputs_v1|pt=1|ms=1|op=1|c=not-hex"))
++	if err == nil {
++		t.Fatalf("expected validation error for commitment format")
++	}
++
++	_, err = DecodePublicInputs([]byte("noema_public_inputs_v1|pt=3|ms=1|op=1|c=0xabc123"))
++	if err == nil {
++		t.Fatalf("expected validation error for policy threshold range")
++	}
++
++	_, err = DecodePublicInputs([]byte("noema_public_inputs_v1|pt=1|ms=1|c=0xabc123"))
++	if err == nil {
++		t.Fatalf("expected validation error for missing fields")
++	}
++}
+
+codex
+What you changed (short)
+- Hardened `DecodePublicInputs` validation for required fields, ranges, and commitment format in `internal/zk/zk.go`.
+- Added validation coverage in `internal/zk/zk_test.go`.
+
+Tests run
+- `go test ./...`
+
+If you want a different improvement next iteration, tell me which area to prioritize.
+file update:
+diff --git a/backend/internal/zk/zk.go b/backend/internal/zk/zk.go
+index 39d35aac7acf6d7a87d7cd8af578684776e360d8..90f0757dfa9114b33f06395f32dc64b99704741a
+--- a/backend/internal/zk/zk.go
++++ b/backend/internal/zk/zk.go
+@@ -106,6 +106,10 @@
+ 	}
+ 	fields := strings.Split(strings.TrimPrefix(s, publicInputsPrefix), "|")
+ 	out := PublicInputs{}
++	seenPT := false
++	seenMS := false
++	seenOP := false
++	seenC := false
+ 	for _, f := range fields {
+ 		kv := strings.SplitN(f, "=", 2)
+ 		if len(kv) != 2 {
+@@ -117,25 +121,50 @@
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid policy threshold")
+ 			}
++			if v < 0 || v > 2 {
++				return PublicInputs{}, fmt.Errorf("policy threshold must be 0..2")
++			}
+ 			out.PolicyThreshold = v
++			seenPT = true
+ 		case "ms":
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid max severity")
+ 			}
++			if v < 0 || v > 2 {
++				return PublicInputs{}, fmt.Errorf("max severity must be 0..2")
++			}
+ 			out.MaxSeverity = v
++			seenMS = true
+ 		case "op":
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid overall pass")
+ 			}
++			if v != 0 && v != 1 {
++				return PublicInputs{}, fmt.Errorf("overall pass must be 0 or 1")
++			}
+ 			out.OverallPass = v == 1
++			seenOP = true
+ 		case "c":
++			if kv[1] == "" {
++				return PublicInputs{}, fmt.Errorf("commitment required")
++			}
++			if !strings.HasPrefix(kv[1], "0x") {
++				return PublicInputs{}, fmt.Errorf("commitment must have 0x prefix")
++			}
++			if _, err := hex.DecodeString(strings.TrimPrefix(kv[1], "0x")); err != nil {
++				return PublicInputs{}, fmt.Errorf("commitment must be hex")
++			}
+ 			out.Commitment = kv[1]
++			seenC = true
+ 		default:
+ 			return PublicInputs{}, fmt.Errorf("unknown public inputs field")
+ 		}
+ 	}
++	if !seenPT || !seenMS || !seenOP || !seenC {
++		return PublicInputs{}, fmt.Errorf("missing public inputs field")
++	}
+ 	return out, nil
+ }
+ 
+diff --git a/backend/internal/zk/zk_test.go b/backend/internal/zk/zk_test.go
+index e72301748c0714c23e7219b949de873b24dedcc8..e59c7e24a7db5105982458a31b58cb11f3d7106a
+--- a/backend/internal/zk/zk_test.go
++++ b/backend/internal/zk/zk_test.go
+@@ -74,3 +74,20 @@
+ 		t.Fatalf("expected validation error for commitment")
+ 	}
+ }
++
++func TestDecodePublicInputsValidation(t *testing.T) {
++	_, err := DecodePublicInputs([]byte("noema_public_inputs_v1|pt=1|ms=1|op=1|c=not-hex"))
++	if err == nil {
++		t.Fatalf("expected validation error for commitment format")
++	}
++
++	_, err = DecodePublicInputs([]byte("noema_public_inputs_v1|pt=3|ms=1|op=1|c=0xabc123"))
++	if err == nil {
++		t.Fatalf("expected validation error for policy threshold range")
++	}
++
++	_, err = DecodePublicInputs([]byte("noema_public_inputs_v1|pt=1|ms=1|c=0xabc123"))
++	if err == nil {
++		t.Fatalf("expected validation error for missing fields")
++	}
++}
+
+tokens used
+16,317
+What you changed (short)
+- Hardened `DecodePublicInputs` validation for required fields, ranges, and commitment format in `internal/zk/zk.go`.
+- Added validation coverage in `internal/zk/zk_test.go`.
+
+Tests run
+- `go test ./...`
+
+If you want a different improvement next iteration, tell me which area to prioritize.
