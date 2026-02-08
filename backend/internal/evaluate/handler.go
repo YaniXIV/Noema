@@ -96,7 +96,17 @@ func Handler(runsDir string, maxRuns int) gin.HandlerFunc {
 			status = "PASS"
 		}
 
-		commitment := zk.CommitmentSHA256([]byte("spec"), mustJSON(spec), []byte("eval"), mustJSON(evalOut))
+		specJSON, err := jsonBytes(spec)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode spec"})
+			return
+		}
+		evalJSON, err := jsonBytes(evalOut)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode evaluation output"})
+			return
+		}
+		commitment := zk.CommitmentSHA256([]byte("spec"), specJSON, []byte("eval"), evalJSON)
 		proof, err := zk.GenerateProof(zk.PublicInputs{
 			PolicyThreshold: policyThreshold,
 			MaxSeverity:     maxSeverity,
@@ -221,10 +231,6 @@ func stubEvalOutput(enabled map[string]ConstraintRule) EvalOutput {
 	return out
 }
 
-func mustJSON(v any) []byte {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return nil
-	}
-	return b
+func jsonBytes(v any) ([]byte, error) {
+	return json.Marshal(v)
 }

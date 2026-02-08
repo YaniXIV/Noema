@@ -1,0 +1,551 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3c81-070e-7e83-84ef-ad260461d984
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Identifying need for agent instructions**
+
+The user provided instructions in AGENTS but no skill is defined, so I'll check the repo for AGENTS details and prepare to run tests using exec_command.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 220ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+?   	noema/internal/verify	[no test files]
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Checking AGENTS.md for requirements**
+
+I plan to inspect the AGENTS.md file with a search tool to clarify if there's a mandatory agent-related requirement or special instructions for the current task.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && rg --files -g 'AGENTS.md'" in /Users/yani/Noema/backend exited 1 in 52ms:
+
+
+thinking
+**Scoping search for error handling**
+
+I'm focusing on up to three files to improve reliability, targeting areas with TODO comments or potential error handling gaps, likely involving Gemini or related file operations.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME|panic|fatal|Must|must" internal' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/dataset.go:37:		return nil, Dataset{}, fmt.Errorf("dataset must be valid JSON")
+internal/evaluate/dataset.go:40:		return nil, Dataset{}, fmt.Errorf("dataset must be a single JSON value")
+internal/evaluate/dataset.go:45:		return nil, Dataset{}, fmt.Errorf("dataset must match schema")
+internal/evaluate/dataset.go:48:		return nil, Dataset{}, fmt.Errorf("dataset.items must be a non-empty array")
+internal/evaluate/parse.go:30:			return fmt.Errorf("constraint id must be non-empty")
+internal/evaluate/parse.go:33:			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
+internal/evaluate/parse.go:38:			return fmt.Errorf("custom_constraint id must be non-empty")
+internal/evaluate/parse.go:41:			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
+internal/evaluate/parse.go:62:			return nil, nil, fmt.Errorf("each image must be at most 5MB")
+internal/evaluate/parse.go:93:			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
+internal/evaluate/handler.go:99:		commitment := zk.CommitmentSHA256([]byte("spec"), mustJSON(spec), []byte("eval"), mustJSON(evalOut))
+internal/evaluate/handler.go:224:func mustJSON(v any) []byte {
+internal/evaluate/gemini_eval.go:43:	key := cacheKey(rawDataset, mustJSON(spec), model, sampleLimit)
+internal/zk/zk.go:86:		return nil, fmt.Errorf("policy threshold must be 0..2")
+internal/zk/zk.go:89:		return nil, fmt.Errorf("max severity must be 0..2")
+internal/evaluate/policy.go:31:		return nil, fmt.Errorf("at least one constraint must be enabled")
+
+thinking
+**Checking potential JSON panics**
+
+I'm verifying if the mustJSON function can panic within the handler to ensure safe error handling.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+// EvaluateResponse is the JSON response for POST /api/evaluate.
+type EvaluateResponse struct {
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
+	})
+	return out
+}
+
+func mustJSON(v any) []byte {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+thinking
+**Assessing error handling for JSON marshalling**
+
+MustJSON currently returns nil on error, which may lead to using nil as a key in gemini_eval; I need to check how this is handled and consider returning an error for correctness.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/gemini_eval.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"context"
+	"log"
+	"mime/multipart"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/gemini"
+)
+
+const geminiEvalTimeout = 45 * time.Second
+
+func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
+	if form != nil && len(form.Value["eval_output"]) > 0 && form.Value["eval_output"][0] != "" {
+		raw := form.Value["eval_output"][0]
+		out, err := parseEvalOutput(raw)
+		if err != nil {
+			return EvalOutput{}, err
+
+
+thinking
+**Refactoring JSON serialization handling**
+
+Planning to replace mustJSON with a jsonBytes helper returning ([]byte, error) to handle marshal failures explicitly; will update handlers to return 500 on marshal errors and gemini_eval to log and fallback to stub output for reliability without silent nil returns.
+thinking
+**Confirming limited mustJSON usage**
+
+mustJSON is only used in two files—handler.go and gemini_eval.go—so replacing it with the new jsonBytes helper will be scoped and manageable.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "mustJSON"' in /Users/yani/Noema/backend succeeded in 51ms:
+internal/evaluate/gemini_eval.go:43:	key := cacheKey(rawDataset, mustJSON(spec), model, sampleLimit)
+internal/evaluate/handler.go:99:		commitment := zk.CommitmentSHA256([]byte("spec"), mustJSON(spec), []byte("eval"), mustJSON(evalOut))
+internal/evaluate/handler.go:224:func mustJSON(v any) []byte {
+
+thinking
+**Applying patch**
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler.go
+@@ -98,3 +98,13 @@
+ 
+-		commitment := zk.CommitmentSHA256([]byte("spec"), mustJSON(spec), []byte("eval"), mustJSON(evalOut))
++		specJSON, err := jsonBytes(spec)
++		if err != nil {
++			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode spec"})
++			return
++		}
++		evalJSON, err := jsonBytes(evalOut)
++		if err != nil {
++			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode evaluation output"})
++			return
++		}
++		commitment := zk.CommitmentSHA256([]byte("spec"), specJSON, []byte("eval"), evalJSON)
+ 		proof, err := zk.GenerateProof(zk.PublicInputs{
+@@ -223,8 +233,4 @@
+ 
+-func mustJSON(v any) []byte {
+-	b, err := json.Marshal(v)
+-	if err != nil {
+-		return nil
+-	}
+-	return b
++func jsonBytes(v any) ([]byte, error) {
++	return json.Marshal(v)
+ }
+apply_patch(auto_approved=true) exited 0 in 32ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/handler.go
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 1c178896e2b3b9091f07bd1e4ae5397c87ce4f9b..2a1ce76ddca85f88fe5ec497a0c9245f35546956
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -96,7 +96,17 @@
+ 			status = "PASS"
+ 		}
+ 
+-		commitment := zk.CommitmentSHA256([]byte("spec"), mustJSON(spec), []byte("eval"), mustJSON(evalOut))
++		specJSON, err := jsonBytes(spec)
++		if err != nil {
++			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode spec"})
++			return
++		}
++		evalJSON, err := jsonBytes(evalOut)
++		if err != nil {
++			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode evaluation output"})
++			return
++		}
++		commitment := zk.CommitmentSHA256([]byte("spec"), specJSON, []byte("eval"), evalJSON)
+ 		proof, err := zk.GenerateProof(zk.PublicInputs{
+ 			PolicyThreshold: policyThreshold,
+ 			MaxSeverity:     maxSeverity,
+@@ -221,10 +231,6 @@
+ 	return out
+ }
+ 
+-func mustJSON(v any) []byte {
+-	b, err := json.Marshal(v)
+-	if err != nil {
+-		return nil
+-	}
+-	return b
++func jsonBytes(v any) ([]byte, error) {
++	return json.Marshal(v)
+ }
+
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 1c178896e2b3b9091f07bd1e4ae5397c87ce4f9b..2a1ce76ddca85f88fe5ec497a0c9245f35546956
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -96,7 +96,17 @@
+ 			status = "PASS"
+ 		}
+ 
+-		commitment := zk.CommitmentSHA256([]byte("spec"), mustJSON(spec), []byte("eval"), mustJSON(evalOut))
++		specJSON, err := jsonBytes(spec)
++		if err != nil {
++			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode spec"})
++			return
++		}
++		evalJSON, err := jsonBytes(evalOut)
++		if err != nil {
++			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode evaluation output"})
++			return
++		}
++		commitment := zk.CommitmentSHA256([]byte("spec"), specJSON, []byte("eval"), evalJSON)
+ 		proof, err := zk.GenerateProof(zk.PublicInputs{
+ 			PolicyThreshold: policyThreshold,
+ 			MaxSeverity:     maxSeverity,
+@@ -221,10 +231,6 @@
+ 	return out
+ }
+ 
+-func mustJSON(v any) []byte {
+-	b, err := json.Marshal(v)
+-	if err != nil {
+-		return nil
+-	}
+-	return b
++func jsonBytes(v any) ([]byte, error) {
++	return json.Marshal(v)
+ }
+
+
+thinking
+**Updating evaluation logic**
+file update
+M /Users/yani/Noema/backend/internal/evaluate/gemini_eval.go
+@@ -42,3 +42,8 @@
+ 	model := gemini.ModelName()
+-	key := cacheKey(rawDataset, mustJSON(spec), model, sampleLimit)
++	specJSON, err := jsonBytes(spec)
++	if err != nil {
++		log.Printf("gemini marshal spec: %v", err)
++		return stubEvalOutput(enabled)
++	}
++	key := cacheKey(rawDataset, specJSON, model, sampleLimit)
+ 	if cached, err := loadCache(runsDir, key); err == nil {
+apply_patch(auto_approved=true) exited 0 in 43ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/gemini_eval.go
+file update:
+diff --git a/backend/internal/evaluate/gemini_eval.go b/backend/internal/evaluate/gemini_eval.go
+index 8d1d3e63fd48ebcaf31e0dae471124b0e85ca685..b440de2eef71bfd21bf7b291ae3a2924998ad61c
+--- a/backend/internal/evaluate/gemini_eval.go
++++ b/backend/internal/evaluate/gemini_eval.go
+@@ -40,7 +40,12 @@
+ 
+ 	sampleLimit := config.SampleItemsLimit()
+ 	model := gemini.ModelName()
+-	key := cacheKey(rawDataset, mustJSON(spec), model, sampleLimit)
++	specJSON, err := jsonBytes(spec)
++	if err != nil {
++		log.Printf("gemini marshal spec: %v", err)
++		return stubEvalOutput(enabled)
++	}
++	key := cacheKey(rawDataset, specJSON, model, sampleLimit)
+ 	if cached, err := loadCache(runsDir, key); err == nil {
+ 		if err := validateEvalOutput(cached.Output, enabled); err == nil {
+ 			return cached.Output
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 1c178896e2b3b9091f07bd1e4ae5397c87ce4f9b..2a1ce76ddca85f88fe5ec497a0c9245f35546956
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -96,7 +96,17 @@
+ 			status = "PASS"
+ 		}
+ 
+-		commitment := zk.CommitmentSHA256([]byte("spec"), mustJSON(spec), []byte("eval"), mustJSON(evalOut))
++		specJSON, err := jsonBytes(spec)
++		if err != nil {
++			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode spec"})
++			return
++		}
++		evalJSON, err := jsonBytes(evalOut)
++		if err != nil {
++			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode evaluation output"})
++			return
++		}
++		commitment := zk.CommitmentSHA256([]byte("spec"), specJSON, []byte("eval"), evalJSON)
+ 		proof, err := zk.GenerateProof(zk.PublicInputs{
+ 			PolicyThreshold: policyThreshold,
+ 			MaxSeverity:     maxSeverity,
+@@ -221,10 +231,6 @@
+ 	return out
+ }
+ 
+-func mustJSON(v any) []byte {
+-	b, err := json.Marshal(v)
+-	if err != nil {
+-		return nil
+-	}
+-	return b
++func jsonBytes(v any) ([]byte, error) {
++	return json.Marshal(v)
+ }
+
+file update:
+diff --git a/backend/internal/evaluate/gemini_eval.go b/backend/internal/evaluate/gemini_eval.go
+index 8d1d3e63fd48ebcaf31e0dae471124b0e85ca685..b440de2eef71bfd21bf7b291ae3a2924998ad61c
+--- a/backend/internal/evaluate/gemini_eval.go
++++ b/backend/internal/evaluate/gemini_eval.go
+@@ -40,7 +40,12 @@
+ 
+ 	sampleLimit := config.SampleItemsLimit()
+ 	model := gemini.ModelName()
+-	key := cacheKey(rawDataset, mustJSON(spec), model, sampleLimit)
++	specJSON, err := jsonBytes(spec)
++	if err != nil {
++		log.Printf("gemini marshal spec: %v", err)
++		return stubEvalOutput(enabled)
++	}
++	key := cacheKey(rawDataset, specJSON, model, sampleLimit)
+ 	if cached, err := loadCache(runsDir, key); err == nil {
+ 		if err := validateEvalOutput(cached.Output, enabled); err == nil {
+ 			return cached.Output
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 1c178896e2b3b9091f07bd1e4ae5397c87ce4f9b..2a1ce76ddca85f88fe5ec497a0c9245f35546956
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -96,7 +96,17 @@
+ 			status = "PASS"
+ 		}
+ 
+-		commitment := zk.CommitmentSHA256([]byte("spec"), mustJSON(spec), []byte("eval"), mustJSON(evalOut))
++		specJSON, err := jsonBytes(spec)
++		if err != nil {
++			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode spec"})
++			return
++		}
++		evalJSON, err := jsonBytes(evalOut)
++		if err != nil {
++			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode evaluation output"})
++			return
++		}
++		commitment := zk.CommitmentSHA256([]byte("spec"), specJSON, []byte("eval"), evalJSON)
+ 		proof, err := zk.GenerateProof(zk.PublicInputs{
+ 			PolicyThreshold: policyThreshold,
+ 			MaxSeverity:     maxSeverity,
+@@ -221,10 +231,6 @@
+ 	return out
+ }
+ 
+-func mustJSON(v any) []byte {
+-	b, err := json.Marshal(v)
+-	if err != nil {
+-		return nil
+-	}
+-	return b
++func jsonBytes(v any) ([]byte, error) {
++	return json.Marshal(v)
+ }
+
+
+thinking
+**Running tests again**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 919ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.029s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+?   	noema/internal/verify	[no test files]
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/evaluate/gemini_eval.go b/backend/internal/evaluate/gemini_eval.go
+index 8d1d3e63fd48ebcaf31e0dae471124b0e85ca685..b440de2eef71bfd21bf7b291ae3a2924998ad61c
+--- a/backend/internal/evaluate/gemini_eval.go
++++ b/backend/internal/evaluate/gemini_eval.go
+@@ -40,7 +40,12 @@
+ 
+ 	sampleLimit := config.SampleItemsLimit()
+ 	model := gemini.ModelName()
+-	key := cacheKey(rawDataset, mustJSON(spec), model, sampleLimit)
++	specJSON, err := jsonBytes(spec)
++	if err != nil {
++		log.Printf("gemini marshal spec: %v", err)
++		return stubEvalOutput(enabled)
++	}
++	key := cacheKey(rawDataset, specJSON, model, sampleLimit)
+ 	if cached, err := loadCache(runsDir, key); err == nil {
+ 		if err := validateEvalOutput(cached.Output, enabled); err == nil {
+ 			return cached.Output
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 1c178896e2b3b9091f07bd1e4ae5397c87ce4f9b..2a1ce76ddca85f88fe5ec497a0c9245f35546956
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -96,7 +96,17 @@
+ 			status = "PASS"
+ 		}
+ 
+-		commitment := zk.CommitmentSHA256([]byte("spec"), mustJSON(spec), []byte("eval"), mustJSON(evalOut))
++		specJSON, err := jsonBytes(spec)
++		if err != nil {
++			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode spec"})
++			return
++		}
++		evalJSON, err := jsonBytes(evalOut)
++		if err != nil {
++			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode evaluation output"})
++			return
++		}
++		commitment := zk.CommitmentSHA256([]byte("spec"), specJSON, []byte("eval"), evalJSON)
+ 		proof, err := zk.GenerateProof(zk.PublicInputs{
+ 			PolicyThreshold: policyThreshold,
+ 			MaxSeverity:     maxSeverity,
+@@ -221,10 +231,6 @@
+ 	return out
+ }
+ 
+-func mustJSON(v any) []byte {
+-	b, err := json.Marshal(v)
+-	if err != nil {
+-		return nil
+-	}
+-	return b
++func jsonBytes(v any) ([]byte, error) {
++	return json.Marshal(v)
+ }
+
+codex
+What you changed (short)
+- Made JSON marshaling for spec/eval output explicit and error-handled to avoid silent nil commitments or cache keys, with safe fallback in Gemini eval.
+
+Tests run
+- `go test ./...`
+file update:
+diff --git a/backend/internal/evaluate/gemini_eval.go b/backend/internal/evaluate/gemini_eval.go
+index 8d1d3e63fd48ebcaf31e0dae471124b0e85ca685..b440de2eef71bfd21bf7b291ae3a2924998ad61c
+--- a/backend/internal/evaluate/gemini_eval.go
++++ b/backend/internal/evaluate/gemini_eval.go
+@@ -40,7 +40,12 @@
+ 
+ 	sampleLimit := config.SampleItemsLimit()
+ 	model := gemini.ModelName()
+-	key := cacheKey(rawDataset, mustJSON(spec), model, sampleLimit)
++	specJSON, err := jsonBytes(spec)
++	if err != nil {
++		log.Printf("gemini marshal spec: %v", err)
++		return stubEvalOutput(enabled)
++	}
++	key := cacheKey(rawDataset, specJSON, model, sampleLimit)
+ 	if cached, err := loadCache(runsDir, key); err == nil {
+ 		if err := validateEvalOutput(cached.Output, enabled); err == nil {
+ 			return cached.Output
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 1c178896e2b3b9091f07bd1e4ae5397c87ce4f9b..2a1ce76ddca85f88fe5ec497a0c9245f35546956
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -96,7 +96,17 @@
+ 			status = "PASS"
+ 		}
+ 
+-		commitment := zk.CommitmentSHA256([]byte("spec"), mustJSON(spec), []byte("eval"), mustJSON(evalOut))
++		specJSON, err := jsonBytes(spec)
++		if err != nil {
++			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode spec"})
++			return
++		}
++		evalJSON, err := jsonBytes(evalOut)
++		if err != nil {
++			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode evaluation output"})
++			return
++		}
++		commitment := zk.CommitmentSHA256([]byte("spec"), specJSON, []byte("eval"), evalJSON)
+ 		proof, err := zk.GenerateProof(zk.PublicInputs{
+ 			PolicyThreshold: policyThreshold,
+ 			MaxSeverity:     maxSeverity,
+@@ -221,10 +231,6 @@
+ 	return out
+ }
+ 
+-func mustJSON(v any) []byte {
+-	b, err := json.Marshal(v)
+-	if err != nil {
+-		return nil
+-	}
+-	return b
++func jsonBytes(v any) ([]byte, error) {
++	return json.Marshal(v)
+ }
+
+tokens used
+14,288
+What you changed (short)
+- Made JSON marshaling for spec/eval output explicit and error-handled to avoid silent nil commitments or cache keys, with safe fallback in Gemini eval.
+
+Tests run
+- `go test ./...`

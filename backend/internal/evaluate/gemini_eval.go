@@ -40,7 +40,12 @@ func evalWithGemini(ctx context.Context, enabled map[string]ConstraintRule, runs
 
 	sampleLimit := config.SampleItemsLimit()
 	model := gemini.ModelName()
-	key := cacheKey(rawDataset, mustJSON(spec), model, sampleLimit)
+	specJSON, err := jsonBytes(spec)
+	if err != nil {
+		log.Printf("gemini marshal spec: %v", err)
+		return stubEvalOutput(enabled)
+	}
+	key := cacheKey(rawDataset, specJSON, model, sampleLimit)
 	if cached, err := loadCache(runsDir, key); err == nil {
 		if err := validateEvalOutput(cached.Output, enabled); err == nil {
 			return cached.Output
