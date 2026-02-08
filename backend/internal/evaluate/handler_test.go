@@ -211,3 +211,28 @@ func TestValidateDatasetJSON_ImageRefMatchesUpload(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+	spec := Spec{
+		SchemaVersion: 1,
+		Constraints: []Constraint{
+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+		},
+	}
+	if err := validateSpec(spec); err == nil {
+		t.Fatalf("expected error for empty constraint id")
+	}
+}
+
+func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+	spec := Spec{
+		SchemaVersion: 1,
+		CustomConstraints: []CustomConstraint{
+			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+		},
+	}
+	if err := validateSpec(spec); err == nil {
+		t.Fatalf("expected error for empty custom constraint id")
+	}
+}

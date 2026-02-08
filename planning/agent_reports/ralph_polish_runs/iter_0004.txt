@@ -1,0 +1,284 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3c7d-e2a5-7f30-9ff5-14c5471fe586
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Preparing to run Go tests**
+
+I'll run the Go tests using exec since AGENTS? is provided without a skill and requires running go test directly.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 103ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+?   	noema/internal/session	[no test files]
+?   	noema/internal/verify	[no test files]
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Searching for TODO comments**
+
+I'm scanning the repo to find TODOs that suggest small reliability improvements or tests to add, targeting no more than three files for quick enhancements.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"TODO|FIXME|panic\\(|\\bmust\\b\" internal | head -100" in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/parse.go:29:			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
+internal/evaluate/parse.go:34:			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
+internal/evaluate/parse.go:55:			return nil, nil, fmt.Errorf("each image must be at most 5MB")
+internal/evaluate/parse.go:86:			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
+internal/evaluate/dataset.go:37:		return nil, Dataset{}, fmt.Errorf("dataset must be valid JSON")
+internal/evaluate/dataset.go:40:		return nil, Dataset{}, fmt.Errorf("dataset must be a single JSON value")
+internal/evaluate/dataset.go:45:		return nil, Dataset{}, fmt.Errorf("dataset must match schema")
+internal/evaluate/dataset.go:48:		return nil, Dataset{}, fmt.Errorf("dataset.items must be a non-empty array")
+internal/evaluate/policy.go:31:		return nil, fmt.Errorf("at least one constraint must be enabled")
+internal/zk/zk.go:86:		return nil, fmt.Errorf("policy threshold must be 0..2")
+internal/zk/zk.go:89:		return nil, fmt.Errorf("max severity must be 0..2")
+
+thinking
+**Planning test additions**
+
+I'm considering adding tests for existing behavior by exploring potential gaps, particularly in internal/verify or gemini areas.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME" internal/cmd -g"*.go"' in /Users/yani/Noema/backend exited 2 in 52ms:
+rg: internal/cmd: IO error for operation on internal/cmd: No such file or directory (os error 2)
+
+thinking
+**Considering adding tests for evaluation and parsing**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
+cmd
+data
+go.mod
+go.sum
+internal
+main
+server
+web
+
+thinking
+**Considering dataset validation**
+
+Planning to add validation for dataset items by reviewing the evaluate/parse.go file to identify existing parsing logic and how to integrate validation.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"mime/multipart"
+
+	"noema/internal/config"
+)
+
+func parseSpec(form *multipart.Form) (Spec, error) {
+	specStrs := form.Value["spec"]
+	if len(specStrs) == 0 || specStrs[0] == "" {
+		return Spec{}, fmt.Errorf("missing field: spec")
+	}
+	var spec Spec
+	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
+		return Spec{}, fmt.Errorf("invalid spec JSON")
+	}
+	return spec, nil
+
+thinking
+**Considering error message improvements and data validations**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+)
+
+type Dataset struct {
+	Items []DatasetItem `json:"items"`
+}
+
+type DatasetItem struct {
+	ID       string         `json:"id"`
+	Text     string         `json:"text"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+	ImageRef string         `json:"image_ref,omitempty"`
+}
+
+thinking
+**Considering ID uniqueness and session scope**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "error|nil" internal/session -g"*.go"' in /Users/yani/Noema/backend succeeded in 51ms:
+internal/session/session.go:19:	sig := hex.EncodeToString(mac.Sum(nil))
+internal/session/session.go:32:	if err != nil || len(sig) != sha256.Size {
+internal/session/session.go:36:	if err != nil {
+internal/session/session.go:42:	expected := mac.Sum(nil)
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/session/session.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package session
+
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"strings"
+)
+
+const CookieName = "noema_judge"
+
+// Sign produces a signed cookie value for the given payload (e.g. judge key).
+// Format: base64(payload) + "." + hex(HMAC-SHA256(secret, payload)).
+func Sign(secret, payload string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(payload))
+	sig := hex.EncodeToString(mac.Sum(nil))
+	encoded := base64.StdEncoding.EncodeToString([]byte(payload))
+
+thinking
+**Adding session sign/verify tests**
+
+I'm creating tests to verify signing and verifying sessions, covering valid cases, tampering detection, invalid formats, and edge cases like payloads containing dots, ensuring robust session handling.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && cat <<'EOF' > internal/session/session_test.go
+package session
+
+import (
+	\"encoding/hex\"
+	\"strings\"
+	\"testing\"
+)
+
+func TestSignVerifyRoundTrip(t *testing.T) {
+	secret := \"s3cr3t\"
+	payload := \"judge-key-123\"
+
+	signed := Sign(secret, payload)
+	got, ok := Verify(secret, signed)
+	if "'!ok {
+		t.Fatalf("expected verify ok")
+	}
+	if got != payload {
+		t.Fatalf("expected payload %q, got %q", payload, got)
+	}
+}
+
+func TestVerifyRejectsTampering(t *testing.T) {
+	secret := "secret"
+	payload := "abc"
+
+	signed := Sign(secret, payload)
+	if !strings.Contains(signed, ".") {
+		t.Fatalf("expected signed value to contain dot")
+	}
+	// Flip the last hex character.
+	last := signed[len(signed)-1]
+	replacement := byte('"'0')
+	if last == '0' {
+		replacement = '1'
+	}
+	tampered := signed[:len(signed)-1] + string(replacement)
+
+	_, ok := Verify(secret, tampered)
+	if ok {
+		t.Fatalf(\"expected tampered signature to fail\")
+	}
+}
+
+func TestVerifyRejectsInvalidFormat(t *testing.T) {
+	secret := \"secret\"
+
+	cases := []string{
+		\"\",                   // empty
+		\"no-dot\",             // missing dot
+		\"abc.def\",            // non-hex signature
+		\"YWJj.\" + hex.EncodeToString([]byte(\"short\")), // wrong length
+	}
+
+	for _, tc := range cases {
+		_, ok := Verify(secret, tc)
+		if ok {
+			t.Fatalf(\"expected verify to fail for %q\", tc)
+		}
+	}
+}
+EOF" in /Users/yani/Noema/backend succeeded in 52ms:
+
+
+thinking
+**Verifying hex decoding edge cases**
+
+I confirmed that hex decoding rejects odd-length strings and noted a test case with a short hex input fails as expected due to signature length mismatch. I'm rerunning all tests to verify overall correctness.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 383ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	0.004s
+?   	noema/internal/verify	[no test files]
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+codex
+What you changed (short)
+- Added session cookie signing/verification tests covering round-trip, tampering, and invalid formats in `internal/session/session_test.go`.
+
+Tests run (must include go test ./...)
+- `go test ./...`
+
+If you want, I can add a small test for `SetCookieHeader` next.
+tokens used
+14,624
+What you changed (short)
+- Added session cookie signing/verification tests covering round-trip, tampering, and invalid formats in `internal/session/session_test.go`.
+
+Tests run (must include go test ./...)
+- `go test ./...`
+
+If you want, I can add a small test for `SetCookieHeader` next.

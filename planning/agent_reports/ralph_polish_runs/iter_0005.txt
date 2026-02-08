@@ -1,0 +1,887 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3c7e-8ac2-71e0-bf02-7fbc54dc85b3
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Executing tests via exec_command**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 105ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+?   	noema/internal/verify	[no test files]
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Checking repo for improvement opportunities**
+
+I'm preparing to inspect the repository with searches to identify impactful changes affecting few files for a meaningful improvement.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg --files' in /Users/yani/Noema/backend succeeded in 52ms:
+go.sum
+internal/session/session_test.go
+internal/session/session.go
+internal/evaluate/prompt.go
+internal/evaluate/parse.go
+internal/evaluate/output.go
+internal/evaluate/handler_test.go
+internal/evaluate/schema.go
+internal/evaluate/dataset.go
+internal/evaluate/storage.go
+internal/evaluate/images.go
+internal/evaluate/handler_integration_test.go
+internal/evaluate/cache.go
+internal/evaluate/commitment.go
+internal/evaluate/policy.go
+internal/evaluate/spec.go
+internal/evaluate/gemini_eval.go
+internal/evaluate/handler.go
+internal/web/auth.go
+internal/web/upload.go
+
+thinking
+**Inspecting evaluation parsing for bugs**
+
+Planning to review internal evaluate and parse code for potential session reliability or validation issues that might cause bugs.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"mime/multipart"
+
+	"noema/internal/config"
+)
+
+func parseSpec(form *multipart.Form) (Spec, error) {
+	specStrs := form.Value["spec"]
+	if len(specStrs) == 0 || specStrs[0] == "" {
+		return Spec{}, fmt.Errorf("missing field: spec")
+	}
+	var spec Spec
+	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
+		return Spec{}, fmt.Errorf("invalid spec JSON")
+	}
+	return spec, nil
+
+thinking
+**Evaluating error handling scope**
+
+Considering that parseSpec error doesn't wrap the original error but might be acceptable; next, I'll check internal/web/upload for potential reliability improvements.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/web/upload.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package web
+
+import (
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+
+	"github.com/gin-gonic/gin"
+)
+
+// UploadData is passed to the upload template.
+type UploadData struct {
+	Error    string
+	Success  bool
+
+thinking
+**Considering file extension and parse validation**
+
+I'm checking that extension extraction handles dotfiles safely and thinking about improving parseSpec error messages with JSON validation using DisallowUnknownFields for robustness without bloating changes. Next, I'll inspect the Spec structure for better decisions.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/spec.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+// Spec is the parsed evaluation spec (schema_version 1).
+type Spec struct {
+	SchemaVersion     int                `json:"schema_version"`
+	EvaluationName    string             `json:"evaluation_name"`
+	Policy            Policy             `json:"policy"`
+	Constraints       []Constraint       `json:"constraints"`
+	CustomConstraints []CustomConstraint `json:"custom_constraints"`
+}
+
+type Policy struct {
+	Reveal RevealPolicy `json:"reveal"`
+}
+
+type RevealPolicy struct {
+	MaxSeverity bool `json:"max_severity"`
+	Commitment  bool `json:"commitment"`
+}
+
+
+thinking
+**Considering validation for constraint uniqueness**
+
+I'm planning to add checks to ensure constraint IDs are unique and to handle empty or duplicate constraints to avoid collisions, next I'll review the evaluation and schema code for relevant logic.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/schema.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+func evalResponseSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"required": []any{
+			"schema_version",
+			"constraints",
+			"max_severity",
+		},
+		"properties": map[string]any{
+			"schema_version": map[string]any{
+				"type": "integer",
+				"enum": []any{1},
+			},
+			"constraints": map[string]any{
+				"type":     "array",
+				"minItems": 1,
+				"items": map[string]any{
+					"type": "object",
+
+thinking
+**Considering input validation improvements**
+
+I'm weighing adding DisallowUnknownFields to parsing for stricter input correctness and validating dataset and image file sizes during upload, while noting these changes are small and possibly do not require tests.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math/big"
+	"mime/multipart"
+	"os"
+	"path/filepath"
+	"strconv"
+	"sync/atomic"
+	"time"
+)
+
+var runIDCounter uint64
+
+func genRunID() string {
+	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
+
+thinking
+**Evaluating error handling and constraint mapping**
+
+saveRunFiles returns generic errors with minimal impact, but parseSpec could include more detailed JSON errors for better UX. Preventing duplicate constraint IDs in specs is a key reliability improvement, so next I'll inspect constraint ID usage by searching for their mapping.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "Constraint" -n internal/evaluate' in /Users/yani/Noema/backend succeeded in 51ms:
+internal/evaluate/parse.go:27:	for _, cn := range spec.Constraints {
+internal/evaluate/parse.go:32:	for _, cn := range spec.CustomConstraints {
+internal/evaluate/output.go:9:type EvalConstraintResult struct {
+internal/evaluate/output.go:17:	Constraints   []EvalConstraintResult `json:"constraints"`
+internal/evaluate/output.go:35:	if len(out.Constraints) == 0 {
+internal/evaluate/output.go:49:func validateEvalOutput(out EvalOutput, enabled map[string]ConstraintRule) error {
+internal/evaluate/output.go:52:	for _, c := range out.Constraints {
+internal/evaluate/prompt.go:13:type PromptConstraint struct {
+internal/evaluate/prompt.go:20:var presetConstraints = map[string]PromptConstraint{
+internal/evaluate/prompt.go:87:	constraints := resolvePromptConstraints(spec)
+internal/evaluate/prompt.go:90:	buf.WriteString("Constraints:\n")
+internal/evaluate/prompt.go:113:func resolvePromptConstraints(spec Spec) []PromptConstraint {
+internal/evaluate/prompt.go:114:	var out []PromptConstraint
+internal/evaluate/prompt.go:115:	for _, c := range spec.Constraints {
+internal/evaluate/prompt.go:119:		if preset, ok := presetConstraints[c.ID]; ok {
+internal/evaluate/prompt.go:124:		out = append(out, PromptConstraint{
+internal/evaluate/prompt.go:130:	for _, c := range spec.CustomConstraints {
+internal/evaluate/prompt.go:141:		out = append(out, PromptConstraint{
+internal/evaluate/spec.go:8:	Constraints       []Constraint       `json:"constraints"`
+internal/evaluate/spec.go:9:	CustomConstraints []CustomConstraint `json:"custom_constraints"`
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,120p' internal/evaluate/policy.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import "fmt"
+
+type ConstraintRule struct {
+	ID                 string
+	AllowedMaxSeverity int
+}
+
+func enabledConstraints(spec Spec) (map[string]ConstraintRule, error) {
+	out := make(map[string]ConstraintRule)
+	for _, c := range spec.Constraints {
+		if !c.Enabled {
+			continue
+		}
+		if _, exists := out[c.ID]; exists {
+			return nil, fmt.Errorf("duplicate constraint id: %s", c.ID)
+		}
+		out[c.ID] = ConstraintRule{ID: c.ID, AllowedMaxSeverity: c.AllowedMaxSeverity}
+	}
+
+thinking
+**Analyzing constraint ID validation and uniqueness**
+
+Noted that duplicate IDs are currently enforced only among enabled constraints, and empty IDs aren't validated. Considering enforcing non-empty IDs for enabled constraints to prevent key collisions and ensure correctness, especially since empty IDs could cause subtle issues during prompt resolution. Next, planning to check evaluate/handler.go for how constraint IDs flow there.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,140p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+// EvaluateResponse is the JSON response for POST /api/evaluate.
+type EvaluateResponse struct {
+
+thinking
+**Assessing constraint ID validation gaps**
+
+I noticed that duplicates among enabled constraints are caught, but empty or duplicate IDs in disabled constraints might slip through; empty IDs for enabled could also cause issues in output validation, so I'll check output.go next to confirm.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,160p' internal/evaluate/output.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+)
+
+type EvalConstraintResult struct {
+	ID        string `json:"id"`
+	Severity  int    `json:"severity"`
+	Rationale string `json:"rationale"`
+}
+
+type EvalOutput struct {
+	SchemaVersion int                    `json:"schema_version"`
+	Constraints   []EvalConstraintResult `json:"constraints"`
+	MaxSeverity   int                    `json:"max_severity"`
+	Confidence    *float64               `json:"confidence,omitempty"`
+}
+
+thinking
+**Planning spec ID validation**
+
+I'm deciding to enforce non-empty IDs for all constraints, including enabled and custom, in spec validation to ensure correctness and prevent output reference errors. I'll add related tests, likely in the existing handler_test file, to keep the change small and meaningful.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"mime/multipart"
+	"net/textproto"
+	"sort"
+	"testing"
+)
+
+type formFile struct {
+	field       string
+	filename    string
+	contentType string
+	content     []byte
+}
+
+func buildMultipartForm(t *testing.T, files []formFile) *multipart.Form {
+
+
+thinking
+**Planning validation for empty constraint IDs**
+
+I'm adding a check in the validation to reject empty IDs in constraints, focusing on enabled constraints only to avoid impacting disabled ones. This keeps behavior safe and minimal while improving error clarity. Next is implementing and testing this in the handler test file.
+thinking
+**Inspecting default specs for empty IDs**
+
+I'm checking the web static constraints file to see if default specs might contain empty IDs, which can inform whether validation should handle those cases from the UI.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/static/constraints.js" in /Users/yani/Noema/backend succeeded in 52ms:
+/* Preset constraints for evaluation policy (schema_version 1) */
+window.NOEMA_PRESET_CONSTRAINTS = [
+  {
+    "id": "pii_exposure_risk",
+    "category": "privacy",
+    "classification_type": "severity",
+    "description": "Assess whether the dataset contains personally identifiable information that could identify individuals directly or indirectly, including contextual linkage of names, addresses, contact details, or identifiable imagery.",
+    "severity_levels": {
+      "0": "No identifiable personal data detected",
+      "1": "Limited or partially redacted personal identifiers present",
+      "2": "Clear personally identifiable information or identity-linkable data present"
+    }
+  },
+  {
+    "id": "regulated_sensitive_data_presence",
+    "category": "regulated_data",
+    "classification_type": "severity",
+    "description": "Determine whether the dataset contains regulated sensitive information such as medical records, financial account information, biometric identifiers, or government-issued identifiers.",
+    "severity_levels": {
+      "0": "No regulated sensitive data detected",
+
+
+thinking
+**Adding enabled constraint ID validation**
+
+I'm updating validateSpec to reject constraints that are enabled but have empty IDs, ensuring runtime reliability without breaking existing specs by ignoring disabled constraints.
+thinking
+**Adding tests for constraint ID validation**
+
+I'm preparing to add table-driven tests in handler_test.go to verify that validateSpec rejects empty IDs in enabled constraints and custom constraints, checking for error presence and consistent messages.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/parse.go
+@@ -6,2 +6,3 @@
+ 	"mime/multipart"
++	"strings"
+ 
+@@ -27,2 +28,5 @@
+ 	for _, cn := range spec.Constraints {
++		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++			return fmt.Errorf("constraint id must be non-empty")
++		}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+@@ -32,2 +36,5 @@
+ 	for _, cn := range spec.CustomConstraints {
++		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++			return fmt.Errorf("custom_constraint id must be non-empty")
++		}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+apply_patch(auto_approved=true) exited 0 in 30ms:
+Success. Updated the following files:
+M internal/evaluate/parse.go
+file update:
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5fc2e874e76c17e562acdc5bd1a08ade0d900cf6..f104c4565a7f911ac198d0e3df4857285f7b47bb
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -4,6 +4,7 @@
+ 	"encoding/json"
+ 	"fmt"
+ 	"mime/multipart"
++	"strings"
+ 
+ 	"noema/internal/config"
+ )
+@@ -25,11 +26,17 @@
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
+ 	for _, cn := range spec.Constraints {
++		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++			return fmt.Errorf("constraint id must be non-empty")
++		}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+ 			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
+ 		}
+ 	}
+ 	for _, cn := range spec.CustomConstraints {
++		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++			return fmt.Errorf("custom_constraint id must be non-empty")
++		}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+ 			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
+ 		}
+
+file update:
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5fc2e874e76c17e562acdc5bd1a08ade0d900cf6..f104c4565a7f911ac198d0e3df4857285f7b47bb
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -4,6 +4,7 @@
+ 	"encoding/json"
+ 	"fmt"
+ 	"mime/multipart"
++	"strings"
+ 
+ 	"noema/internal/config"
+ )
+@@ -25,11 +26,17 @@
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
+ 	for _, cn := range spec.Constraints {
++		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++			return fmt.Errorf("constraint id must be non-empty")
++		}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+ 			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
+ 		}
+ 	}
+ 	for _, cn := range spec.CustomConstraints {
++		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++			return fmt.Errorf("custom_constraint id must be non-empty")
++		}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+ 			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
+ 		}
+
+
+thinking
+**Adding test for apply_patch**
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
+@@ -213 +213,26 @@
+ }
++
++func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for empty constraint id")
++	}
++}
++
++func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		CustomConstraints: []CustomConstraint{
++			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for empty custom constraint id")
++	}
++}
+apply_patch(auto_approved=true) exited 0 in 37ms:
+Success. Updated the following files:
+M internal/evaluate/handler_test.go
+file update:
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 183c064a31a280c8ca8dba5b4c55420b2f8d445a..51b2b30093747df682b1379eff8e6012b3acffe9
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -211,3 +211,28 @@
+ 		t.Fatalf("unexpected error: %v", err)
+ 	}
+ }
++
++func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for empty constraint id")
++	}
++}
++
++func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		CustomConstraints: []CustomConstraint{
++			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for empty custom constraint id")
++	}
++}
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5fc2e874e76c17e562acdc5bd1a08ade0d900cf6..f104c4565a7f911ac198d0e3df4857285f7b47bb
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -4,6 +4,7 @@
+ 	"encoding/json"
+ 	"fmt"
+ 	"mime/multipart"
++	"strings"
+ 
+ 	"noema/internal/config"
+ )
+@@ -25,11 +26,17 @@
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
+ 	for _, cn := range spec.Constraints {
++		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++			return fmt.Errorf("constraint id must be non-empty")
++		}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+ 			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
+ 		}
+ 	}
+ 	for _, cn := range spec.CustomConstraints {
++		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++			return fmt.Errorf("custom_constraint id must be non-empty")
++		}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+ 			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
+ 		}
+
+file update:
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 183c064a31a280c8ca8dba5b4c55420b2f8d445a..51b2b30093747df682b1379eff8e6012b3acffe9
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -211,3 +211,28 @@
+ 		t.Fatalf("unexpected error: %v", err)
+ 	}
+ }
++
++func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for empty constraint id")
++	}
++}
++
++func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		CustomConstraints: []CustomConstraint{
++			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for empty custom constraint id")
++	}
++}
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5fc2e874e76c17e562acdc5bd1a08ade0d900cf6..f104c4565a7f911ac198d0e3df4857285f7b47bb
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -4,6 +4,7 @@
+ 	"encoding/json"
+ 	"fmt"
+ 	"mime/multipart"
++	"strings"
+ 
+ 	"noema/internal/config"
+ )
+@@ -25,11 +26,17 @@
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
+ 	for _, cn := range spec.Constraints {
++		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++			return fmt.Errorf("constraint id must be non-empty")
++		}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+ 			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
+ 		}
+ 	}
+ 	for _, cn := range spec.CustomConstraints {
++		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++			return fmt.Errorf("custom_constraint id must be non-empty")
++		}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+ 			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
+ 		}
+
+
+thinking
+**Running all tests**
+
+I'm executing the full test suite with `go test ./...` to verify correctness across the entire codebase.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backendfile update:
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 183c064a31a280c8ca8dba5b4c55420b2f8d445a..51b2b30093747df682b1379eff8e6012b3acffe9
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -211,3 +211,28 @@
+ 		t.Fatalf("unexpected error: %v", err)
+ 	}
+ }
++
++func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for empty constraint id")
++	}
++}
++
++func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		CustomConstraints: []CustomConstraint{
++			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for empty custom constraint id")
++	}
++}
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5fc2e874e76c17e562acdc5bd1a08ade0d900cf6..f104c4565a7f911ac198d0e3df4857285f7b47bb
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -4,6 +4,7 @@
+ 	"encoding/json"
+ 	"fmt"
+ 	"mime/multipart"
++	"strings"
+ 
+ 	"noema/internal/config"
+ )
+@@ -25,11 +26,17 @@
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
+ 	for _, cn := range spec.Constraints {
++		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++			return fmt.Errorf("constraint id must be non-empty")
++		}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+ 			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
+ 		}
+ 	}
+ 	for _, cn := range spec.CustomConstraints {
++		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++			return fmt.Errorf("custom_constraint id must be non-empty")
++		}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+ 			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
+ 		}
+
+ succeeded in 2.22s:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.027s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+?   	noema/internal/verify	[no test files]
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Waiting for process output**
+file update:
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 183c064a31a280c8ca8dba5b4c55420b2f8d445a..51b2b30093747df682b1379eff8e6012b3acffe9
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -211,3 +211,28 @@
+ 		t.Fatalf("unexpected error: %v", err)
+ 	}
+ }
++
++func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for empty constraint id")
++	}
++}
++
++func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		CustomConstraints: []CustomConstraint{
++			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for empty custom constraint id")
++	}
++}
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5fc2e874e76c17e562acdc5bd1a08ade0d900cf6..f104c4565a7f911ac198d0e3df4857285f7b47bb
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -4,6 +4,7 @@
+ 	"encoding/json"
+ 	"fmt"
+ 	"mime/multipart"
++	"strings"
+ 
+ 	"noema/internal/config"
+ )
+@@ -25,11 +26,17 @@
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
+ 	for _, cn := range spec.Constraints {
++		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++			return fmt.Errorf("constraint id must be non-empty")
++		}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+ 			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
+ 		}
+ 	}
+ 	for _, cn := range spec.CustomConstraints {
++		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++			return fmt.Errorf("custom_constraint id must be non-empty")
++		}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+ 			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
+ 		}
+
+
+thinking
+**Preparing final summary and tests**
+
+I'm consolidating the final changed files list and test results, confirming only two files changed and that 'go test ./...' passes successfully.
+codex
+**Summary**
+Added validation to reject enabled constraints with empty IDs and added tests covering both preset and custom constraints.
+
+**What Changed**
+- Enforced non-empty IDs for enabled constraints and custom constraints in `internal/evaluate/parse.go`.
+- Added tests for empty constraint IDs in `internal/evaluate/handler_test.go`.
+
+**Tests Run**
+- `cd /Users/yani/Noema/backend && go test ./...`
+
+**Next Steps**
+1. If you want stricter validation, we can also enforce non-empty `title`/`description` for enabled custom constraints.
+file update:
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 183c064a31a280c8ca8dba5b4c55420b2f8d445a..51b2b30093747df682b1379eff8e6012b3acffe9
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -211,3 +211,28 @@
+ 		t.Fatalf("unexpected error: %v", err)
+ 	}
+ }
++
++func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for empty constraint id")
++	}
++}
++
++func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		CustomConstraints: []CustomConstraint{
++			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for empty custom constraint id")
++	}
++}
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5fc2e874e76c17e562acdc5bd1a08ade0d900cf6..f104c4565a7f911ac198d0e3df4857285f7b47bb
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -4,6 +4,7 @@
+ 	"encoding/json"
+ 	"fmt"
+ 	"mime/multipart"
++	"strings"
+ 
+ 	"noema/internal/config"
+ )
+@@ -25,11 +26,17 @@
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
+ 	for _, cn := range spec.Constraints {
++		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++			return fmt.Errorf("constraint id must be non-empty")
++		}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+ 			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
+ 		}
+ 	}
+ 	for _, cn := range spec.CustomConstraints {
++		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++			return fmt.Errorf("custom_constraint id must be non-empty")
++		}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+ 			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
+ 		}
+
+tokens used
+30,184
+**Summary**
+Added validation to reject enabled constraints with empty IDs and added tests covering both preset and custom constraints.
+
+**What Changed**
+- Enforced non-empty IDs for enabled constraints and custom constraints in `internal/evaluate/parse.go`.
+- Added tests for empty constraint IDs in `internal/evaluate/handler_test.go`.
+
+**Tests Run**
+- `cd /Users/yani/Noema/backend && go test ./...`
+
+**Next Steps**
+1. If you want stricter validation, we can also enforce non-empty `title`/`description` for enabled custom constraints.

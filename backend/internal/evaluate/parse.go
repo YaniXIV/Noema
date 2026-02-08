@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"mime/multipart"
+	"strings"
 
 	"noema/internal/config"
 )
@@ -25,11 +26,17 @@ func validateSpec(spec Spec) error {
 		return fmt.Errorf("unsupported schema_version")
 	}
 	for _, cn := range spec.Constraints {
+		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
+			return fmt.Errorf("constraint id must be non-empty")
+		}
 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
 			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
 		}
 	}
 	for _, cn := range spec.CustomConstraints {
+		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
+			return fmt.Errorf("custom_constraint id must be non-empty")
+		}
 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
 			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
 		}
