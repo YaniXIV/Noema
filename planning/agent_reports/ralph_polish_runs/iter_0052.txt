@@ -1,0 +1,781 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3cb8-90a6-7cd1-9063-6c840813b258
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Preparing to run tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 265ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+ok  	noema/internal/config	(cached)
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Listing project files for inspection**
+
+I'll list the project files to identify a small, reliable correctness improvement touching at most three files.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME|BUG"' in /Users/yani/Noema/backend exited 1 in 52ms:
+
+
+thinking
+**Checking HTTP error handling**
+
+I'm inspecting the internal HTTP utility code to understand existing error handling and identify improvements for better feedback on failures.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
+cmd
+data
+go.mod
+go.sum
+internal
+main
+server
+web
+
+thinking
+**Exploring HTTP utility module**
+
+I'm examining the internal HTTP utility code to understand its functionality and how it might support the current implementation needs.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/httputil' in /Users/yani/Noema/backend succeeded in 52ms:
+body.go
+body_test.go
+
+thinking
+**Searching error handling and panic usage**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"panic\\(|Must\\w+\\(\" internal" in /Users/yani/Noema/backend exited 1 in 52ms:
+
+
+thinking
+**Checking web handlers**
+
+I'm looking into the internal/web directory next to explore web handlers and their role in the codebase.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/web' in /Users/yani/Noema/backend succeeded in 52ms:
+auth.go
+results.go
+upload.go
+
+thinking
+**Opening search results**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/web/results.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package web
+
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+)
+
+// ResultsData is passed to the results template.
+type ResultsData struct {
+	RunID string
+}
+
+// ResultsPage renders GET /app/results/:id.
+func ResultsPage(c *gin.Context, tmpl string, runID string) {
+	c.HTML(http.StatusOK, tmpl, ResultsData{RunID: runID})
+}
+
+thinking
+**Considering auth/upload context**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/web/upload.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package web
+
+import (
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+
+	"github.com/gin-gonic/gin"
+)
+
+// UploadData is passed to the upload template.
+type UploadData struct {
+	Error    string
+
+thinking
+**Considering file upload validations**
+
+I'm thinking about adding checks to ensure uploaded file names and sizes are validated more strictly, possibly verifying file size isn't zero and checking for read errors; next, I'll examine internal verification code for relevant logic.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/verify/verify.go" in /Users/yani/Noema/backend exited 1 in 52ms:
+sed: internal/verify/verify.go: No such file or directory
+
+thinking
+**Listing directory contents**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/verify' in /Users/yani/Noema/backend succeeded in 51ms:
+handler.go
+handler_test.go
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/verify/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package verify
+
+import (
+	"encoding/base64"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+// VerifyRequest is the JSON body for POST /api/verify.
+type VerifyRequest struct {
+	RunID           string `json:"run_id"`
+	ProofB64        string `json:"proof_b64"`
+	PublicInputsB64 string `json:"public_inputs_b64"`
+
+thinking
+**Scanning test coverage and structure**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/verify/handler_test.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package verify
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"noema/internal/config"
+
+	"github.com/gin-gonic/gin"
+)
+
+type errorResponse struct {
+	Error string `json:"error"`
+}
+
+func setupRouter() *gin.Engine {
+
+thinking
+**Considering runID validation**
+
+I'm checking whether runID length validation exists elsewhere, likely in internal/session or evaluate modules, before adding any new checks.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/session/store.go" in /Users/yani/Noema/backend exited 1 in 52ms:
+sed: internal/session/store.go: No such file or directory
+
+thinking
+**Listing internal session data**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/session' in /Users/yani/Noema/backend succeeded in 51ms:
+session.go
+session_test.go
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/session/session.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package session
+
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"strings"
+)
+
+const CookieName = "noema_judge"
+
+// Sign produces a signed cookie value for the given payload (e.g. judge key).
+// Format: base64(payload) + "." + hex(HMAC-SHA256(secret, payload)).
+func Sign(secret, payload string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(payload))
+	sig := hex.EncodeToString(mac.Sum(nil))
+	encoded := base64.StdEncoding.EncodeToString([]byte(payload))
+
+thinking
+**Noting cookie header detail**
+
+The cookie Max-Age is set to 86400 but lacks an Expires attribute; considering this minor inconsistency while planning to review internal HTTP utility code next.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/httputil/body.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package httputil
+
+import (
+	"errors"
+	"net/http"
+	"strings"
+)
+
+// IsBodyTooLarge reports whether the error indicates the request body exceeded MaxBytesReader.
+func IsBodyTooLarge(err error) bool {
+	if err == nil {
+		return false
+	}
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "request body too large") ||
+		strings.Contains(msg, "multipart: message too large")
+
+thinking
+**Reviewing upload and verify edge cases**
+
+Identified potential upload size check edge cases where multipart file size may be zero for streaming uploads, possibly skipping mismatch checks. Also noted minor improvements like deferring form cleanup safely and trimming whitespace before base64 decoding in verification. Next, inspecting internal config for further enhancement opportunities.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/config/config.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package config
+
+import (
+	"os"
+	"strconv"
+
+	"github.com/joho/godotenv"
+)
+
+const devCookieSecret = "dev-secret-change-in-production"
+
+// Load reads .env from the current directory and sets env vars.
+// Safe to call multiple times; existing env vars are not overwritten.
+func Load() error {
+	return godotenv.Load()
+}
+
+// JudgeKey returns the judge key used to gate protected routes.
+func JudgeKey() string {
+	return os.Getenv("JUDGE_KEY")
+
+thinking
+**Considering placing code in internal/zk**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/zk/verify.go" in /Users/yani/Noema/backend exited 1 in 52ms:
+sed: internal/zk/verify.go: No such file or directory
+
+thinking
+**Listing internal directory contents**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/zk' in /Users/yani/Noema/backend succeeded in 52ms:
+FORMAT.md
+zk.go
+zk_test.go
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package zk
+
+import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+const (
+	ProofSystem = "groth16"
+	ProofCurve  = "bn254"
+
+	publicInputsPrefix = "noema_public_inputs_v1|"
+	proofPrefix        = "noema_stub_proof_v1|"
+)
+
+// PublicInputs define the public inputs for policy aggregation.
+
+thinking
+**Planning duplicate field checks**
+
+Considering adding checks in decoding to reject duplicate fields to prevent overwriting and ambiguity, improving correctness and reliability. Next step is inspecting tests to cover these cases.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/zk/zk_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package zk
+
+import "testing"
+
+func TestStubProofRoundTrip(t *testing.T) {
+	pi := PublicInputs{
+		PolicyThreshold: 1,
+		MaxSeverity:     1,
+		OverallPass:     true,
+		Commitment:      "0xabc123",
+	}
+	proof, err := GenerateProof(pi)
+	if err != nil {
+		t.Fatalf("GenerateProof error: %v", err)
+	}
+	ok, _, err := VerifyProof(proof.ProofB64, proof.PublicInputsB64)
+	if err != nil {
+		t.Fatalf("VerifyProof error: %v", err)
+	}
+	if !ok {
+
+thinking
+**Adding duplicate fields check and tests**
+
+I'm updating the parsing logic to track seen fields and return errors on duplicates or missing fields, improving robustness. I'll add a focused test in zk_test to verify duplicate policy thresholds trigger the expected error.
+file update
+M /Users/yani/Noema/backend/internal/zk/zk.go
+@@ -119,2 +119,5 @@
+ 		case "pt":
++			if seenPT {
++				return PublicInputs{}, fmt.Errorf("duplicate policy threshold")
++			}
+ 			v, err := strconv.Atoi(kv[1])
+@@ -129,2 +132,5 @@
+ 		case "ms":
++			if seenMS {
++				return PublicInputs{}, fmt.Errorf("duplicate max severity")
++			}
+ 			v, err := strconv.Atoi(kv[1])
+@@ -139,2 +145,5 @@
+ 		case "op":
++			if seenOP {
++				return PublicInputs{}, fmt.Errorf("duplicate overall pass")
++			}
+ 			v, err := strconv.Atoi(kv[1])
+@@ -149,2 +158,5 @@
+ 		case "c":
++			if seenC {
++				return PublicInputs{}, fmt.Errorf("duplicate commitment")
++			}
+ 			if kv[1] == "" {
+apply_patch(auto_approved=true) exited 0 in 32ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/zk/zk.go
+file update:
+diff --git a/backend/internal/zk/zk.go b/backend/internal/zk/zk.go
+index 90f0757dfa9114b33f06395f32dc64b99704741a..1706f73caede9d2f16dc6d6f7b02b4f14ca425c6
+--- a/backend/internal/zk/zk.go
++++ b/backend/internal/zk/zk.go
+@@ -117,6 +117,9 @@
+ 		}
+ 		switch kv[0] {
+ 		case "pt":
++			if seenPT {
++				return PublicInputs{}, fmt.Errorf("duplicate policy threshold")
++			}
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid policy threshold")
+@@ -127,6 +130,9 @@
+ 			out.PolicyThreshold = v
+ 			seenPT = true
+ 		case "ms":
++			if seenMS {
++				return PublicInputs{}, fmt.Errorf("duplicate max severity")
++			}
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid max severity")
+@@ -137,6 +143,9 @@
+ 			out.MaxSeverity = v
+ 			seenMS = true
+ 		case "op":
++			if seenOP {
++				return PublicInputs{}, fmt.Errorf("duplicate overall pass")
++			}
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid overall pass")
+@@ -147,6 +156,9 @@
+ 			out.OverallPass = v == 1
+ 			seenOP = true
+ 		case "c":
++			if seenC {
++				return PublicInputs{}, fmt.Errorf("duplicate commitment")
++			}
+ 			if kv[1] == "" {
+ 				return PublicInputs{}, fmt.Errorf("commitment required")
+ 			}
+
+file update:
+diff --git a/backend/internal/zk/zk.go b/backend/internal/zk/zk.go
+index 90f0757dfa9114b33f06395f32dc64b99704741a..1706f73caede9d2f16dc6d6f7b02b4f14ca425c6
+--- a/backend/internal/zk/zk.go
++++ b/backend/internal/zk/zk.go
+@@ -117,6 +117,9 @@
+ 		}
+ 		switch kv[0] {
+ 		case "pt":
++			if seenPT {
++				return PublicInputs{}, fmt.Errorf("duplicate policy threshold")
++			}
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid policy threshold")
+@@ -127,6 +130,9 @@
+ 			out.PolicyThreshold = v
+ 			seenPT = true
+ 		case "ms":
++			if seenMS {
++				return PublicInputs{}, fmt.Errorf("duplicate max severity")
++			}
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid max severity")
+@@ -137,6 +143,9 @@
+ 			out.MaxSeverity = v
+ 			seenMS = true
+ 		case "op":
++			if seenOP {
++				return PublicInputs{}, fmt.Errorf("duplicate overall pass")
++			}
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid overall pass")
+@@ -147,6 +156,9 @@
+ 			out.OverallPass = v == 1
+ 			seenOP = true
+ 		case "c":
++			if seenC {
++				return PublicInputs{}, fmt.Errorf("duplicate commitment")
++			}
+ 			if kv[1] == "" {
+ 				return PublicInputs{}, fmt.Errorf("commitment required")
+ 			}
+
+
+thinking
+**Adding test**
+file update
+M /Users/yani/Noema/backend/internal/zk/zk_test.go
+@@ -92,2 +92,7 @@
+ 	}
++
++	_, err = DecodePublicInputs([]byte("noema_public_inputs_v1|pt=1|pt=2|ms=1|op=1|c=0xabc123"))
++	if err == nil {
++		t.Fatalf("expected validation error for duplicate fields")
++	}
+ }
+apply_patch(auto_approved=true) exited 0 in 34ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/zk/zk_test.go
+file update:
+diff --git a/backend/internal/zk/zk.go b/backend/internal/zk/zk.go
+index 90f0757dfa9114b33f06395f32dc64b99704741a..1706f73caede9d2f16dc6d6f7b02b4f14ca425c6
+--- a/backend/internal/zk/zk.go
++++ b/backend/internal/zk/zk.go
+@@ -117,6 +117,9 @@
+ 		}
+ 		switch kv[0] {
+ 		case "pt":
++			if seenPT {
++				return PublicInputs{}, fmt.Errorf("duplicate policy threshold")
++			}
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid policy threshold")
+@@ -127,6 +130,9 @@
+ 			out.PolicyThreshold = v
+ 			seenPT = true
+ 		case "ms":
++			if seenMS {
++				return PublicInputs{}, fmt.Errorf("duplicate max severity")
++			}
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid max severity")
+@@ -137,6 +143,9 @@
+ 			out.MaxSeverity = v
+ 			seenMS = true
+ 		case "op":
++			if seenOP {
++				return PublicInputs{}, fmt.Errorf("duplicate overall pass")
++			}
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid overall pass")
+@@ -147,6 +156,9 @@
+ 			out.OverallPass = v == 1
+ 			seenOP = true
+ 		case "c":
++			if seenC {
++				return PublicInputs{}, fmt.Errorf("duplicate commitment")
++			}
+ 			if kv[1] == "" {
+ 				return PublicInputs{}, fmt.Errorf("commitment required")
+ 			}
+diff --git a/backend/internal/zk/zk_test.go b/backend/internal/zk/zk_test.go
+index e59c7e24a7db5105982458a31b58cb11f3d7106a..e14a6785053e48cefed4ba21aa69c713593b5450
+--- a/backend/internal/zk/zk_test.go
++++ b/backend/internal/zk/zk_test.go
+@@ -90,4 +90,9 @@
+ 	if err == nil {
+ 		t.Fatalf("expected validation error for missing fields")
+ 	}
++
++	_, err = DecodePublicInputs([]byte("noema_public_inputs_v1|pt=1|pt=2|ms=1|op=1|c=0xabc123"))
++	if err == nil {
++		t.Fatalf("expected validation error for duplicate fields")
++	}
+ }
+
+file update:
+diff --git a/backend/internal/zk/zk.go b/backend/internal/zk/zk.go
+index 90f0757dfa9114b33f06395f32dc64b99704741a..1706f73caede9d2f16dc6d6f7b02b4f14ca425c6
+--- a/backend/internal/zk/zk.go
++++ b/backend/internal/zk/zk.go
+@@ -117,6 +117,9 @@
+ 		}
+ 		switch kv[0] {
+ 		case "pt":
++			if seenPT {
++				return PublicInputs{}, fmt.Errorf("duplicate policy threshold")
++			}
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid policy threshold")
+@@ -127,6 +130,9 @@
+ 			out.PolicyThreshold = v
+ 			seenPT = true
+ 		case "ms":
++			if seenMS {
++				return PublicInputs{}, fmt.Errorf("duplicate max severity")
++			}
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid max severity")
+@@ -137,6 +143,9 @@
+ 			out.MaxSeverity = v
+ 			seenMS = true
+ 		case "op":
++			if seenOP {
++				return PublicInputs{}, fmt.Errorf("duplicate overall pass")
++			}
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid overall pass")
+@@ -147,6 +156,9 @@
+ 			out.OverallPass = v == 1
+ 			seenOP = true
+ 		case "c":
++			if seenC {
++				return PublicInputs{}, fmt.Errorf("duplicate commitment")
++			}
+ 			if kv[1] == "" {
+ 				return PublicInputs{}, fmt.Errorf("commitment required")
+ 			}
+diff --git a/backend/internal/zk/zk_test.go b/backend/internal/zk/zk_test.go
+index e59c7e24a7db5105982458a31b58cb11f3d7106a..e14a6785053e48cefed4ba21aa69c713593b5450
+--- a/backend/internal/zk/zk_test.go
++++ b/backend/internal/zk/zk_test.go
+@@ -90,4 +90,9 @@
+ 	if err == nil {
+ 		t.Fatalf("expected validation error for missing fields")
+ 	}
++
++	_, err = DecodePublicInputs([]byte("noema_public_inputs_v1|pt=1|pt=2|ms=1|op=1|c=0xabc123"))
++	if err == nil {
++		t.Fatalf("expected validation error for duplicate fields")
++	}
+ }
+
+
+thinking
+**Running Go tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 660ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+ok  	noema/internal/config	(cached)
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.153s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	0.023s
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	0.004s
+file update:
+diff --git a/backend/internal/zk/zk.go b/backend/internal/zk/zk.go
+index 90f0757dfa9114b33f06395f32dc64b99704741a..1706f73caede9d2f16dc6d6f7b02b4f14ca425c6
+--- a/backend/internal/zk/zk.go
++++ b/backend/internal/zk/zk.go
+@@ -117,6 +117,9 @@
+ 		}
+ 		switch kv[0] {
+ 		case "pt":
++			if seenPT {
++				return PublicInputs{}, fmt.Errorf("duplicate policy threshold")
++			}
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid policy threshold")
+@@ -127,6 +130,9 @@
+ 			out.PolicyThreshold = v
+ 			seenPT = true
+ 		case "ms":
++			if seenMS {
++				return PublicInputs{}, fmt.Errorf("duplicate max severity")
++			}
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid max severity")
+@@ -137,6 +143,9 @@
+ 			out.MaxSeverity = v
+ 			seenMS = true
+ 		case "op":
++			if seenOP {
++				return PublicInputs{}, fmt.Errorf("duplicate overall pass")
++			}
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid overall pass")
+@@ -147,6 +156,9 @@
+ 			out.OverallPass = v == 1
+ 			seenOP = true
+ 		case "c":
++			if seenC {
++				return PublicInputs{}, fmt.Errorf("duplicate commitment")
++			}
+ 			if kv[1] == "" {
+ 				return PublicInputs{}, fmt.Errorf("commitment required")
+ 			}
+diff --git a/backend/internal/zk/zk_test.go b/backend/internal/zk/zk_test.go
+index e59c7e24a7db5105982458a31b58cb11f3d7106a..e14a6785053e48cefed4ba21aa69c713593b5450
+--- a/backend/internal/zk/zk_test.go
++++ b/backend/internal/zk/zk_test.go
+@@ -90,4 +90,9 @@
+ 	if err == nil {
+ 		t.Fatalf("expected validation error for missing fields")
+ 	}
++
++	_, err = DecodePublicInputs([]byte("noema_public_inputs_v1|pt=1|pt=2|ms=1|op=1|c=0xabc123"))
++	if err == nil {
++		t.Fatalf("expected validation error for duplicate fields")
++	}
+ }
+
+codex
+What you changed (short)
+- Reject duplicate public input fields during decode to prevent ambiguous/overwritten values.
+- Added a test case covering duplicate field rejection.
+
+Tests run
+- `go test ./...`
+file update:
+diff --git a/backend/internal/zk/zk.go b/backend/internal/zk/zk.go
+index 90f0757dfa9114b33f06395f32dc64b99704741a..1706f73caede9d2f16dc6d6f7b02b4f14ca425c6
+--- a/backend/internal/zk/zk.go
++++ b/backend/internal/zk/zk.go
+@@ -117,6 +117,9 @@
+ 		}
+ 		switch kv[0] {
+ 		case "pt":
++			if seenPT {
++				return PublicInputs{}, fmt.Errorf("duplicate policy threshold")
++			}
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid policy threshold")
+@@ -127,6 +130,9 @@
+ 			out.PolicyThreshold = v
+ 			seenPT = true
+ 		case "ms":
++			if seenMS {
++				return PublicInputs{}, fmt.Errorf("duplicate max severity")
++			}
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid max severity")
+@@ -137,6 +143,9 @@
+ 			out.MaxSeverity = v
+ 			seenMS = true
+ 		case "op":
++			if seenOP {
++				return PublicInputs{}, fmt.Errorf("duplicate overall pass")
++			}
+ 			v, err := strconv.Atoi(kv[1])
+ 			if err != nil {
+ 				return PublicInputs{}, fmt.Errorf("invalid overall pass")
+@@ -147,6 +156,9 @@
+ 			out.OverallPass = v == 1
+ 			seenOP = true
+ 		case "c":
++			if seenC {
++				return PublicInputs{}, fmt.Errorf("duplicate commitment")
++			}
+ 			if kv[1] == "" {
+ 				return PublicInputs{}, fmt.Errorf("commitment required")
+ 			}
+diff --git a/backend/internal/zk/zk_test.go b/backend/internal/zk/zk_test.go
+index e59c7e24a7db5105982458a31b58cb11f3d7106a..e14a6785053e48cefed4ba21aa69c713593b5450
+--- a/backend/internal/zk/zk_test.go
++++ b/backend/internal/zk/zk_test.go
+@@ -90,4 +90,9 @@
+ 	if err == nil {
+ 		t.Fatalf("expected validation error for missing fields")
+ 	}
++
++	_, err = DecodePublicInputs([]byte("noema_public_inputs_v1|pt=1|pt=2|ms=1|op=1|c=0xabc123"))
++	if err == nil {
++		t.Fatalf("expected validation error for duplicate fields")
++	}
+ }
+
+tokens used
+25,375
+What you changed (short)
+- Reject duplicate public input fields during decode to prevent ambiguous/overwritten values.
+- Added a test case covering duplicate field rejection.
+
+Tests run
+- `go test ./...`

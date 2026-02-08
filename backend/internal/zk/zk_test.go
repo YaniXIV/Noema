@@ -90,4 +90,9 @@ func TestDecodePublicInputsValidation(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected validation error for missing fields")
 	}
+
+	_, err = DecodePublicInputs([]byte("noema_public_inputs_v1|pt=1|pt=2|ms=1|op=1|c=0xabc123"))
+	if err == nil {
+		t.Fatalf("expected validation error for duplicate fields")
+	}
 }

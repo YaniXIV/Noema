@@ -117,6 +117,9 @@ func DecodePublicInputs(pub []byte) (PublicInputs, error) {
 		}
 		switch kv[0] {
 		case "pt":
+			if seenPT {
+				return PublicInputs{}, fmt.Errorf("duplicate policy threshold")
+			}
 			v, err := strconv.Atoi(kv[1])
 			if err != nil {
 				return PublicInputs{}, fmt.Errorf("invalid policy threshold")
@@ -127,6 +130,9 @@ func DecodePublicInputs(pub []byte) (PublicInputs, error) {
 			out.PolicyThreshold = v
 			seenPT = true
 		case "ms":
+			if seenMS {
+				return PublicInputs{}, fmt.Errorf("duplicate max severity")
+			}
 			v, err := strconv.Atoi(kv[1])
 			if err != nil {
 				return PublicInputs{}, fmt.Errorf("invalid max severity")
@@ -137,6 +143,9 @@ func DecodePublicInputs(pub []byte) (PublicInputs, error) {
 			out.MaxSeverity = v
 			seenMS = true
 		case "op":
+			if seenOP {
+				return PublicInputs{}, fmt.Errorf("duplicate overall pass")
+			}
 			v, err := strconv.Atoi(kv[1])
 			if err != nil {
 				return PublicInputs{}, fmt.Errorf("invalid overall pass")
@@ -147,6 +156,9 @@ func DecodePublicInputs(pub []byte) (PublicInputs, error) {
 			out.OverallPass = v == 1
 			seenOP = true
 		case "c":
+			if seenC {
+				return PublicInputs{}, fmt.Errorf("duplicate commitment")
+			}
 			if kv[1] == "" {
 				return PublicInputs{}, fmt.Errorf("commitment required")
 			}
