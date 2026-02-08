@@ -41,6 +41,7 @@ func UploadPost(c *gin.Context, uploadTmpl string, uploadsDir string) {
 		UploadGet(c, uploadTmpl, UploadData{Error: "Invalid form."})
 		return
 	}
+	defer form.RemoveAll()
 	files := form.File["file"]
 	if len(files) == 0 {
 		UploadGet(c, uploadTmpl, UploadData{Error: "No file selected."})
