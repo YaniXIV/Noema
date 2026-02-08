@@ -7,7 +7,7 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3c82-a733-7732-9228-39efc319c58b
+session id: 019c3ec8-dd05-7230-8a71-c1d3fe45a0d3
 --------
 user
 You are an autonomous coding agent polishing the Noema repository.
@@ -18,8 +18,9 @@ Hard rules:
 - Keep changes small: max 3 files per iteration.
 - No cosmetic-only edits.
 - No new dependencies unless absolutely necessary.
+- keep all the same ui functionality, the end user should be able to do the same stuff but the experiance and design should be better.
 
-Goal: continuously improve production quality.
+Goal: continuously improve production quality. continuously improve front end quality and polish.
 
 Iteration:
 1) Run: cd backend && go test ./...
@@ -29,7 +30,7 @@ Iteration:
 Pick the highest-value improvement:
 A) Reliability/correctness: validation, error handling, run persistence, verify robustness
 B) Tests: add/strengthen tests for the change you made
-C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+C) upgrading the user interface so that it looks better.
 D) Maintainability: reduce duplication with tiny refactors
 E) UX: wizard/results/verify clarity (small, safe changes)
 F) Docs: README/DEPLOYMENT polish
@@ -43,380 +44,1362 @@ mcp startup: no servers
 thinking
 **Running Go tests**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 245ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 255ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
 ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
-?   	noema/internal/verify	[no test files]
+ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
 
 thinking
-**Planning targeted improvement**
+**Planning UI polish scope**
 
-I'm preparing to inspect the repo with ripgrep to identify a meaningful improvement affecting no more than three files, avoiding cosmetic changes.
+Tests pass, now aiming for a meaningful UI polish involving at most three files. I'll locate relevant frontend code by listing web asset directories and searching with ripgrep to first identify the UI components to improve.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"TODO|FIXME|panic\\(|error\" internal | head -100" in /Users/yani/Noema/backend succeeded in 52ms:
-internal/evaluate/prompt.go:160:func marshalSampledDataset(ds Dataset) ([]byte, error) {
-internal/evaluate/policy.go:10:func enabledConstraints(spec Spec) (map[string]ConstraintRule, error) {
-internal/evaluate/handler_test.go:67:		t.Fatalf("enabledConstraints error: %v", err)
-internal/evaluate/handler_test.go:73:		t.Fatalf("parseEvalOutputOptional error: %v", err)
-internal/evaluate/handler_test.go:110:		t.Fatalf("enabledConstraints error: %v", err)
-internal/evaluate/handler_test.go:129:		t.Fatalf("parseEvalOutputOptional error: %v", err)
-internal/evaluate/handler_test.go:148:		t.Fatalf("enabledConstraints error: %v", err)
-internal/evaluate/handler_test.go:165:		t.Fatalf("expected validation error for unknown constraint")
-internal/evaluate/handler_test.go:201:		t.Fatalf("expected error for image_ref without images")
-internal/evaluate/handler_test.go:214:		t.Fatalf("unexpected error: %v", err)
-internal/evaluate/handler_test.go:227:		t.Fatalf("expected error for empty constraint id")
-internal/evaluate/handler_test.go:239:		t.Fatalf("expected error for empty custom constraint id")
-internal/evaluate/handler_test.go:267:		t.Fatalf("pruneRuns error: %v", err)
-internal/evaluate/storage.go:28:func ensureRunDir(path string) error {
-internal/evaluate/storage.go:32:func saveRunFiles(runPath string, dataset *multipart.FileHeader, images []*multipart.FileHeader) error {
-internal/evaluate/storage.go:49:func saveUpload(fh *multipart.FileHeader, dst string) error {
-internal/evaluate/storage.go:64:func saveJSON(path string, v any) error {
-internal/evaluate/storage.go:83:func updateRunsIndex(runsDir string, limit int, entry RunIndexEntry) error {
-internal/evaluate/storage.go:89:	var corruptedErr error
-internal/evaluate/gemini_eval.go:15:func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 51ms:
+cmd
+data
+go.mod
+go.sum
+internal
+main
+web
 
 thinking
-**Reviewing storage implementation**
-
-I'm opening storage.go to assess how data evaluation and storage handling are implemented, aiming to identify robustness improvements.
+**Noting frontend is web-based list**
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"crypto/rand"
-	"encoding/json"
-	"fmt"
-	"io"
-	"math/big"
-	"mime/multipart"
-	"os"
-	"path/filepath"
-	"strconv"
-	"sync/atomic"
-	"time"
-)
-
-var runIDCounter uint64
-
-func genRunID() string {
-	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web' in /Users/yani/Noema/backend succeeded in 52ms:
+static
+templates
 
 thinking
-**Planning error handling improvements**
-
-I'm aiming to enhance saveRunFiles by including the file index and underlying error in its messages for better reliability. I'll also review saveUpload for correctness regarding file truncation and fsync, plus verify permission handling and explore evaluate/handler.go for similar patterns.
+**Reviewing templates for UI improvement**
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package evaluate
-
-import (
-	"encoding/json"
-	"log"
-	"mime/multipart"
-	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
-	"time"
-
-	"noema/internal/config"
-	"noema/internal/zk"
-
-	"github.com/gin-gonic/gin"
-)
-
-// EvaluateResponse is the JSON response for POST /api/evaluate.
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/templates' in /Users/yani/Noema/backend succeeded in 52ms:
+app.html
+app_new.html
+app_results.html
+index.html
+partial_header_app.html
+partial_header_public.html
+partial_header_upload.html
+partial_orb.html
+upload.html
+verify.html
+verify_results.html
 
 thinking
-**Improving error handling with context**
-
-Plan to wrap saveRunFiles and saveUpload errors with additional context for better reliability and debugging without major changes, while verifying dataset nil handling in parsing.
+**Considering placing styles in static**
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,160p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"encoding/json"
-	"fmt"
-	"mime/multipart"
-	"strings"
-
-	"noema/internal/config"
-)
-
-func parseSpec(form *multipart.Form) (Spec, error) {
-	specStrs := form.Value["spec"]
-	if len(specStrs) == 0 || specStrs[0] == "" {
-		return Spec{}, fmt.Errorf("missing field: spec")
-	}
-	var spec Spec
-	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
-		return Spec{}, fmt.Errorf("invalid spec JSON")
-	}
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/static' in /Users/yani/Noema/backend succeeded in 51ms:
+app.js
+constraints.js
+results.js
+styles.css
+upload.js
+verify.js
+wizard.js
 
 thinking
-**Planning enhanced error context**
+**Reviewing styles.css**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "" web/static/styles.css' in /Users/yani/Noema/backend succeeded in 52ms:
+Total output lines: 1248
 
-I'm adding error wrapping with file path context in saveRunFiles and saveUpload to improve diagnostics without leaking sensitive info, ensuring errors preserve original details with %w. I'll also update image index error handling to avoid ignoring failures.
+1:@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap');
+2:
+3::root {
+4:  --bg: #05060a;
+5:  --bg-card: rgba(9, 12, 18, 0.9);
+6:  --text: #f4f6fb;
+7:  --text-muted: #9aa3b2;
+8:  --accent: #45d4ff;
+9:  --accent-strong: #2c7bff;
+10:  --accent-glow: rgba(69, 212, 255, 0.35);
+11:  --border: rgba(255, 255, 255, 0.08);
+12:  --border-strong: rgba(69, 212, 255, 0.4);
+13:  --error: #f87171;
+14:  --success: #22c55e;
+15:  --warning: #fbbf24;
+16:  --shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
+17:}
+18:
+
+thinking
+**Planning focused UI improvements**
+
+I'm aiming to enhance the wizard step UX or focus states for meaningful UI improvement without cosmetic-only edits. Next, I'll check templates like app_results to spot potential UX issues.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "wizard" web/templates web/static' in /Users/yani/Noema/backend succeeded in 52ms:
+web/static/styles.css:145:.main:not(.main-dashboard):not(.main-wizard):not(.main-results) .card {
+web/static/styles.css:524:.main-wizard {
+web/static/styles.css:529:.wizard-card {
+web/static/styles.css:562:.wizard-form { margin-top: 0.5rem; }
+web/static/styles.css:781:.wizard-actions {
+web/static/styles.css:788:.wizard-nav {
+web/static/styles.css:1048:  .wizard-nav {
+web/static/wizard.js:31:    document.querySelectorAll('.wizard-pane').forEach(function(el) {
+web/static/wizard.js:36:    document.getElementById('wizard-prev').disabled = step === 1;
+web/static/wizard.js:40:    document.getElementById('wizard-next').textContent = nextLabel;
+web/static/wizard.js:338:  document.getElementById('wizard-next').addEventListener('click', function() {
+web/static/wizard.js:356:  document.getElementById('wizard-prev').addEventListener('click', function() {
+web/static/wizard.js:405:    document.getElementById('wizard-next').disabled = true;
+web/static/wizard.js:454:        document.getElementById('wizard-next').disabled = false;
+web/templates/app_new.html:13:  <main class="main main-wizard">
+web/templates/app_new.html:15:    <div class="wizard-card card">
+web/templates/app_new.html:25:      <form id="eval-form" class="wizard-form">
+web/templates/app_new.html:27:        <div class="wizard-pane active" id="pane-1" role="tabpanel">
+web/templates/app_new.html:57:        <div class="wizard-pane" id="pane-2" role="tabpanel" hidden>
+web/templates/app_new.html:87:        <div class="wizard-pane" id="pane-3" role="tabpanel" hidden>
+
+thinking
+**Checking wizard UI for progress improvements**
+
+I'm reviewing the existing wizard styles and stepper components to see if the progress indicator can be enhanced or if it's already sufficient.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '480,840p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+  border: 1px solid rgba(34, 197, 94, 0.4);
+  color: #86efac;
+}
+.upload-result.error {
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  color: var(--error);
+}
+
+.upload-details {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.85rem;
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.3);
+}
+
+
+thinking
+**Assessing wizard.js for UX improvements**
+
+I'm reviewing wizard.js to find meaningful UX enhancements like improved accessible focus on stepper buttons, sticky navigation, scroll-to-top on step changes, or auto-validation to boost reliability without cosmetic-only edits.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' web/static/wizard.js" in /Users/yani/Noema/backend succeeded in 52ms:
+(function() {
+  var PRESET_CONSTRAINTS = window.NOEMA_PRESET_CONSTRAINTS || [];
+  var currentStep = 1;
+  var maxStep = 3;
+  var customConstraintCount = 0;
+  var maxCustomConstraints = 5;
+  var datasetSource = 'file';
+
+  function stepEl(n) { return document.querySelector('.stepper-step[data-step="' + n + '"]'); }
+  function paneEl(n) { return document.getElementById('pane-' + n); }
+
+  function titleCase(str) {
+    return str
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, function(m) { return m.toUpperCase(); });
+  }
+
+  function escapeHtml(s) {
+    var div = document.createElement('div');
+    div.textContent = s;
+
+thinking
+**Considering keyboard accessibility improvements**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' web/static/wizard.js" in /Users/yani/Noema/backend succeeded in 52ms:
+    });
+
+    validateCustomConstraint(div);
+    updateConstraintsCount();
+  }
+
+  function updateCustomLimitHint() {
+    var btn = document.getElementById('add-custom-constraint');
+    var hint = document.getElementById('custom-constraints-hint');
+    btn.disabled = customConstraintCount >= maxCustomConstraints;
+    if (customConstraintCount >= maxCustomConstraints) {
+      hint.textContent = 'Limit reached: remove one to add more.';
+    } else {
+      hint.textContent = 'Add up to five custom constraints.';
+    }
+  }
+
+  function validateCustomConstraint(item) {
+    var title = item.querySelector('.custom-title').value.trim();
+    var desc = item.querySelector('.custom-desc').value.trim();
+
+thinking
+**Evaluating UX improvements for wizard**
+
+I'm considering subtle UX refinements like persisting dataset selections, improving error focus on invalid datasets, and ensuring constraint counts update correctly, while keeping changes minimal and dependency-free. Next, I'll check the wizard markup in the HTML template to assess stepper accessibility and inline error display options.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,180p' web/templates/app_new.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "app_new"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — New Evaluation</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_app" .}}
+
+  <main class="main main-wizard">
+    {{template "orb" .}}
+    <div class="wizard-card card">
+      <h1 class="card-title">New Evaluation</h1>
+      <div class="stepper" role="tablist">
+        <button type="button" class="stepper-step active" data-step="1" aria-selected="true">Dataset</button>
+        <span class="stepper-sep"></span>
+        <button type="button" class="stepper-step" data-step="2">Policy</button>
+
+
+thinking
+**Refining UI improvements within scope**
+
+Focusing on enhancing UX by improving existing displays like dataset size and constraint counts in the review summary, avoiding new functionality such as bulk enable/disable buttons to keep capabilities unchanged.
+thinking
+**Adding client-side dataset and image size validation**
+
+Planning to enforce max 50MB for dataset files and max 10 images each up to 5MB with inline status messages and Next button blocking in step 1, updating wizard.js and HTML to show file counts and errors while reusing existing styles for consistent UX.
 file update
-M /Users/yani/Noema/backend/internal/evaluate/storage.go
-@@ -33,3 +33,3 @@
- 	if err := saveUpload(dataset, filepath.Join(runPath, "dataset.json")); err != nil {
--		return fmt.Errorf("failed to save dataset")
-+		return fmt.Errorf("failed to save dataset: %w", err)
- 	}
-@@ -42,3 +42,3 @@
- 		if err := saveUpload(f, dst); err != nil {
--			return fmt.Errorf("failed to save image")
-+			return fmt.Errorf("failed to save image %d: %w", i, err)
- 		}
-@@ -51,3 +51,3 @@
- 	if err != nil {
--		return err
-+		return fmt.Errorf("open upload: %w", err)
- 	}
-@@ -56,3 +56,3 @@
- 	if err != nil {
--		return err
-+		return fmt.Errorf("create %s: %w", dst, err)
- 	}
-@@ -60,3 +60,6 @@
- 	_, err = io.Copy(out, src)
--	return err
-+	if err != nil {
-+		return fmt.Errorf("copy to %s: %w", dst, err)
-+	}
-+	return nil
- }
-apply_patch(auto_approved=true) exited 0 in 33ms:
+M /Users/yani/Noema/backend/web/static/wizard.js
+@@ -7,2 +7,5 @@
+   var datasetSource = 'file';
++  var MAX_DATASET_BYTES = 50 * 1024 * 1024;
++  var MAX_IMAGE_BYTES = 5 * 1024 * 1024;
++  var MAX_IMAGE_COUNT = 10;
+ 
+@@ -23,2 +26,10 @@
+ 
++  function formatBytes(bytes) {
++    if (!bytes || bytes <= 0) return '0 B';
++    var units = ['B', 'KB', 'MB', 'GB'];
++    var idx = Math.floor(Math.log(bytes) / Math.log(1024));
++    var value = bytes / Math.pow(1024, idx);
++    return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
++  }
++
+   function showStep(step) {
+@@ -66,4 +77,9 @@
+         var file = fileInput.files[0];
+-        statusEl.textContent = 'Selected file: ' + file.name + ' (' + Math.round(file.size / 1024) + ' KB)';
+-        statusEl.classList.add('is-valid');
++        if (file.size > MAX_DATASET_BYTES) {
++          statusEl.textContent = 'File too large. Max size is 50MB.';
++          statusEl.classList.add('is-invalid');
++        } else {
++          statusEl.textContent = 'Selected file: ' + file.name + ' (' + formatBytes(file.size) + ')';
++          statusEl.classList.add('is-valid');
++        }
+       } else {
+@@ -82,2 +98,9 @@
+ 
++    if (new Blob([paste]).size > MAX_DATASET_BYTES) {
++      statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
++      statusEl.classList.add('is-invalid');
++      previewEl.hidden = true;
++      return;
++    }
++
+     var parsed = parseJsonSafe(paste);
+@@ -98,2 +121,33 @@
+ 
++  function updateImagesStatus() {
++    var statusEl = document.getElementById('images-status');
++    if (!statusEl) return;
++    statusEl.classList.remove('is-valid', 'is-invalid');
++
++    var imagesInput = document.getElementById('images-file');
++    var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
++    if (files.length === 0) {
++      statusEl.textContent = 'No images selected.';
++      return true;
++    }
++
++    if (files.length > MAX_IMAGE_COUNT) {
++      statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
++      statusEl.classList.add('is-invalid');
++      return false;
++    }
++
++    var oversized = files.find(function(file) { return file.size > MAX_IMAGE_BYTES; });
++    if (oversized) {
++      statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
++      statusEl.classList.add('is-invalid');
++      return false;
++    }
++
++    var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
++    statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
++    statusEl.classList.add('is-valid');
++    return true;
++  }
++
+   function parseJsonSafe(text) {
+@@ -297,3 +351,7 @@
+       var fileInput = document.getElementById('dataset-file');
+-      if (fileInput.files && fileInput.files.length > 0) return fileInput.files[0];
++      if (fileInput.files && fileInput.files.length > 0) {
++        var file = fileInput.files[0];
++        if (file.size > MAX_DATASET_BYTES) return null;
++        return file;
++      }
+       return null;
+@@ -303,2 +361,3 @@
+     if (paste) {
++      if (new Blob([paste]).size > MAX_DATASET_BYTES) return null;
+       var parsed = parseJsonSafe(paste);
+@@ -336,2 +395,4 @@
+   document.getElementById('dataset-paste').addEventListener('input', updateDatasetStatus);
++  var imagesInputEl = document.getElementById('images-file');
++  if (imagesInputEl) imagesInputEl.addEventListener('change', updateImagesStatus);
+ 
+@@ -346,2 +407,3 @@
+         }
++        if (!updateImagesStatus()) return;
+       }
+@@ -388,2 +450,7 @@
+     }
++    if (!updateImagesStatus()) {
++      document.getElementById('submit-error').textContent = 'Please fix image upload limits (max 10, 5MB each).';
++      document.getElementById('submit-error').style.display = 'block';
++      return;
++    }
+ 
+@@ -460,2 +527,3 @@
+   updateCustomLimitHint();
++  updateImagesStatus();
+ })();
+apply_patch(auto_approved=true) exited 0 in 29ms:
 Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/storage.go
+M /Users/yani/Noema/backend/web/static/wizard.js
 file update:
-diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
-index 031a838955372225b792ac338f7b7ef55fb4c240..e85a0702209ca351eff8a5238f4cc1b73fbe6822
---- a/backend/internal/evaluate/storage.go
-+++ b/backend/internal/evaluate/storage.go
-@@ -31,7 +31,7 @@
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 158c5b1e748acb4a3c337ebde8425e8d0b901396..caefda760a8b6b5d547b62b60998c95a16c140ee
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -5,6 +5,9 @@
+   var customConstraintCount = 0;
+   var maxCustomConstraints = 5;
+   var datasetSource = 'file';
++  var MAX_DATASET_BYTES = 50 * 1024 * 1024;
++  var MAX_IMAGE_BYTES = 5 * 1024 * 1024;
++  var MAX_IMAGE_COUNT = 10;
  
- func saveRunFiles(runPath string, dataset *multipart.FileHeader, images []*multipart.FileHeader) error {
- 	if err := saveUpload(dataset, filepath.Join(runPath, "dataset.json")); err != nil {
--		return fmt.Errorf("failed to save dataset")
-+		return fmt.Errorf("failed to save dataset: %w", err)
- 	}
- 	for i, f := range images {
- 		ext := filepath.Ext(f.Filename)
-@@ -40,7 +40,7 @@
- 		}
- 		dst := filepath.Join(runPath, fmt.Sprintf("image_%d%s", i, ext))
- 		if err := saveUpload(f, dst); err != nil {
--			return fmt.Errorf("failed to save image")
-+			return fmt.Errorf("failed to save image %d: %w", i, err)
- 		}
- 	}
- 	return nil
-@@ -49,16 +49,19 @@
- func saveUpload(fh *multipart.FileHeader, dst string) error {
- 	src, err := fh.Open()
- 	if err != nil {
--		return err
-+		return fmt.Errorf("open upload: %w", err)
- 	}
- 	defer src.Close()
- 	out, err := os.Create(dst)
- 	if err != nil {
--		return err
-+		return fmt.Errorf("create %s: %w", dst, err)
- 	}
- 	defer out.Close()
- 	_, err = io.Copy(out, src)
--	return err
-+	if err != nil {
-+		return fmt.Errorf("copy to %s: %w", dst, err)
-+	}
-+	return nil
- }
+   function stepEl(n) { return document.querySelector('.stepper-step[data-step="' + n + '"]'); }
+   function paneEl(n) { return document.getElementById('pane-' + n); }
+@@ -21,6 +24,14 @@
+     return div.innerHTML;
+   }
  
- func saveJSON(path string, v any) error {
++  function formatBytes(bytes) {
++    if (!bytes || bytes <= 0) return '0 B';
++    var units = ['B', 'KB', 'MB', 'GB'];
++    var idx = Math.floor(Math.log(bytes) / Math.log(1024));
++    var value = bytes / Math.pow(1024, idx);
++    return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -64,8 +75,13 @@
+       var fileInput = document.getElementById('dataset-file');
+       if (fileInput.files && fileInput.files.length > 0) {
+         var file = fileInput.files[0];
+-        statusEl.textContent = 'Selected file: ' + file.name + ' (' + Math.round(file.size / 1024) + ' KB)';
+-        statusEl.classList.add('is-valid');
++        if (file.size > MAX_DATASET_BYTES) {
++          statusEl.textContent = 'File too large. Max size is 50MB.';
++          statusEl.classList.add('is-invalid');
++        } else {
++          statusEl.textContent = 'Selected file: ' + file.name + ' (' + formatBytes(file.size) + ')';
++          statusEl.classList.add('is-valid');
++        }
+       } else {
+         statusEl.textContent = 'Select a JSON file to continue.';
+       }
+@@ -80,6 +96,13 @@
+       return;
+     }
+ 
++    if (new Blob([paste]).size > MAX_DATASET_BYTES) {
++      statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
++      statusEl.classList.add('is-invalid');
++      previewEl.hidden = true;
++      return;
++    }
++
+     var parsed = parseJsonSafe(paste);
+     if (!parsed.valid) {
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+@@ -96,6 +119,37 @@
+     previewEl.hidden = false;
+   }
+ 
++  function updateImagesStatus() {
++    var statusEl = document.getElementById('images-status');
++    if (!statusEl) return;
++    statusEl.classList.remove('is-valid', 'is-invalid');
++
++    var imagesInput = document.getElementById('images-file');
++    var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
++    if (files.length === 0) {
++      statusEl.textContent = 'No images selected.';
++      return true;
++    }
++
++    if (files.length > MAX_IMAGE_COUNT) {
++      statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
++      statusEl.classList.add('is-invalid');
++      return false;
++    }
++
++    var oversized = files.find(function(file) { return file.size > MAX_IMAGE_BYTES; });
++    if (oversized) {
++      statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
++      statusEl.classList.add('is-invalid');
++      return false;
++    }
++
++    var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
++    statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
++    statusEl.classList.add('is-valid');
++    return true;
++  }
++
+   function parseJsonSafe(text) {
+     try {
+       var data = JSON.parse(text);
+@@ -295,12 +349,17 @@
+   function getDatasetFile() {
+     if (datasetSource === 'file') {
+       var fileInput = document.getElementById('dataset-file');
+-      if (fileInput.files && fileInput.files.length > 0) return fileInput.files[0];
++      if (fileInput.files && fileInput.files.length > 0) {
++        var file = fileInput.files[0];
++        if (file.size > MAX_DATASET_BYTES) return null;
++        return file;
++      }
+       return null;
+     }
+ 
+     var paste = document.getElementById('dataset-paste').value.trim();
+     if (paste) {
++      if (new Blob([paste]).size > MAX_DATASET_BYTES) return null;
+       var parsed = parseJsonSafe(paste);
+       if (parsed.valid) {
+         return new File([paste], 'dataset.json', { type: 'application/json' });
+@@ -334,6 +393,8 @@
+ 
+   document.getElementById('dataset-file').addEventListener('change', updateDatasetStatus);
+   document.getElementById('dataset-paste').addEventListener('input', updateDatasetStatus);
++  var imagesInputEl = document.getElementById('images-file');
++  if (imagesInputEl) imagesInputEl.addEventListener('change', updateImagesStatus);
+ 
+   document.getElementById('wizard-next').addEventListener('click', function() {
+     if (currentStep < maxStep) {
+@@ -344,6 +405,7 @@
+           document.getElementById('dataset-status').classList.add('is-invalid');
+           return;
+         }
++        if (!updateImagesStatus()) return;
+       }
+       var next = currentStep + 1;
+       showStep(next);
+@@ -386,6 +448,11 @@
+       document.getElementById('submit-error').style.display = 'block';
+       return;
+     }
++    if (!updateImagesStatus()) {
++      document.getElementById('submit-error').textContent = 'Please fix image upload limits (max 10, 5MB each).';
++      document.getElementById('submit-error').style.display = 'block';
++      return;
++    }
+ 
+     var invalidCustom = false;
+     document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
+@@ -458,4 +525,5 @@
+   buildConstraintsList();
+   setDatasetSource('file');
+   updateCustomLimitHint();
++  updateImagesStatus();
+ })();
 
 file update:
-diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
-index 031a838955372225b792ac338f7b7ef55fb4c240..e85a0702209ca351eff8a5238f4cc1b73fbe6822
---- a/backend/internal/evaluate/storage.go
-+++ b/backend/internal/evaluate/storage.go
-@@ -31,7 +31,7 @@
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 158c5b1e748acb4a3c337ebde8425e8d0b901396..caefda760a8b6b5d547b62b60998c95a16c140ee
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -5,6 +5,9 @@
+   var customConstraintCount = 0;
+   var maxCustomConstraints = 5;
+   var datasetSource = 'file';
++  var MAX_DATASET_BYTES = 50 * 1024 * 1024;
++  var MAX_IMAGE_BYTES = 5 * 1024 * 1024;
++  var MAX_IMAGE_COUNT = 10;
  
- func saveRunFiles(runPath string, dataset *multipart.FileHeader, images []*multipart.FileHeader) error {
- 	if err := saveUpload(dataset, filepath.Join(runPath, "dataset.json")); err != nil {
--		return fmt.Errorf("failed to save dataset")
-+		return fmt.Errorf("failed to save dataset: %w", err)
- 	}
- 	for i, f := range images {
- 		ext := filepath.Ext(f.Filename)
-@@ -40,7 +40,7 @@
- 		}
- 		dst := filepath.Join(runPath, fmt.Sprintf("image_%d%s", i, ext))
- 		if err := saveUpload(f, dst); err != nil {
--			return fmt.Errorf("failed to save image")
-+			return fmt.Errorf("failed to save image %d: %w", i, err)
- 		}
- 	}
- 	return nil
-@@ -49,16 +49,19 @@
- func saveUpload(fh *multipart.FileHeader, dst string) error {
- 	src, err := fh.Open()
- 	if err != nil {
--		return err
-+		return fmt.Errorf("open upload: %w", err)
- 	}
- 	defer src.Close()
- 	out, err := os.Create(dst)
- 	if err != nil {
--		return err
-+		return fmt.Errorf("create %s: %w", dst, err)
- 	}
- 	defer out.Close()
- 	_, err = io.Copy(out, src)
--	return err
-+	if err != nil {
-+		return fmt.Errorf("copy to %s: %w", dst, err)
-+	}
-+	return nil
- }
+   function stepEl(n) { return document.querySelector('.stepper-step[data-step="' + n + '"]'); }
+   function paneEl(n) { return document.getElementById('pane-' + n); }
+@@ -21,6 +24,14 @@
+     return div.innerHTML;
+   }
  
- func saveJSON(path string, v any) error {
++  function formatBytes(bytes) {
++    if (!bytes || bytes <= 0) return '0 B';
++    var units = ['B', 'KB', 'MB', 'GB'];
++    var idx = Math.floor(Math.log(bytes) / Math.log(1024));
++    var value = bytes / Math.pow(1024, idx);
++    return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -64,8 +75,13 @@
+       var fileInput = document.getElementById('dataset-file');
+       if (fileInput.files && fileInput.files.length > 0) {
+         var file = fileInput.files[0];
+-        statusEl.textContent = 'Selected file: ' + file.name + ' (' + Math.round(file.size / 1024) + ' KB)';
+-        statusEl.classList.add('is-valid');
++        if (file.size > MAX_DATASET_BYTES) {
++          statusEl.textContent = 'File too large. Max size is 50MB.';
++          statusEl.classList.add('is-invalid');
++        } else {
++          statusEl.textContent = 'Selected file: ' + file.name + ' (' + formatBytes(file.size) + ')';
++          statusEl.classList.add('is-valid');
++        }
+       } else {
+         statusEl.textContent = 'Select a JSON file to continue.';
+       }
+@@ -80,6 +96,13 @@
+       return;
+     }
+ 
++    if (new Blob([paste]).size > MAX_DATASET_BYTES) {
++      statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
++      statusEl.classList.add('is-invalid');
++      previewEl.hidden = true;
++      return;
++    }
++
+     var parsed = parseJsonSafe(paste);
+     if (!parsed.valid) {
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+@@ -96,6 +119,37 @@
+     previewEl.hidden = false;
+   }
+ 
++  function updateImagesStatus() {
++    var statusEl = document.getElementById('images-status');
++    if (!statusEl) return;
++    statusEl.classList.remove('is-valid', 'is-invalid');
++
++    var imagesInput = document.getElementById('images-file');
++    var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
++    if (files.length === 0) {
++      statusEl.textContent = 'No images selected.';
++      return true;
++    }
++
++    if (files.length > MAX_IMAGE_COUNT) {
++      statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
++      statusEl.classList.add('is-invalid');
++      return false;
++    }
++
++    var oversized = files.find(function(file) { return file.size > MAX_IMAGE_BYTES; });
++    if (oversized) {
++      statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
++      statusEl.classList.add('is-invalid');
++      return false;
++    }
++
++    var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
++    statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
++    statusEl.classList.add('is-valid');
++    return true;
++  }
++
+   function parseJsonSafe(text) {
+     try {
+       var data = JSON.parse(text);
+@@ -295,12 +349,17 @@
+   function getDatasetFile() {
+     if (datasetSource === 'file') {
+       var fileInput = document.getElementById('dataset-file');
+-      if (fileInput.files && fileInput.files.length > 0) return fileInput.files[0];
++      if (fileInput.files && fileInput.files.length > 0) {
++        var file = fileInput.files[0];
++        if (file.size > MAX_DATASET_BYTES) return null;
++        return file;
++      }
+       return null;
+     }
+ 
+     var paste = document.getElementById('dataset-paste').value.trim();
+     if (paste) {
++      if (new Blob([paste]).size > MAX_DATASET_BYTES) return null;
+       var parsed = parseJsonSafe(paste);
+       if (parsed.valid) {
+         return new File([paste], 'dataset.json', { type: 'application/json' });
+@@ -334,6 +393,8 @@
+ 
+   document.getElementById('dataset-file').addEventListener('change', updateDatasetStatus);
+   document.getElementById('dataset-paste').addEventListener('input', updateDatasetStatus);
++  var imagesInputEl = document.getElementById('images-file');
++  if (imagesInputEl) imagesInputEl.addEventListener('change', updateImagesStatus);
+ 
+   document.getElementById('wizard-next').addEventListener('click', function() {
+     if (currentStep < maxStep) {
+@@ -344,6 +405,7 @@
+           document.getElementById('dataset-status').classList.add('is-invalid');
+           return;
+         }
++        if (!updateImagesStatus()) return;
+       }
+       var next = currentStep + 1;
+       showStep(next);
+@@ -386,6 +448,11 @@
+       document.getElementById('submit-error').style.display = 'block';
+       return;
+     }
++    if (!updateImagesStatus()) {
++      document.getElementById('submit-error').textContent = 'Please fix image upload limits (max 10, 5MB each).';
++      document.getElementById('submit-error').style.display = 'block';
++      return;
++    }
+ 
+     var invalidCustom = false;
+     document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
+@@ -458,4 +525,5 @@
+   buildConstraintsList();
+   setDatasetSource('file');
+   updateCustomLimitHint();
++  updateImagesStatus();
+ })();
 
 
 thinking
-**Running full tests**
+**Adding images-status element in HTML**
+file update
+M /Users/yani/Noema/backend/web/templates/app_new.html
+@@ -51,2 +51,3 @@
+           </div>
++          <div class="dataset-status" id="images-status">No images selected.</div>
+           <div class="dataset-status" id="dataset-status">No dataset selected.</div>
+apply_patch(auto_approved=true) exited 0 in 38ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/web/templates/app_new.html
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 158c5b1e748acb4a3c337ebde8425e8d0b901396..caefda760a8b6b5d547b62b60998c95a16c140ee
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -5,6 +5,9 @@
+   var customConstraintCount = 0;
+   var maxCustomConstraints = 5;
+   var datasetSource = 'file';
++  var MAX_DATASET_BYTES = 50 * 1024 * 1024;
++  var MAX_IMAGE_BYTES = 5 * 1024 * 1024;
++  var MAX_IMAGE_COUNT = 10;
+ 
+   function stepEl(n) { return document.querySelector('.stepper-step[data-step="' + n + '"]'); }
+   function paneEl(n) { return document.getElementById('pane-' + n); }
+@@ -21,6 +24,14 @@
+     return div.innerHTML;
+   }
+ 
++  function formatBytes(bytes) {
++    if (!bytes || bytes <= 0) return '0 B';
++    var units = ['B', 'KB', 'MB', 'GB'];
++    var idx = Math.floor(Math.log(bytes) / Math.log(1024));
++    var value = bytes / Math.pow(1024, idx);
++    return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -64,8 +75,13 @@
+       var fileInput = document.getElementById('dataset-file');
+       if (fileInput.files && fileInput.files.length > 0) {
+         var file = fileInput.files[0];
+-        statusEl.textContent = 'Selected file: ' + file.name + ' (' + Math.round(file.size / 1024) + ' KB)';
+-        statusEl.classList.add('is-valid');
++        if (file.size > MAX_DATASET_BYTES) {
++          statusEl.textContent = 'File too large. Max size is 50MB.';
++          statusEl.classList.add('is-invalid');
++        } else {
++          statusEl.textContent = 'Selected file: ' + file.name + ' (' + formatBytes(file.size) + ')';
++          statusEl.classList.add('is-valid');
++        }
+       } else {
+         statusEl.textContent = 'Select a JSON file to continue.';
+       }
+@@ -80,6 +96,13 @@
+       return;
+     }
+ 
++    if (new Blob([paste]).size > MAX_DATASET_BYTES) {
++      statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
++      statusEl.classList.add('is-invalid');
++      previewEl.hidden = true;
++      return;
++    }
++
+     var parsed = parseJsonSafe(paste);
+     if (!parsed.valid) {
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+@@ -96,6 +119,37 @@
+     previewEl.hidden = false;
+   }
+ 
++  function updateImagesStatus() {
++    var statusEl = document.getElementById('images-status');
++    if (!statusEl) return;
++    statusEl.classList.remove('is-valid', 'is-invalid');
++
++    var imagesInput = document.getElementById('images-file');
++    var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
++    if (files.length === 0) {
++      statusEl.textContent = 'No images selected.';
++      return true;
++    }
++
++    if (files.length > MAX_IMAGE_COUNT) {
++      statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
++      statusEl.classList.add('is-invalid');
++      return false;
++    }
++
++    var oversized = files.find(function(file) { return file.size > MAX_IMAGE_BYTES; });
++    if (oversized) {
++      statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
++      statusEl.classList.add('is-invalid');
++      return false;
++    }
++
++    var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
++    statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
++    statusEl.classList.add('is-valid');
++    return true;
++  }
++
+   function parseJsonSafe(text) {
+     try {
+       var data = JSON.parse(text);
+@@ -295,12 +349,17 @@
+   function getDatasetFile() {
+     if (datasetSource === 'file') {
+       var fileInput = document.getElementById('dataset-file');
+-      if (fileInput.files && fileInput.files.length > 0) return fileInput.files[0];
++      if (fileInput.files && fileInput.files.length > 0) {
++        var file = fileInput.files[0];
++        if (file.size > MAX_DATASET_BYTES) return null;
++        return file;
++      }
+       return null;
+     }
+ 
+     var paste = document.getElementById('dataset-paste').value.trim();
+     if (paste) {
++      if (new Blob([paste]).size > MAX_DATASET_BYTES) return null;
+       var parsed = parseJsonSafe(paste);
+       if (parsed.valid) {
+         return new File([paste], 'dataset.json', { type: 'application/json' });
+@@ -334,6 +393,8 @@
+ 
+   document.getElementById('dataset-file').addEventListener('change', updateDatasetStatus);
+   document.getElementById('dataset-paste').addEventListener('input', updateDatasetStatus);
++  var imagesInputEl = document.getElementById('images-file');
++  if (imagesInputEl) imagesInputEl.addEventListener('change', updateImagesStatus);
+ 
+   document.getElementById('wizard-next').addEventListener('click', function() {
+     if (currentStep < maxStep) {
+@@ -344,6 +405,7 @@
+           document.getElementById('dataset-status').classList.add('is-invalid');
+           return;
+         }
++        if (!updateImagesStatus()) return;
+       }
+       var next = currentStep + 1;
+       showStep(next);
+@@ -386,6 +448,11 @@
+       document.getElementById('submit-error').style.display = 'block';
+       return;
+     }
++    if (!updateImagesStatus()) {
++      document.getElementById('submit-error').textContent = 'Please fix image upload limits (max 10, 5MB each).';
++      document.getElementById('submit-error').style.display = 'block';
++      return;
++    }
+ 
+     var invalidCustom = false;
+     document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
+@@ -458,4 +525,5 @@
+   buildConstraintsList();
+   setDatasetSource('file');
+   updateCustomLimitHint();
++  updateImagesStatus();
+ })();
+diff --git a/backend/web/templates/app_new.html b/backend/web/templates/app_new.html
+index a7b981a0c3ab124261a9d482d71ffed31d13e4b5..48c467c7ca64348b255ea2f83cd6ed7d16136bc0
+--- a/backend/web/templates/app_new.html
++++ b/backend/web/templates/app_new.html
+@@ -49,6 +49,7 @@
+             <label class="label">Images (optional, max 10, 5MB each)</label>
+             <input type="file" id="images-file" name="images" accept="image/*" multiple class="input">
+           </div>
++          <div class="dataset-status" id="images-status">No images selected.</div>
+           <div class="dataset-status" id="dataset-status">No dataset selected.</div>
+           <pre class="dataset-preview" id="dataset-preview" hidden></pre>
+         </div>
+
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 158c5b1e748acb4a3c337ebde8425e8d0b901396..caefda760a8b6b5d547b62b60998c95a16c140ee
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -5,6 +5,9 @@
+   var customConstraintCount = 0;
+   var maxCustomConstraints = 5;
+   var datasetSource = 'file';
++  var MAX_DATASET_BYTES = 50 * 1024 * 1024;
++  var MAX_IMAGE_BYTES = 5 * 1024 * 1024;
++  var MAX_IMAGE_COUNT = 10;
+ 
+   function stepEl(n) { return document.querySelector('.stepper-step[data-step="' + n + '"]'); }
+   function paneEl(n) { return document.getElementById('pane-' + n); }
+@@ -21,6 +24,14 @@
+     return div.innerHTML;
+   }
+ 
++  function formatBytes(bytes) {
++    if (!bytes || bytes <= 0) return '0 B';
++    var units = ['B', 'KB', 'MB', 'GB'];
++    var idx = Math.floor(Math.log(bytes) / Math.log(1024));
++    var value = bytes / Math.pow(1024, idx);
++    return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -64,8 +75,13 @@
+       var fileInput = document.getElementById('dataset-file');
+       if (fileInput.files && fileInput.files.length > 0) {
+         var file = fileInput.files[0];
+-        statusEl.textContent = 'Selected file: ' + file.name + ' (' + Math.round(file.size / 1024) + ' KB)';
+-        statusEl.classList.add('is-valid');
++        if (file.size > MAX_DATASET_BYTES) {
++          statusEl.textContent = 'File too large. Max size is 50MB.';
++          statusEl.classList.add('is-invalid');
++        } else {
++          statusEl.textContent = 'Selected file: ' + file.name + ' (' + formatBytes(file.size) + ')';
++          statusEl.classList.add('is-valid');
++        }
+       } else {
+         statusEl.textContent = 'Select a JSON file to continue.';
+       }
+@@ -80,6 +96,13 @@
+       return;
+     }
+ 
++    if (new Blob([paste]).size > MAX_DATASET_BYTES) {
++      statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
++      statusEl.classList.add('is-invalid');
++      previewEl.hidden = true;
++      return;
++    }
++
+     var parsed = parseJsonSafe(paste);
+     if (!parsed.valid) {
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+@@ -96,6 +119,37 @@
+     previewEl.hidden = false;
+   }
+ 
++  function updateImagesStatus() {
++    var statusEl = document.getElementById('images-status');
++    if (!statusEl) return;
++    statusEl.classList.remove('is-valid', 'is-invalid');
++
++    var imagesInput = document.getElementById('images-file');
++    var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
++    if (files.length === 0) {
++      statusEl.textContent = 'No images selected.';
++      return true;
++    }
++
++    if (files.length > MAX_IMAGE_COUNT) {
++      statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
++      statusEl.classList.add('is-invalid');
++      return false;
++    }
++
++    var oversized = files.find(function(file) { return file.size > MAX_IMAGE_BYTES; });
++    if (oversized) {
++      statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
++      statusEl.classList.add('is-invalid');
++      return false;
++    }
++
++    var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
++    statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
++    statusEl.classList.add('is-valid');
++    return true;
++  }
++
+   function parseJsonSafe(text) {
+     try {
+       var data = JSON.parse(text);
+@@ -295,12 +349,17 @@
+   function getDatasetFile() {
+     if (datasetSource === 'file') {
+       var fileInput = document.getElementById('dataset-file');
+-      if (fileInput.files && fileInput.files.length > 0) return fileInput.files[0];
++      if (fileInput.files && fileInput.files.length > 0) {
++        var file = fileInput.files[0];
++        if (file.size > MAX_DATASET_BYTES) return null;
++        return file;
++      }
+       return null;
+     }
+ 
+     var paste = document.getElementById('dataset-paste').value.trim();
+     if (paste) {
++      if (new Blob([paste]).size > MAX_DATASET_BYTES) return null;
+       var parsed = parseJsonSafe(paste);
+       if (parsed.valid) {
+         return new File([paste], 'dataset.json', { type: 'application/json' });
+@@ -334,6 +393,8 @@
+ 
+   document.getElementById('dataset-file').addEventListener('change', updateDatasetStatus);
+   document.getElementById('dataset-paste').addEventListener('input', updateDatasetStatus);
++  var imagesInputEl = document.getElementById('images-file');
++  if (imagesInputEl) imagesInputEl.addEventListener('change', updateImagesStatus);
+ 
+   document.getElementById('wizard-next').addEventListener('click', function() {
+     if (currentStep < maxStep) {
+@@ -344,6 +405,7 @@
+           document.getElementById('dataset-status').classList.add('is-invalid');
+           return;
+         }
++        if (!updateImagesStatus()) return;
+       }
+       var next = currentStep + 1;
+       showStep(next);
+@@ -386,6 +448,11 @@
+       document.getElementById('submit-error').style.display = 'block';
+       return;
+     }
++    if (!updateImagesStatus()) {
++      document.getElementById('submit-error').textContent = 'Please fix image upload limits (max 10, 5MB each).';
++      document.getElementById('submit-error').style.display = 'block';
++      return;
++    }
+ 
+     var invalidCustom = false;
+     document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
+@@ -458,4 +525,5 @@
+   buildConstraintsList();
+   setDatasetSource('file');
+   updateCustomLimitHint();
++  updateImagesStatus();
+ })();
+diff --git a/backend/web/templates/app_new.html b/backend/web/templates/app_new.html
+index a7b981a0c3ab124261a9d482d71ffed31d13e4b5..48c467c7ca64348b255ea2f83cd6ed7d16136bc0
+--- a/backend/web/templates/app_new.html
++++ b/backend/web/templates/app_new.html
+@@ -49,6 +49,7 @@
+             <label class="label">Images (optional, max 10, 5MB each)</label>
+             <input type="file" id="images-file" name="images" accept="image/*" multiple class="input">
+           </div>
++          <div class="dataset-status" id="images-status">No images selected.</div>
+           <div class="dataset-status" id="dataset-status">No dataset selected.</div>
+           <pre class="dataset-preview" id="dataset-preview" hidden></pre>
+         </div>
+
+
+thinking
+**Rerunning full test suite**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 932ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 297ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	0.029s
+ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
-?   	noema/internal/verify	[no test files]
+ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
 file update:
-diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
-index 031a838955372225b792ac338f7b7ef55fb4c240..e85a0702209ca351eff8a5238f4cc1b73fbe6822
---- a/backend/internal/evaluate/storage.go
-+++ b/backend/internal/evaluate/storage.go
-@@ -31,7 +31,7 @@
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 158c5b1e748acb4a3c337ebde8425e8d0b901396..caefda760a8b6b5d547b62b60998c95a16c140ee
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -5,6 +5,9 @@
+   var customConstraintCount = 0;
+   var maxCustomConstraints = 5;
+   var datasetSource = 'file';
++  var MAX_DATASET_BYTES = 50 * 1024 * 1024;
++  var MAX_IMAGE_BYTES = 5 * 1024 * 1024;
++  var MAX_IMAGE_COUNT = 10;
  
- func saveRunFiles(runPath string, dataset *multipart.FileHeader, images []*multipart.FileHeader) error {
- 	if err := saveUpload(dataset, filepath.Join(runPath, "dataset.json")); err != nil {
--		return fmt.Errorf("failed to save dataset")
-+		return fmt.Errorf("failed to save dataset: %w", err)
- 	}
- 	for i, f := range images {
- 		ext := filepath.Ext(f.Filename)
-@@ -40,7 +40,7 @@
- 		}
- 		dst := filepath.Join(runPath, fmt.Sprintf("image_%d%s", i, ext))
- 		if err := saveUpload(f, dst); err != nil {
--			return fmt.Errorf("failed to save image")
-+			return fmt.Errorf("failed to save image %d: %w", i, err)
- 		}
- 	}
- 	return nil
-@@ -49,16 +49,19 @@
- func saveUpload(fh *multipart.FileHeader, dst string) error {
- 	src, err := fh.Open()
- 	if err != nil {
--		return err
-+		return fmt.Errorf("open upload: %w", err)
- 	}
- 	defer src.Close()
- 	out, err := os.Create(dst)
- 	if err != nil {
--		return err
-+		return fmt.Errorf("create %s: %w", dst, err)
- 	}
- 	defer out.Close()
- 	_, err = io.Copy(out, src)
--	return err
-+	if err != nil {
-+		return fmt.Errorf("copy to %s: %w", dst, err)
-+	}
-+	return nil
- }
+   function stepEl(n) { return document.querySelector('.stepper-step[data-step="' + n + '"]'); }
+   function paneEl(n) { return document.getElementById('pane-' + n); }
+@@ -21,6 +24,14 @@
+     return div.innerHTML;
+   }
  
- func saveJSON(path string, v any) error {
++  function formatBytes(bytes) {
++    if (!bytes || bytes <= 0) return '0 B';
++    var units = ['B', 'KB', 'MB', 'GB'];
++    var idx = Math.floor(Math.log(bytes) / Math.log(1024));
++    var value = bytes / Math.pow(1024, idx);
++    return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -64,8 +75,13 @@
+       var fileInput = document.getElementById('dataset-file');
+       if (fileInput.files && fileInput.files.length > 0) {
+         var file = fileInput.files[0];
+-        statusEl.textContent = 'Selected file: ' + file.name + ' (' + Math.round(file.size / 1024) + ' KB)';
+-        statusEl.classList.add('is-valid');
++        if (file.size > MAX_DATASET_BYTES) {
++          statusEl.textContent = 'File too large. Max size is 50MB.';
++          statusEl.classList.add('is-invalid');
++        } else {
++          statusEl.textContent = 'Selected file: ' + file.name + ' (' + formatBytes(file.size) + ')';
++          statusEl.classList.add('is-valid');
++        }
+       } else {
+         statusEl.textContent = 'Select a JSON file to continue.';
+       }
+@@ -80,6 +96,13 @@
+       return;
+     }
+ 
++    if (new Blob([paste]).size > MAX_DATASET_BYTES) {
++      statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
++      statusEl.classList.add('is-invalid');
++      previewEl.hidden = true;
++      return;
++    }
++
+     var parsed = parseJsonSafe(paste);
+     if (!parsed.valid) {
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+@@ -96,6 +119,37 @@
+     previewEl.hidden = false;
+   }
+ 
++  function updateImagesStatus() {
++    var statusEl = document.getElementById('images-status');
++    if (!statusEl) return;
++    statusEl.classList.remove('is-valid', 'is-invalid');
++
++    var imagesInput = document.getElementById('images-file');
++    var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
++    if (files.length === 0) {
++      statusEl.textContent = 'No images selected.';
++      return true;
++    }
++
++    if (files.length > MAX_IMAGE_COUNT) {
++      statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
++      statusEl.classList.add('is-invalid');
++      return false;
++    }
++
++    var oversized = files.find(function(file) { return file.size > MAX_IMAGE_BYTES; });
++    if (oversized) {
++      statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
++      statusEl.classList.add('is-invalid');
++      return false;
++    }
++
++    var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
++    statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
++    statusEl.classList.add('is-valid');
++    return true;
++  }
++
+   function parseJsonSafe(text) {
+     try {
+       var data = JSON.parse(text);
+@@ -295,12 +349,17 @@
+   function getDatasetFile() {
+     if (datasetSource === 'file') {
+       var fileInput = document.getElementById('dataset-file');
+-      if (fileInput.files && fileInput.files.length > 0) return fileInput.files[0];
++      if (fileInput.files && fileInput.files.length > 0) {
++        var file = fileInput.files[0];
++        if (file.size > MAX_DATASET_BYTES) return null;
++        return file;
++      }
+       return null;
+     }
+ 
+     var paste = document.getElementById('dataset-paste').value.trim();
+     if (paste) {
++      if (new Blob([paste]).size > MAX_DATASET_BYTES) return null;
+       var parsed = parseJsonSafe(paste);
+       if (parsed.valid) {
+         return new File([paste], 'dataset.json', { type: 'application/json' });
+@@ -334,6 +393,8 @@
+ 
+   document.getElementById('dataset-file').addEventListener('change', updateDatasetStatus);
+   document.getElementById('dataset-paste').addEventListener('input', updateDatasetStatus);
++  var imagesInputEl = document.getElementById('images-file');
++  if (imagesInputEl) imagesInputEl.addEventListener('change', updateImagesStatus);
+ 
+   document.getElementById('wizard-next').addEventListener('click', function() {
+     if (currentStep < maxStep) {
+@@ -344,6 +405,7 @@
+           document.getElementById('dataset-status').classList.add('is-invalid');
+           return;
+         }
++        if (!updateImagesStatus()) return;
+       }
+       var next = currentStep + 1;
+       showStep(next);
+@@ -386,6 +448,11 @@
+       document.getElementById('submit-error').style.display = 'block';
+       return;
+     }
++    if (!updateImagesStatus()) {
++      document.getElementById('submit-error').textContent = 'Please fix image upload limits (max 10, 5MB each).';
++      document.getElementById('submit-error').style.display = 'block';
++      return;
++    }
+ 
+     var invalidCustom = false;
+     document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
+@@ -458,4 +525,5 @@
+   buildConstraintsList();
+   setDatasetSource('file');
+   updateCustomLimitHint();
++  updateImagesStatus();
+ })();
+diff --git a/backend/web/templates/app_new.html b/backend/web/templates/app_new.html
+index a7b981a0c3ab124261a9d482d71ffed31d13e4b5..48c467c7ca64348b255ea2f83cd6ed7d16136bc0
+--- a/backend/web/templates/app_new.html
++++ b/backend/web/templates/app_new.html
+@@ -49,6 +49,7 @@
+             <label class="label">Images (optional, max 10, 5MB each)</label>
+             <input type="file" id="images-file" name="images" accept="image/*" multiple class="input">
+           </div>
++          <div class="dataset-status" id="images-status">No images selected.</div>
+           <div class="dataset-status" id="dataset-status">No dataset selected.</div>
+           <pre class="dataset-preview" id="dataset-preview" hidden></pre>
+         </div>
 
+
+thinking
+**Confirming final response details**
+
+The final response will mention changes in two files and include summary plus tests in the required format.
 codex
 What you changed (short)
-- Added contextual error wrapping for upload saves so API error responses are actionable while preserving the original cause. (`internal/evaluate/storage.go`)
+- Added client-side size/count validation for datasets and images in the evaluation wizard, plus an images status panel to surface limits and totals. (`web/static/wizard.js`, `web/templates/app_new.html`)
 
-Tests run (must include go test ./...)
+Tests run
 - `go test ./...`
 
-If you want another iteration, say the word.
+Next steps (optional)
+1. If you want, I can refine the status copy or add inline linking from errors to the relevant inputs.
 file update:
-diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
-index 031a838955372225b792ac338f7b7ef55fb4c240..e85a0702209ca351eff8a5238f4cc1b73fbe6822
---- a/backend/internal/evaluate/storage.go
-+++ b/backend/internal/evaluate/storage.go
-@@ -31,7 +31,7 @@
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index 158c5b1e748acb4a3c337ebde8425e8d0b901396..caefda760a8b6b5d547b62b60998c95a16c140ee
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -5,6 +5,9 @@
+   var customConstraintCount = 0;
+   var maxCustomConstraints = 5;
+   var datasetSource = 'file';
++  var MAX_DATASET_BYTES = 50 * 1024 * 1024;
++  var MAX_IMAGE_BYTES = 5 * 1024 * 1024;
++  var MAX_IMAGE_COUNT = 10;
  
- func saveRunFiles(runPath string, dataset *multipart.FileHeader, images []*multipart.FileHeader) error {
- 	if err := saveUpload(dataset, filepath.Join(runPath, "dataset.json")); err != nil {
--		return fmt.Errorf("failed to save dataset")
-+		return fmt.Errorf("failed to save dataset: %w", err)
- 	}
- 	for i, f := range images {
- 		ext := filepath.Ext(f.Filename)
-@@ -40,7 +40,7 @@
- 		}
- 		dst := filepath.Join(runPath, fmt.Sprintf("image_%d%s", i, ext))
- 		if err := saveUpload(f, dst); err != nil {
--			return fmt.Errorf("failed to save image")
-+			return fmt.Errorf("failed to save image %d: %w", i, err)
- 		}
- 	}
- 	return nil
-@@ -49,16 +49,19 @@
- func saveUpload(fh *multipart.FileHeader, dst string) error {
- 	src, err := fh.Open()
- 	if err != nil {
--		return err
-+		return fmt.Errorf("open upload: %w", err)
- 	}
- 	defer src.Close()
- 	out, err := os.Create(dst)
- 	if err != nil {
--		return err
-+		return fmt.Errorf("create %s: %w", dst, err)
- 	}
- 	defer out.Close()
- 	_, err = io.Copy(out, src)
--	return err
-+	if err != nil {
-+		return fmt.Errorf("copy to %s: %w", dst, err)
-+	}
-+	return nil
- }
+   function stepEl(n) { return document.querySelector('.stepper-step[data-step="' + n + '"]'); }
+   function paneEl(n) { return document.getElementById('pane-' + n); }
+@@ -21,6 +24,14 @@
+     return div.innerHTML;
+   }
  
- func saveJSON(path string, v any) error {
++  function formatBytes(bytes) {
++    if (!bytes || bytes <= 0) return '0 B';
++    var units = ['B', 'KB', 'MB', 'GB'];
++    var idx = Math.floor(Math.log(bytes) / Math.log(1024));
++    var value = bytes / Math.pow(1024, idx);
++    return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
++  }
++
+   function showStep(step) {
+     currentStep = step;
+     document.querySelectorAll('.stepper-step').forEach(function(el) {
+@@ -64,8 +75,13 @@
+       var fileInput = document.getElementById('dataset-file');
+       if (fileInput.files && fileInput.files.length > 0) {
+         var file = fileInput.files[0];
+-        statusEl.textContent = 'Selected file: ' + file.name + ' (' + Math.round(file.size / 1024) + ' KB)';
+-        statusEl.classList.add('is-valid');
++        if (file.size > MAX_DATASET_BYTES) {
++          statusEl.textContent = 'File too large. Max size is 50MB.';
++          statusEl.classList.add('is-invalid');
++        } else {
++          statusEl.textContent = 'Selected file: ' + file.name + ' (' + formatBytes(file.size) + ')';
++          statusEl.classList.add('is-valid');
++        }
+       } else {
+         statusEl.textContent = 'Select a JSON file to continue.';
+       }
+@@ -80,6 +96,13 @@
+       return;
+     }
+ 
++    if (new Blob([paste]).size > MAX_DATASET_BYTES) {
++      statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
++      statusEl.classList.add('is-invalid');
++      previewEl.hidden = true;
++      return;
++    }
++
+     var parsed = parseJsonSafe(paste);
+     if (!parsed.valid) {
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+@@ -96,6 +119,37 @@
+     previewEl.hidden = false;
+   }
+ 
++  function updateImagesStatus() {
++    var statusEl = document.getElementById('images-status');
++    if (!statusEl) return;
++    statusEl.classList.remove('is-valid', 'is-invalid');
++
++    var imagesInput = document.getElementById('images-file');
++    var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
++    if (files.length === 0) {
++      statusEl.textContent = 'No images selected.';
++      return true;
++    }
++
++    if (files.length > MAX_IMAGE_COUNT) {
++      statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
++      statusEl.classList.add('is-invalid');
++      return false;
++    }
++
++    var oversized = files.find(function(file) { return file.size > MAX_IMAGE_BYTES; });
++    if (oversized) {
++      statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
++      statusEl.classList.add('is-invalid');
++      return false;
++    }
++
++    var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
++    statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
++    statusEl.classList.add('is-valid');
++    return true;
++  }
++
+   function parseJsonSafe(text) {
+     try {
+       var data = JSON.parse(text);
+@@ -295,12 +349,17 @@
+   function getDatasetFile() {
+     if (datasetSource === 'file') {
+       var fileInput = document.getElementById('dataset-file');
+-      if (fileInput.files && fileInput.files.length > 0) return fileInput.files[0];
++      if (fileInput.files && fileInput.files.length > 0) {
++        var file = fileInput.files[0];
++        if (file.size > MAX_DATASET_BYTES) return null;
++        return file;
++      }
+       return null;
+     }
+ 
+     var paste = document.getElementById('dataset-paste').value.trim();
+     if (paste) {
++      if (new Blob([paste]).size > MAX_DATASET_BYTES) return null;
+       var parsed = parseJsonSafe(paste);
+       if (parsed.valid) {
+         return new File([paste], 'dataset.json', { type: 'application/json' });
+@@ -334,6 +393,8 @@
+ 
+   document.getElementById('dataset-file').addEventListener('change', updateDatasetStatus);
+   document.getElementById('dataset-paste').addEventListener('input', updateDatasetStatus);
++  var imagesInputEl = document.getElementById('images-file');
++  if (imagesInputEl) imagesInputEl.addEventListener('change', updateImagesStatus);
+ 
+   document.getElementById('wizard-next').addEventListener('click', function() {
+     if (currentStep < maxStep) {
+@@ -344,6 +405,7 @@
+           document.getElementById('dataset-status').classList.add('is-invalid');
+           return;
+         }
++        if (!updateImagesStatus()) return;
+       }
+       var next = currentStep + 1;
+       showStep(next);
+@@ -386,6 +448,11 @@
+       document.getElementById('submit-error').style.display = 'block';
+       return;
+     }
++    if (!updateImagesStatus()) {
++      document.getElementById('submit-error').textContent = 'Please fix image upload limits (max 10, 5MB each).';
++      document.getElementById('submit-error').style.display = 'block';
++      return;
++    }
+ 
+     var invalidCustom = false;
+     document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
+@@ -458,4 +525,5 @@
+   buildConstraintsList();
+   setDatasetSource('file');
+   updateCustomLimitHint();
++  updateImagesStatus();
+ })();
+diff --git a/backend/web/templates/app_new.html b/backend/web/templates/app_new.html
+index a7b981a0c3ab124261a9d482d71ffed31d13e4b5..48c467c7ca64348b255ea2f83cd6ed7d16136bc0
+--- a/backend/web/templates/app_new.html
++++ b/backend/web/templates/app_new.html
+@@ -49,6 +49,7 @@
+             <label class="label">Images (optional, max 10, 5MB each)</label>
+             <input type="file" id="images-file" name="images" accept="image/*" multiple class="input">
+           </div>
++          <div class="dataset-status" id="images-status">No images selected.</div>
+           <div class="dataset-status" id="dataset-status">No dataset selected.</div>
+           <pre class="dataset-preview" id="dataset-preview" hidden></pre>
+         </div>
 
 tokens used
-10,639
+43,565
 What you changed (short)
-- Added contextual error wrapping for upload saves so API error responses are actionable while preserving the original cause. (`internal/evaluate/storage.go`)
+- Added client-side size/count validation for datasets and images in the evaluation wizard, plus an images status panel to surface limits and totals. (`web/static/wizard.js`, `web/templates/app_new.html`)
 
-Tests run (must include go test ./...)
+Tests run
 - `go test ./...`
 
-If you want another iteration, say the word.
+Next steps (optional)
+1. If you want, I can refine the status copy or add inline linking from errors to the relevant inputs.

@@ -5,6 +5,9 @@
   var customConstraintCount = 0;
   var maxCustomConstraints = 5;
   var datasetSource = 'file';
+  var MAX_DATASET_BYTES = 50 * 1024 * 1024;
+  var MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+  var MAX_IMAGE_COUNT = 10;
 
   function stepEl(n) { return document.querySelector('.stepper-step[data-step="' + n + '"]'); }
   function paneEl(n) { return document.getElementById('pane-' + n); }
@@ -19,6 +22,14 @@
     var div = document.createElement('div');
     div.textContent = s;
     return div.innerHTML;
+  }
+
+  function formatBytes(bytes) {
+    if (!bytes || bytes <= 0) return '0 B';
+    var units = ['B', 'KB', 'MB', 'GB'];
+    var idx = Math.floor(Math.log(bytes) / Math.log(1024));
+    var value = bytes / Math.pow(1024, idx);
+    return value.toFixed(value >= 10 || idx === 0 ? 0 : 1) + ' ' + units[idx];
   }
 
   function showStep(step) {
@@ -64,8 +75,13 @@
       var fileInput = document.getElementById('dataset-file');
       if (fileInput.files && fileInput.files.length > 0) {
         var file = fileInput.files[0];
-        statusEl.textContent = 'Selected file: ' + file.name + ' (' + Math.round(file.size / 1024) + ' KB)';
-        statusEl.classList.add('is-valid');
+        if (file.size > MAX_DATASET_BYTES) {
+          statusEl.textContent = 'File too large. Max size is 50MB.';
+          statusEl.classList.add('is-invalid');
+        } else {
+          statusEl.textContent = 'Selected file: ' + file.name + ' (' + formatBytes(file.size) + ')';
+          statusEl.classList.add('is-valid');
+        }
       } else {
         statusEl.textContent = 'Select a JSON file to continue.';
       }
@@ -76,6 +92,13 @@
     var paste = document.getElementById('dataset-paste').value.trim();
     if (!paste) {
       statusEl.textContent = 'Paste JSON to continue.';
+      previewEl.hidden = true;
+      return;
+    }
+
+    if (new Blob([paste]).size > MAX_DATASET_BYTES) {
+      statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
+      statusEl.classList.add('is-invalid');
       previewEl.hidden = true;
       return;
     }
@@ -94,6 +117,37 @@
     if (preview.length > 700) preview = preview.slice(0, 700) + '\n…';
     previewEl.textContent = preview;
     previewEl.hidden = false;
+  }
+
+  function updateImagesStatus() {
+    var statusEl = document.getElementById('images-status');
+    if (!statusEl) return;
+    statusEl.classList.remove('is-valid', 'is-invalid');
+
+    var imagesInput = document.getElementById('images-file');
+    var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
+    if (files.length === 0) {
+      statusEl.textContent = 'No images selected.';
+      return true;
+    }
+
+    if (files.length > MAX_IMAGE_COUNT) {
+      statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
+      statusEl.classList.add('is-invalid');
+      return false;
+    }
+
+    var oversized = files.find(function(file) { return file.size > MAX_IMAGE_BYTES; });
+    if (oversized) {
+      statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
+      statusEl.classList.add('is-invalid');
+      return false;
+    }
+
+    var total = files.reduce(function(sum, file) { return sum + file.size; }, 0);
+    statusEl.textContent = 'Images selected: ' + files.length + ' (' + formatBytes(total) + ' total)';
+    statusEl.classList.add('is-valid');
+    return true;
   }
 
   function parseJsonSafe(text) {
@@ -295,12 +349,17 @@
   function getDatasetFile() {
     if (datasetSource === 'file') {
       var fileInput = document.getElementById('dataset-file');
-      if (fileInput.files && fileInput.files.length > 0) return fileInput.files[0];
+      if (fileInput.files && fileInput.files.length > 0) {
+        var file = fileInput.files[0];
+        if (file.size > MAX_DATASET_BYTES) return null;
+        return file;
+      }
       return null;
     }
 
     var paste = document.getElementById('dataset-paste').value.trim();
     if (paste) {
+      if (new Blob([paste]).size > MAX_DATASET_BYTES) return null;
       var parsed = parseJsonSafe(paste);
       if (parsed.valid) {
         return new File([paste], 'dataset.json', { type: 'application/json' });
@@ -334,6 +393,8 @@
 
   document.getElementById('dataset-file').addEventListener('change', updateDatasetStatus);
   document.getElementById('dataset-paste').addEventListener('input', updateDatasetStatus);
+  var imagesInputEl = document.getElementById('images-file');
+  if (imagesInputEl) imagesInputEl.addEventListener('change', updateImagesStatus);
 
   document.getElementById('wizard-next').addEventListener('click', function() {
     if (currentStep < maxStep) {
@@ -344,6 +405,7 @@
           document.getElementById('dataset-status').classList.add('is-invalid');
           return;
         }
+        if (!updateImagesStatus()) return;
       }
       var next = currentStep + 1;
       showStep(next);
@@ -383,6 +445,11 @@
     var datasetFile = getDatasetFile();
     if (!datasetFile) {
       document.getElementById('submit-error').textContent = 'Please provide a dataset (file or pasted JSON).';
+      document.getElementById('submit-error').style.display = 'block';
+      return;
+    }
+    if (!updateImagesStatus()) {
+      document.getElementById('submit-error').textContent = 'Please fix image upload limits (max 10, 5MB each).';
       document.getElementById('submit-error').style.display = 'block';
       return;
     }
@@ -458,4 +525,5 @@
   buildConstraintsList();
   setDatasetSource('file');
   updateCustomLimitHint();
+  updateImagesStatus();
 })();
