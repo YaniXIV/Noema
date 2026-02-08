@@ -28,6 +28,33 @@
     };
   }
 
+  function copyText(text, button) {
+    if (!text) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function() {
+        if (button) showCopied(button);
+      });
+    } else {
+      var temp = document.createElement('textarea');
+      temp.value = text;
+      document.body.appendChild(temp);
+      temp.select();
+      document.execCommand('copy');
+      document.body.removeChild(temp);
+      if (button) showCopied(button);
+    }
+  }
+
+  function showCopied(button) {
+    var original = button.textContent;
+    button.textContent = 'Copied';
+    button.disabled = true;
+    setTimeout(function() {
+      button.textContent = original;
+      button.disabled = false;
+    }, 1200);
+  }
+
   function loadRecentRuns() {
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
@@ -41,15 +68,15 @@
       emptyEl.style.display = 'none';
       listEl.innerHTML = '';
       runs.slice(0, 10).forEach(function(r) {
-        var a = document.createElement('a');
-        a.href = '/app/results/' + r.run_id;
-        a.className = 'recent-run-item';
+        var item = document.createElement('div');
+        item.className = 'recent-run-item';
 
         var header = document.createElement('div');
         header.className = 'recent-run-header';
 
-        var name = document.createElement('div');
-        name.className = 'recent-run-name';
+        var name = document.createElement('a');
+        name.className = 'recent-run-link recent-run-name';
+        name.href = '/app/results/' + r.run_id;
         name.textContent = r.name || r.run_id;
 
         var status = document.createElement('span');
@@ -74,9 +101,18 @@
           meta.appendChild(time);
         }
 
-        a.appendChild(header);
-        a.appendChild(meta);
-        listEl.appendChild(a);
+        var copyBtn = document.createElement('button');
+        copyBtn.type = 'button';
+        copyBtn.className = 'btn btn-ghost btn-sm recent-run-copy';
+        copyBtn.textContent = 'Copy ID';
+        copyBtn.addEventListener('click', function() {
+          copyText(r.run_id, copyBtn);
+        });
+        meta.appendChild(copyBtn);
+
+        item.appendChild(header);
+        item.appendChild(meta);
+        listEl.appendChild(item);
       });
     } catch (e) {
       listEl.innerHTML = '';

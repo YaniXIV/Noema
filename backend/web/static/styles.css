@@ -347,6 +347,7 @@ pre,
 .severity-select:focus-visible,
 .upload-zone:focus-visible,
 .recent-run-item:focus-visible,
+.recent-run-link:focus-visible,
 .verify-run-id:focus-visible,
 .logo:focus-visible,
 .constraint-details summary:focus-visible {
@@ -385,7 +386,6 @@ pre,
   flex-direction: column;
   gap: 0.35rem;
   color: var(--text-muted);
-  text-decoration: none;
   font-size: 0.95rem;
   padding: 0.75rem 0.7rem;
   border-radius: 12px;
@@ -397,6 +397,12 @@ pre,
   background: rgba(255,255,255,0.03);
   border-color: rgba(255,255,255,0.08);
 }
+
+.recent-run-link {
+  color: var(--text);
+  text-decoration: none;
+}
+.recent-run-link:hover { color: var(--accent); }
 
 .recent-run-header {
   display: flex;
@@ -418,6 +424,8 @@ pre,
   font-size: 0.85rem;
   color: var(--text-muted);
 }
+
+.recent-run-copy { margin-left: auto; }
 
 .status-pill {
   font-size: 0.7rem;
