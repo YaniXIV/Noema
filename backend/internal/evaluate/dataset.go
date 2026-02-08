@@ -65,6 +65,15 @@ func readDatasetFile(fh *multipart.FileHeader) ([]byte, Dataset, error) {
 		if strings.TrimSpace(item.Text) == "" {
 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
 		}
+		if item.ImageRef != "" {
+			trimmedRef := strings.TrimSpace(item.ImageRef)
+			if trimmedRef == "" {
+				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must be non-empty", i)
+			}
+			if trimmedRef != item.ImageRef {
+				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must not include leading/trailing whitespace", i)
+			}
+		}
 		if _, exists := seenIDs[item.ID]; exists {
 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
 		}

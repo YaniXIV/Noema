@@ -1,0 +1,809 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3cab-06cb-76e2-9501-72163792c42d
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Running Go tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 270ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+ok  	noema/internal/config	(cached)
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Scanning for improvement areas**
+
+I'm searching the repo for TODOs and error handling comments to identify clear spots for meaningful improvements that enhance reliability or maintainability within a few files.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"TODO|FIXME|panic\\(|Must\\(|should never|unreachable\"" in /Users/yani/Noema/backend exited 1 in 52ms:
+
+
+thinking
+**Noting missing matches**
+
+No matches were found with the current search, indicating the need to improve the search criteria or approach before proceeding. Next, I'll explore the code more to understand and plan adding tests or small correctness checks.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
+cmd
+data
+go.mod
+go.sum
+internal
+main
+server
+web
+
+thinking
+**Considering enhancing error handling**
+
+I'm reviewing the httputil module to identify opportunities for improving its error handling and robustness.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "http" internal/httputil -S' in /Users/yani/Noema/backend succeeded in 51ms:
+internal/httputil/body_test.go:1:package httputil
+internal/httputil/body_test.go:5:	"net/http"
+internal/httputil/body_test.go:16:		{name: "max bytes error", err: &http.MaxBytesError{Limit: 1}, want: true},
+internal/httputil/body_test.go:17:		{name: "http too large string", err: errors.New("http: request body too large"), want: true},
+internal/httputil/body.go:1:package httputil
+internal/httputil/body.go:5:	"net/http"
+internal/httputil/body.go:14:	var maxBytesErr *http.MaxBytesError
+
+thinking
+**Opening file for improvement**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/session/store.go" in /Users/yani/Noema/backend exited 1 in 51ms:
+sed: internal/session/store.go: No such file or directory
+
+thinking
+**Identifying need for internal session list**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/session' in /Users/yani/Noema/backend succeeded in 51ms:
+session.go
+session_test.go
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/session/session.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package session
+
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"strings"
+)
+
+const CookieName = "noema_judge"
+
+// Sign produces a signed cookie value for the given payload (e.g. judge key).
+// Format: base64(payload) + "." + hex(HMAC-SHA256(secret, payload)).
+func Sign(secret, payload string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(payload))
+	sig := hex.EncodeToString(mac.Sum(nil))
+	encoded := base64.StdEncoding.EncodeToString([]byte(payload))
+
+thinking
+**Assessing verification security**
+
+I'm confirming the verification uses constant-time comparison with hmac.Equal and considering adding constant-time checks on base64 decoding; next, I'll review the verify module for potential improvements.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/verify/verify.go" in /Users/yani/Noema/backend exited 1 in 52ms:
+sed: internal/verify/verify.go: No such file or directory
+
+thinking
+**Listing verification steps**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/verify' in /Users/yani/Noema/backend succeeded in 52ms:
+handler.go
+handler_test.go
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/verify/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package verify
+
+import (
+	"encoding/base64"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+// VerifyRequest is the JSON body for POST /api/verify.
+type VerifyRequest struct {
+	RunID           string `json:"run_id"`
+	ProofB64        string `json:"proof_b64"`
+	PublicInputsB64 string `json:"public_inputs_b64"`
+
+thinking
+**Considering validation for base64 size and proof verification**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
+	}
+	return nil
+}
+
+func parseEvalOutputOptional(form *multipart.Form, enabled map[string]ConstraintRule) (EvalOutput, error) {
+	out, provided, err := parseEvalOutputProvided(form, enabled)
+	if err != nil {
+		return EvalOutput{}, err
+	}
+	if !provided {
+		return stubEvalOutput(enabled), nil
+	}
+	return out, nil
+}
+
+func stubEvalOutput(enabled map[string]ConstraintRule) EvalOutput {
+	out := EvalOutput{
+		SchemaVersion: 1,
+		Constraints:   make([]EvalConstraintResult, 0, len(enabled)),
+		MaxSeverity:   0,
+
+thinking
+**Reviewing parsing error handling**
+
+I'm verifying how parseEvalOutputOptional handles empty strings and considering whether parseUploads manages errors similarly to improve robustness.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/uploads.go" in /Users/yani/Noema/backend exited 1 in 52ms:
+sed: internal/evaluate/uploads.go: No such file or directory
+
+thinking
+**Listing internal evaluation methods**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
+cache.go
+commitment.go
+dataset.go
+gemini_eval.go
+handler.go
+handler_integration_test.go
+handler_test.go
+images.go
+output.go
+parse.go
+policy.go
+prompt.go
+schema.go
+spec.go
+storage.go
+
+thinking
+**Checking parse.go and dataset files**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"strings"
+)
+
+type Dataset struct {
+	Items []DatasetItem `json:"items"`
+}
+
+type DatasetItem struct {
+	ID       string         `json:"id"`
+	Text     string         `json:"text"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+	ImageRef string         `json:"image_ref,omitempty"`
+
+thinking
+**Considering image reference validation**
+
+Noticing a potential improvement to verify that each dataset item's ImageRef points to an existing image, likely to be handled during image processing in images.go. Next, I'll check images.go to confirm and plan this validation.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/images.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"fmt"
+	"io"
+	"mime"
+	"mime/multipart"
+	"path/filepath"
+	"strings"
+)
+
+type ImageInfo struct {
+	Filename string
+	MIMEType string
+	Data     []byte
+}
+
+func readImages(files []*multipart.FileHeader) ([]ImageInfo, error) {
+	out := make([]ImageInfo, 0, len(files))
+	for _, fh := range files {
+
+thinking
+**Considering image size validation**
+
+I'm exploring whether to add validation for image sizes by checking how uploaded files are parsed, starting with searching the parseUploads area.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "parseUploads|dataset" internal/evaluate -S' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/prompt.go:23:		Description: "Assess whether the dataset contains personally identifiable information that could identify individuals directly or indirectly, including contextual linkage of names, addresses, contact details, or identifiable imagery.",
+internal/evaluate/prompt.go:32:		Description: "Determine whether the dataset contains regulated sensitive information such as medical records, financial account information, biometric identifiers, or government-issued identifiers.",
+internal/evaluate/prompt.go:41:		Description: "Evaluate whether the dataset appears to contain content that may have been collected without proper user consent or originates from private communications or restricted sources.",
+internal/evaluate/prompt.go:50:		Description: "Assess whether the dataset contains safety-critical guidance such as medical, legal, engineering, or operational instructions that could cause harm if followed incorrectly.",
+internal/evaluate/prompt.go:59:		Description: "Evaluate whether the dataset includes content that could enable harmful real-world actions if generated or amplified by AI systems, including operational misuse or harmful procedural knowledge.",
+internal/evaluate/prompt.go:66:	"dataset_intended_use_mismatch": {
+internal/evaluate/prompt.go:67:		ID:          "dataset_intended_use_mismatch",
+internal/evaluate/prompt.go:68:		Description: "Determine whether the dataset content appears inconsistent with its stated intended use or declared labeling context, indicating potential governance or deployment risk.",
+internal/evaluate/prompt.go:72:			"2": "Clear mismatch between dataset content and intended use",
+internal/evaluate/prompt.go:79:You are a strict dataset policy evaluator for Noema.
+internal/evaluate/prompt.go:86:func buildUserPrompt(spec Spec, datasetJSON []byte, images []ImageInfo) string {
+internal/evaluate/prompt.go:89:	buf.WriteString("Evaluate the dataset against the following constraints.\n")
+internal/evaluate/prompt.go:109:	buf.Write(datasetJSON)
+internal/evaluate/parse.go:74:func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.FileHeader, error) {
+internal/evaluate/parse.go:75:	datasetFiles := form.File["dataset"]
+internal/evaluate/parse.go:76:	if len(datasetFiles) == 0 {
+internal/evaluate/parse.go:77:		return nil, nil, fmt.Errorf("missing required file: dataset")
+internal/evaluate/parse.go:79:	if len(datasetFiles) > 1 {
+internal/evaluate/parse.go:80:		return nil, nil, fmt.Errorf("only one dataset file allowed")
+internal/evaluate/parse.go:82:	datasetFile := datasetFiles[0]
+
+thinking
+**Opening data parsing code**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"path/filepath"
+	"strings"
+
+	"noema/internal/config"
+)
+
+func parseSpec(form *multipart.Form) (Spec, error) {
+	specStrs := form.Value["spec"]
+	if len(specStrs) == 0 || specStrs[0] == "" {
+		return Spec{}, fmt.Errorf("missing field: spec")
+	}
+	if len(specStrs) > 1 {
+		return Spec{}, fmt.Errorf("only one spec value allowed")
+
+thinking
+**Identifying dataset image_ref validation gaps**
+
+Discovered that image_ref values aren’t trimmed, allowing leading/trailing whitespace which risks mismatches; current checks only verify non-empty but don’t enforce trimming or precise error messaging. Planning to tighten validation by trimming and clarifying messages, plus briefly considering metadata checks and spec parsing improvements.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/gemini_eval.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"context"
+	"log"
+	"mime/multipart"
+	"os"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/gemini"
+)
+
+const geminiEvalTimeout = 45 * time.Second
+
+func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
+	if out, provided, err := parseEvalOutputProvided(form, enabled); err != nil {
+		return EvalOutput{}, err
+	} else if provided {
+		return out, nil
+
+thinking
+**Noting potential improvements**
+
+Identified that readImages may not enforce zero size but parseUploads does, and SetCookieHeader sets Max-Age without Expires. Considering adding file size checks in httputil's IsBodyTooLarge.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/httputil/body.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package httputil
+
+import (
+	"errors"
+	"net/http"
+	"strings"
+)
+
+// IsBodyTooLarge reports whether the error indicates the request body exceeded MaxBytesReader.
+func IsBodyTooLarge(err error) bool {
+	if err == nil {
+		return false
+	}
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "request body too large") ||
+		strings.Contains(msg, "multipart: message too large")
+
+
+thinking
+**Planning dataset image_ref validation**
+
+I'm planning to enhance dataset validation by trimming whitespace from image_ref fields, ensuring they're non-empty if set, and checking for disallowed path separators to prevent mismatches with uploaded filenames. Next, I'll implement these checks in readDatasetFile and add corresponding tests in handler_test.
+thinking
+**Preparing tests for image_ref validation**
+
+I'm planning to add tests covering whitespace-only and leading/trailing whitespace cases for image_ref in readDatasetFile validation, plus at least one test in handler_test during evaluation; I'll review existing test structure before implementation.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '250,430p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+		t.Fatalf("expected error for multiple eval_output values")
+	}
+}
+
+func TestParseEvalOutputOptional_IgnoresWhitespace(t *testing.T) {
+	spec := Spec{
+		SchemaVersion: 1,
+		Constraints: []Constraint{
+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+			{ID: "harm_enabling_content_risk", Enabled: true, AllowedMaxSeverity: 2},
+		},
+	}
+	enabled, err := enabledConstraints(spec)
+	if err != nil {
+		t.Fatalf("enabledConstraints error: %v", err)
+	}
+
+	form := &multipart.Form{Value: map[string][]string{"eval_output": {" \n\t "}}}
+	out, err := parseEvalOutputOptional(form, enabled)
+	if err != nil {
+
+
+thinking
+**Planning image_ref validation**
+
+I'm preparing to add checks for image_ref in dataset parsing to ensure no leading/trailing whitespace and require non-empty values when image_ref is provided, aiming to improve error clarity and UX by trimming before matching uploaded filenames.
+thinking
+**Defining precise image_ref whitespace validation**
+
+I'm finalizing validation to reject image_ref values that are empty or include leading/trailing whitespace, aligning error messages for clarity and consistency, and planning two tests covering whitespace-only and trimmed image_ref cases with appropriate image files to isolate these errors.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/dataset.go
+@@ -67,2 +67,11 @@
+ 		}
++		if item.ImageRef != "" {
++			trimmedRef := strings.TrimSpace(item.ImageRef)
++			if trimmedRef == "" {
++				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must be non-empty", i)
++			}
++			if trimmedRef != item.ImageRef {
++				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must not include leading/trailing whitespace", i)
++			}
++		}
+ 		if _, exists := seenIDs[item.ID]; exists {
+apply_patch(auto_approved=true) exited 0 in 32ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/dataset.go
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 8c0754f0757bb53fee014845a10a1cdde371a6dc..52f2a3b7bc8ca6358a68728234fa70ed3ecf5873
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -65,6 +65,15 @@
+ 		if strings.TrimSpace(item.Text) == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
+ 		}
++		if item.ImageRef != "" {
++			trimmedRef := strings.TrimSpace(item.ImageRef)
++			if trimmedRef == "" {
++				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must be non-empty", i)
++			}
++			if trimmedRef != item.ImageRef {
++				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must not include leading/trailing whitespace", i)
++			}
++		}
+ 		if _, exists := seenIDs[item.ID]; exists {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
+ 		}
+
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 8c0754f0757bb53fee014845a10a1cdde371a6dc..52f2a3b7bc8ca6358a68728234fa70ed3ecf5873
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -65,6 +65,15 @@
+ 		if strings.TrimSpace(item.Text) == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
+ 		}
++		if item.ImageRef != "" {
++			trimmedRef := strings.TrimSpace(item.ImageRef)
++			if trimmedRef == "" {
++				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must be non-empty", i)
++			}
++			if trimmedRef != item.ImageRef {
++				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must not include leading/trailing whitespace", i)
++			}
++		}
+ 		if _, exists := seenIDs[item.ID]; exists {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
+ 		}
+
+
+thinking
+**Adding tests to handler_test.go**
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
+@@ -328,2 +328,28 @@
+ 
++func TestValidateDatasetJSON_RejectsWhitespaceImageRef(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"   "}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
++	})
++	datasetFile := form.File["dataset"][0]
++	imageFiles := form.File["images"]
++	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
++		t.Fatalf("expected error for whitespace image_ref")
++	}
++}
++
++func TestValidateDatasetJSON_RejectsTrimmedImageRef(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello","image_ref":" img.png "}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
++	})
++	datasetFile := form.File["dataset"][0]
++	imageFiles := form.File["images"]
++	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
++		t.Fatalf("expected error for trimmed image_ref")
++	}
++}
++
+ func TestValidateDatasetJSON_RejectsDuplicateIDs(t *testing.T) {
+apply_patch(auto_approved=true) exited 0 in 37ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 8c0754f0757bb53fee014845a10a1cdde371a6dc..52f2a3b7bc8ca6358a68728234fa70ed3ecf5873
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -65,6 +65,15 @@
+ 		if strings.TrimSpace(item.Text) == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
+ 		}
++		if item.ImageRef != "" {
++			trimmedRef := strings.TrimSpace(item.ImageRef)
++			if trimmedRef == "" {
++				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must be non-empty", i)
++			}
++			if trimmedRef != item.ImageRef {
++				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must not include leading/trailing whitespace", i)
++			}
++		}
+ 		if _, exists := seenIDs[item.ID]; exists {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
+ 		}
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 67e7a3dfdb544e290d4bbb03691a2cd295e32621..8786d43d8b3342aad2195a514e2dffc746da04f9
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -326,6 +326,32 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsWhitespaceImageRef(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"   "}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
++	})
++	datasetFile := form.File["dataset"][0]
++	imageFiles := form.File["images"]
++	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
++		t.Fatalf("expected error for whitespace image_ref")
++	}
++}
++
++func TestValidateDatasetJSON_RejectsTrimmedImageRef(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello","image_ref":" img.png "}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
++	})
++	datasetFile := form.File["dataset"][0]
++	imageFiles := form.File["images"]
++	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
++		t.Fatalf("expected error for trimmed image_ref")
++	}
++}
++
+ func TestValidateDatasetJSON_RejectsDuplicateIDs(t *testing.T) {
+ 	dataset := `{"items":[{"id":"1","text":"hello"},{"id":"1","text":"world"}]}`
+ 	form := buildMultipartForm(t, []formFile{
+
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 8c0754f0757bb53fee014845a10a1cdde371a6dc..52f2a3b7bc8ca6358a68728234fa70ed3ecf5873
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -65,6 +65,15 @@
+ 		if strings.TrimSpace(item.Text) == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
+ 		}
++		if item.ImageRef != "" {
++			trimmedRef := strings.TrimSpace(item.ImageRef)
++			if trimmedRef == "" {
++				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must be non-empty", i)
++			}
++			if trimmedRef != item.ImageRef {
++				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must not include leading/trailing whitespace", i)
++			}
++		}
+ 		if _, exists := seenIDs[item.ID]; exists {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
+ 		}
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 67e7a3dfdb544e290d4bbb03691a2cd295e32621..8786d43d8b3342aad2195a514e2dffc746da04f9
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -326,6 +326,32 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsWhitespaceImageRef(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"   "}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
++	})
++	datasetFile := form.File["dataset"][0]
++	imageFiles := form.File["images"]
++	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
++		t.Fatalf("expected error for whitespace image_ref")
++	}
++}
++
++func TestValidateDatasetJSON_RejectsTrimmedImageRef(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello","image_ref":" img.png "}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
++	})
++	datasetFile := form.File["dataset"][0]
++	imageFiles := form.File["images"]
++	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
++		t.Fatalf("expected error for trimmed image_ref")
++	}
++}
++
+ func TestValidateDatasetJSON_RejectsDuplicateIDs(t *testing.T) {
+ 	dataset := `{"items":[{"id":"1","text":"hello"},{"id":"1","text":"world"}]}`
+ 	form := buildMultipartForm(t, []formFile{
+
+
+thinking
+**Running full Go test suite**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 600ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+ok  	noema/internal/config	(cached)
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.106s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 8c0754f0757bb53fee014845a10a1cdde371a6dc..52f2a3b7bc8ca6358a68728234fa70ed3ecf5873
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -65,6 +65,15 @@
+ 		if strings.TrimSpace(item.Text) == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
+ 		}
++		if item.ImageRef != "" {
++			trimmedRef := strings.TrimSpace(item.ImageRef)
++			if trimmedRef == "" {
++				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must be non-empty", i)
++			}
++			if trimmedRef != item.ImageRef {
++				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must not include leading/trailing whitespace", i)
++			}
++		}
+ 		if _, exists := seenIDs[item.ID]; exists {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
+ 		}
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 67e7a3dfdb544e290d4bbb03691a2cd295e32621..8786d43d8b3342aad2195a514e2dffc746da04f9
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -326,6 +326,32 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsWhitespaceImageRef(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"   "}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
++	})
++	datasetFile := form.File["dataset"][0]
++	imageFiles := form.File["images"]
++	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
++		t.Fatalf("expected error for whitespace image_ref")
++	}
++}
++
++func TestValidateDatasetJSON_RejectsTrimmedImageRef(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello","image_ref":" img.png "}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
++	})
++	datasetFile := form.File["dataset"][0]
++	imageFiles := form.File["images"]
++	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
++		t.Fatalf("expected error for trimmed image_ref")
++	}
++}
++
+ func TestValidateDatasetJSON_RejectsDuplicateIDs(t *testing.T) {
+ 	dataset := `{"items":[{"id":"1","text":"hello"},{"id":"1","text":"world"}]}`
+ 	form := buildMultipartForm(t, []formFile{
+
+
+thinking
+**Summarizing changes and tests**
+
+I prepared a concise summary listing modified files, what was changed, and which tests were run, adhering to the formatting instructions for clarity and brevity.
+codex
+What you changed
+- Tightened dataset validation to reject whitespace-only or trimmed `image_ref` values, with tests covering both cases. (`internal/evaluate/dataset.go`, `internal/evaluate/handler_test.go`)
+
+Tests run
+- `go test ./...`
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 8c0754f0757bb53fee014845a10a1cdde371a6dc..52f2a3b7bc8ca6358a68728234fa70ed3ecf5873
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -65,6 +65,15 @@
+ 		if strings.TrimSpace(item.Text) == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
+ 		}
++		if item.ImageRef != "" {
++			trimmedRef := strings.TrimSpace(item.ImageRef)
++			if trimmedRef == "" {
++				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must be non-empty", i)
++			}
++			if trimmedRef != item.ImageRef {
++				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must not include leading/trailing whitespace", i)
++			}
++		}
+ 		if _, exists := seenIDs[item.ID]; exists {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
+ 		}
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 67e7a3dfdb544e290d4bbb03691a2cd295e32621..8786d43d8b3342aad2195a514e2dffc746da04f9
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -326,6 +326,32 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsWhitespaceImageRef(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"   "}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
++	})
++	datasetFile := form.File["dataset"][0]
++	imageFiles := form.File["images"]
++	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
++		t.Fatalf("expected error for whitespace image_ref")
++	}
++}
++
++func TestValidateDatasetJSON_RejectsTrimmedImageRef(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello","image_ref":" img.png "}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
++	})
++	datasetFile := form.File["dataset"][0]
++	imageFiles := form.File["images"]
++	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
++		t.Fatalf("expected error for trimmed image_ref")
++	}
++}
++
+ func TestValidateDatasetJSON_RejectsDuplicateIDs(t *testing.T) {
+ 	dataset := `{"items":[{"id":"1","text":"hello"},{"id":"1","text":"world"}]}`
+ 	form := buildMultipartForm(t, []formFile{
+
+tokens used
+28,242
+What you changed
+- Tightened dataset validation to reject whitespace-only or trimmed `image_ref` values, with tests covering both cases. (`internal/evaluate/dataset.go`, `internal/evaluate/handler_test.go`)
+
+Tests run
+- `go test ./...`

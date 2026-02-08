@@ -326,6 +326,32 @@ func TestValidateDatasetJSON_ImageRefMatchesUpload(t *testing.T) {
 	}
 }
 
+func TestValidateDatasetJSON_RejectsWhitespaceImageRef(t *testing.T) {
+	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"   "}]}`
+	form := buildMultipartForm(t, []formFile{
+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
+		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
+	})
+	datasetFile := form.File["dataset"][0]
+	imageFiles := form.File["images"]
+	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
+		t.Fatalf("expected error for whitespace image_ref")
+	}
+}
+
+func TestValidateDatasetJSON_RejectsTrimmedImageRef(t *testing.T) {
+	dataset := `{"items":[{"id":"1","text":"hello","image_ref":" img.png "}]}`
+	form := buildMultipartForm(t, []formFile{
+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
+		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
+	})
+	datasetFile := form.File["dataset"][0]
+	imageFiles := form.File["images"]
+	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
+		t.Fatalf("expected error for trimmed image_ref")
+	}
+}
+
 func TestValidateDatasetJSON_RejectsDuplicateIDs(t *testing.T) {
 	dataset := `{"items":[{"id":"1","text":"hello"},{"id":"1","text":"world"}]}`
 	form := buildMultipartForm(t, []formFile{
