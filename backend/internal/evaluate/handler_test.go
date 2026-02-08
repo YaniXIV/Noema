@@ -431,7 +431,8 @@ func TestParseUploads_RejectsDuplicateImageNames(t *testing.T) {
 
 func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
 	spec := Spec{
-		SchemaVersion: 1,
+		SchemaVersion:  1,
+		EvaluationName: "eval",
 		Constraints: []Constraint{
 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
@@ -444,7 +445,8 @@ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
 
 func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
 	spec := Spec{
-		SchemaVersion: 1,
+		SchemaVersion:  1,
+		EvaluationName: "eval",
 		CustomConstraints: []CustomConstraint{
 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
 		},
@@ -456,7 +458,8 @@ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
 
 func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
 	spec := Spec{
-		SchemaVersion: 1,
+		SchemaVersion:  1,
+		EvaluationName: "eval",
 		Constraints: []Constraint{
 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
@@ -469,13 +472,40 @@ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
 
 func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
 	spec := Spec{
-		SchemaVersion: 1,
+		SchemaVersion:  1,
+		EvaluationName: "eval",
 		Constraints: []Constraint{
 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
 		},
 	}
 	if err := validateSpec(spec); err == nil {
 		t.Fatalf("expected error for whitespace in constraint id")
+	}
+}
+
+func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
+	spec := Spec{
+		SchemaVersion:  1,
+		EvaluationName: "",
+		Constraints: []Constraint{
+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+		},
+	}
+	if err := validateSpec(spec); err == nil {
+		t.Fatalf("expected error for missing evaluation_name")
+	}
+}
+
+func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
+	spec := Spec{
+		SchemaVersion:  1,
+		EvaluationName: " eval ",
+		Constraints: []Constraint{
+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+		},
+	}
+	if err := validateSpec(spec); err == nil {
+		t.Fatalf("expected error for whitespace in evaluation_name")
 	}
 }
 

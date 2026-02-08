@@ -20,7 +20,7 @@ func TestEvaluateHandler_WithEvalOutput(t *testing.T) {
 	router.POST("/api/evaluate", Handler(runsDir, 0))
 
 	spec := Spec{
-		SchemaVersion: 1,
+		SchemaVersion:  1,
 		EvaluationName: "test",
 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
 		Constraints: []Constraint{
@@ -70,7 +70,7 @@ func TestEvaluateHandler_StubEvalOutput(t *testing.T) {
 	router.POST("/api/evaluate", Handler(runsDir, 0))
 
 	spec := Spec{
-		SchemaVersion: 1,
+		SchemaVersion:  1,
 		EvaluationName: "test",
 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
 		Constraints: []Constraint{
@@ -111,7 +111,8 @@ func TestEvaluateHandler_InvalidDataset(t *testing.T) {
 	router.POST("/api/evaluate", Handler(runsDir, 0))
 
 	spec := Spec{
-		SchemaVersion: 1,
+		SchemaVersion:  1,
+		EvaluationName: "test",
 		Constraints: []Constraint{
 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
 		},
@@ -135,7 +136,8 @@ func TestEvaluateHandler_InvalidEvalOutput(t *testing.T) {
 	router.POST("/api/evaluate", Handler(runsDir, 0))
 
 	spec := Spec{
-		SchemaVersion: 1,
+		SchemaVersion:  1,
+		EvaluationName: "test",
 		Constraints: []Constraint{
 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
 		},
@@ -166,7 +168,8 @@ func TestEvaluateHandler_CleansUpFailedRun(t *testing.T) {
 	router.POST("/api/evaluate", Handler(runsDir, 0))
 
 	spec := Spec{
-		SchemaVersion: 1,
+		SchemaVersion:  1,
+		EvaluationName: "test",
 		Constraints: []Constraint{
 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
 		},
@@ -207,7 +210,8 @@ func TestEvaluateHandler_WithImages(t *testing.T) {
 	router.POST("/api/evaluate", Handler(runsDir, 0))
 
 	spec := Spec{
-		SchemaVersion: 1,
+		SchemaVersion:  1,
+		EvaluationName: "test",
 		Constraints: []Constraint{
 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
 		},

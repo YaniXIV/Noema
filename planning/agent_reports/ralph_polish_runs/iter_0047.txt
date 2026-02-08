@@ -1,0 +1,5037 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3cad-7dd9-77c1-8f79-f33e47a269bd
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Running Go tests using exec**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 265ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+ok  	noema/internal/config	(cached)
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Searching TODOs for focus areas**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"TODO|FIXME|panic\\(|Must\\(|TODO:\"" in /Users/yani/Noema/backend exited 1 in 53ms:
+
+
+thinking
+**Investigating missing matches**
+
+No matches found for the search, so I'm shifting focus to error handling and considering adding context to the HTTP client; next, I'll list project files to guide further exploration.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 53ms:
+cmd
+data
+go.mod
+go.sum
+internal
+main
+server
+web
+
+thinking
+**Inspecting internal HTTP utilities**
+
+I'm planning to review internal HTTP utility code or verification logic next to identify a small improvement opportunity.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "error" internal/httputil internal/web internal/session internal/evaluate internal/verify' in /Users/yani/Noema/backend succeeded in 53ms:
+internal/httputil/body_test.go:4:	"errors"
+internal/httputil/body_test.go:12:		err  error
+internal/httputil/body_test.go:16:		{name: "max bytes error", err: &http.MaxBytesError{Limit: 1}, want: true},
+internal/httputil/body_test.go:17:		{name: "http too large string", err: errors.New("http: request body too large"), want: true},
+internal/httputil/body_test.go:18:		{name: "multipart too large string", err: errors.New("multipart: message too large"), want: true},
+internal/httputil/body_test.go:19:		{name: "other error", err: errors.New("boom"), want: false},
+internal/web/auth.go:25:// On success: set cookie, redirect 303 to /app. On failure: re-render index with inline error.
+internal/evaluate/prompt.go:160:func marshalSampledDataset(ds Dataset) ([]byte, error) {
+internal/verify/handler_test.go:16:type errorResponse struct {
+internal/verify/handler_test.go:17:	Error string `json:"error"`
+internal/verify/handler_test.go:71:	var resp errorResponse
+internal/verify/handler_test.go:96:	var resp errorResponse
+internal/verify/handler_test.go:121:	var resp errorResponse
+internal/verify/handler_test.go:146:	var resp errorResponse
+internal/verify/handler_test.go:172:	var resp errorResponse
+internal/httputil/body.go:4:	"errors"
+internal/httputil/body.go:9:// IsBodyTooLarge reports whether the error indicates the request body exceeded MaxBytesReader.
+internal/httputil/body.go:10:func IsBodyTooLarge(err error) bool {
+internal/httputil/body.go:15:	if errors.As(err, &maxBytesErr) {
+internal/web/upload.go:56:		UploadGet(c, uploadTmpl, UploadData{Error: "Server error saving file."})
+
+thinking
+**Preparing to inspect evaluation and parsing**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package evaluate
+
+import (
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math/big"
+	"mime/multipart"
+	"os"
+	"path/filepath"
+	"strconv"
+	"sync/atomic"
+	"time"
+)
+
+var runIDCounter uint64
+
+func genRunID() string {
+	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
+
+thinking
+**Questioning file extension safety**
+
+I'm considering whether extracting file extensions from filenames in saveRunFiles might be unsafe and will check for parsing related to image evaluation next.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/images.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"fmt"
+	"io"
+	"mime"
+	"mime/multipart"
+	"path/filepath"
+	"strings"
+
+	"noema/internal/config"
+)
+
+type ImageInfo struct {
+	Filename string
+	MIMEType string
+	Data     []byte
+}
+
+func readImages(files []*multipart.FileHeader) ([]ImageInfo, error) {
+
+thinking
+**Reviewing error handling in image reading**
+
+Noticed that if reading image data succeeds but closing the reader returns an error, this error should still be returned; considering if similar checks can improve reliability in the evaluation or caching steps.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/cache.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package evaluate
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+type CachedGeminiOutput struct {
+	Model         string       `json:"model"`
+	PromptVersion string       `json:"prompt_version"`
+	Output        EvalOutput   `json:"output"`
+	RawText       string       `json:"raw_text"`
+	Usage         *GeminiUsage `json:"usage,omitempty"`
+	CachedAt      string       `json:"cached_at"`
+}
+
+thinking
+**Considering cache corruption handling**
+
+I'm thinking about making the cache loading more robust by tolerating and removing corrupt entries, focusing on the evaluation handler for potential changes.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '260,620p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 53ms:
+		return EvalOutput{}, false, nil
+	}
+	if len(form.Value["eval_output"]) > 1 {
+		return EvalOutput{}, true, fmt.Errorf("only one eval_output value allowed")
+	}
+	raw := strings.TrimSpace(form.Value["eval_output"][0])
+	if raw == "" {
+		return EvalOutput{}, false, nil
+	}
+	out, err := parseEvalOutput(raw)
+	if err != nil {
+		return EvalOutput{}, true, err
+	}
+	if err := validateEvalOutput(out, enabled); err != nil {
+		return EvalOutput{}, true, err
+	}
+	return out, true, nil
+}
+
+thinking
+**Noting potential file handling improvements**
+
+Considering sanitizing image file names on disk and preserving file mode in atomic writes, plus reviewing dataset file reading for enhancements.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"strings"
+
+	"noema/internal/config"
+)
+
+type Dataset struct {
+	Items []DatasetItem `json:"items"`
+}
+
+type DatasetItem struct {
+	ID       string         `json:"id"`
+	Text     string         `json:"text"`
+
+thinking
+**Verifying unknown fields handling**
+
+Noticed dataset reading uses DisallowUnknownFields to reject unknown top-level fields, but considering checking parseUploads for similar validation next.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"path/filepath"
+	"strings"
+
+	"noema/internal/config"
+)
+
+func parseSpec(form *multipart.Form) (Spec, error) {
+	specStrs := form.Value["spec"]
+	if len(specStrs) == 0 || specStrs[0] == "" {
+		return Spec{}, fmt.Errorf("missing field: spec")
+	}
+	if len(specStrs) > 1 {
+		return Spec{}, fmt.Errorf("only one spec value allowed")
+
+thinking
+**Considering parse and error handling improvements**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/verify/handler.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package verify
+
+import (
+	"encoding/base64"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+// VerifyRequest is the JSON body for POST /api/verify.
+type VerifyRequest struct {
+	RunID           string `json:"run_id"`
+	ProofB64        string `json:"proof_b64"`
+	PublicInputsB64 string `json:"public_inputs_b64"`
+
+thinking
+**Considering error handling improvements**
+
+I'm evaluating strengthening base64 decoding error handling around whitespace trimming and exploring enhancements to httputil.IsBodyTooLarge for better multipart support.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/httputil/body.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package httputil
+
+import (
+	"errors"
+	"net/http"
+	"strings"
+)
+
+// IsBodyTooLarge reports whether the error indicates the request body exceeded MaxBytesReader.
+func IsBodyTooLarge(err error) bool {
+	if err == nil {
+		return false
+	}
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "request body too large") ||
+		strings.Contains(msg, "multipart: message too large")
+
+
+thinking
+**Noting minor potential improvements**
+
+Identified some minor areas for enhancement like stricter checks on zero-length images, trimming whitespace before JSON parsing, and better error wrapping on write failures; none require immediate changes but could improve robustness later.
+thinking
+**Identifying subtle robustness checks**
+
+Noting potential improvements like better error context on upload writes, more precise error handling in verification, and possible dataset size validation; none critical but worth addressing if tests are passing.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/config/config.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package config
+
+import (
+	"os"
+	"strconv"
+
+	"github.com/joho/godotenv"
+)
+
+const devCookieSecret = "dev-secret-change-in-production"
+
+// Load reads .env from the current directory and sets env vars.
+// Safe to call multiple times; existing env vars are not overwritten.
+func Load() error {
+	return godotenv.Load()
+}
+
+// JudgeKey returns the judge key used to gate protected routes.
+func JudgeKey() string {
+	return os.Getenv("JUDGE_KEY")
+
+thinking
+**Noting potential validation improvements**
+
+Considering enhancements like validating custom constraint severities and confirming multipart file size checks, plus trimming whitespace before JSON decode in spec parsing; next, I'll review output validation in output.go.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/output.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+)
+
+type EvalConstraintResult struct {
+	ID        string `json:"id"`
+	Severity  int    `json:"severity"`
+	Rationale string `json:"rationale"`
+}
+
+type EvalOutput struct {
+	SchemaVersion int                    `json:"schema_version"`
+	Constraints   []EvalConstraintResult `json:"constraints"`
+	MaxSeverity   int                    `json:"max_severity"`
+	Confidence    *float64               `json:"confidence,omitempty"`
+
+thinking
+**Noticing uniform error messages**
+
+All error messages are currently the same, suggesting they need improvement; considering adding an evaluation_name check in the spec validation after reviewing the spec structure.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/spec.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package evaluate
+
+// Spec is the parsed evaluation spec (schema_version 1).
+type Spec struct {
+	SchemaVersion     int                `json:"schema_version"`
+	EvaluationName    string             `json:"evaluation_name"`
+	Policy            Policy             `json:"policy"`
+	Constraints       []Constraint       `json:"constraints"`
+	CustomConstraints []CustomConstraint `json:"custom_constraints"`
+}
+
+type Policy struct {
+	Reveal RevealPolicy `json:"reveal"`
+}
+
+type RevealPolicy struct {
+	MaxSeverity bool `json:"max_severity"`
+	Commitment  bool `json:"commitment"`
+}
+
+
+thinking
+**Considering validation of EvaluationName**
+
+I'm reviewing whether EvaluationName needs trimming or non-empty checks in validation and planning to check policy constraints next to inform this decision.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/policy.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import "fmt"
+
+type ConstraintRule struct {
+	ID                 string
+	AllowedMaxSeverity int
+}
+
+func enabledConstraints(spec Spec) (map[string]ConstraintRule, error) {
+	out := make(map[string]ConstraintRule)
+	for _, c := range spec.Constraints {
+		if !c.Enabled {
+			continue
+		}
+		if _, exists := out[c.ID]; exists {
+			return nil, fmt.Errorf("duplicate constraint id: %s", c.ID)
+		}
+		out[c.ID] = ConstraintRule{ID: c.ID, AllowedMaxSeverity: c.AllowedMaxSeverity}
+	}
+
+thinking
+**Noting improvement areas**
+
+The validateSpec uniqueness check and error messaging in readDatasetFile can be clearer, and evaluate/handler may send 400 errors even on Gemini failures; I'll review resolveEvalOutput and filepath sanitization on Windows next.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/gemini_eval.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"context"
+	"log"
+	"mime/multipart"
+	"os"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/gemini"
+)
+
+const geminiEvalTimeout = 45 * time.Second
+
+func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
+	if out, provided, err := parseEvalOutputProvided(form, enabled); err != nil {
+		return EvalOutput{}, err
+	} else if provided {
+		return out, nil
+
+thinking
+**Identifying validation improvements**
+
+I'm noting that some spec fields like CustomConstraint's Title/Description aren't validated yet, which might be important to enforce. Next, I'll review test coverage around EvaluationName in evaluate/handler_test to understand current validation and spot easy enhancements.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "evaluation_name" -n internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/handler_test.go:485:			"spec": {`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[],"extra":true}`},
+internal/evaluate/handler_test.go:497:				`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[]}`,
+internal/evaluate/handler_test.go:498:				`{"schema_version":1,"evaluation_name":"other","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[]}`,
+internal/evaluate/storage.go:120:	EvaluationName string `json:"evaluation_name,omitempty"`
+internal/evaluate/spec.go:6:	EvaluationName    string             `json:"evaluation_name"`
+
+thinking
+**Checking validation in tests**
+
+I'm reviewing tests around line 470 to see if evaluation_name is validated for non-empty values.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '440,540p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+	if err := validateSpec(spec); err == nil {
+		t.Fatalf("expected error for empty constraint id")
+	}
+}
+
+func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+	spec := Spec{
+		SchemaVersion: 1,
+		CustomConstraints: []CustomConstraint{
+			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+		},
+	}
+	if err := validateSpec(spec); err == nil {
+		t.Fatalf("expected error for empty custom constraint id")
+	}
+}
+
+func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+	spec := Spec{
+		SchemaVersion: 1,
+
+thinking
+**Considering validation and error message improvements**
+
+I'm identifying possible enhancements to validate non-empty evaluation names and custom constraint fields, plus more informative dataset error messages, but I'm weighing potential test or client breaks and checking existing error message test coverage.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "dataset" internal/evaluate/handler_test.go' in /Users/yani/Noema/backend succeeded in 51ms:
+102:	dataset := `{"items":[{"id":"item-1","text":"hello"}]}`
+105:			field:       "dataset",
+106:			filename:    "dataset.json",
+108:			content:     []byte(dataset),
+306:	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"img1.png"}]}`
+308:		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
+310:	datasetFile := form.File["dataset"][0]
+311:	if err := validateDatasetJSON(datasetFile, nil); err == nil {
+317:	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"img1.png"}]}`
+319:		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
+322:	datasetFile := form.File["dataset"][0]
+324:	if err := validateDatasetJSON(datasetFile, imageFiles); err != nil {
+330:	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"   "}]}`
+332:		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
+335:	datasetFile := form.File["dataset"][0]
+337:	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
+343:	dataset := `{"items":[{"id":"1","text":"hello","image_ref":" img.png "}]}`
+345:		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
+348:	datasetFile := form.File["dataset"][0]
+350:	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
+
+
+thinking
+**Considering validation additions carefully**
+
+Evaluated several minor improvements but flagged that adding validation for evaluation names and custom constraint fields risks breaking clients, so cautious about implementing these now.
+thinking
+**Noticing potential eval output handling issue**
+
+Observed that blank eval_output strings are currently treated as not provided, causing fallback rather than erroring, which might reduce reliability; considering making blank eval_output an error to avoid silent ignores.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "eval_output" internal/evaluate/handler_test.go' in /Users/yani/Noema/backend succeeded in 51ms:
+148:		t.Fatalf("marshal eval_output: %v", err)
+151:	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw)}}}
+185:		t.Fatalf("marshal eval_output: %v", err)
+188:	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw)}}}
+215:		t.Fatalf("marshal eval_output: %v", err)
+218:	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw) + " trailing"}}}
+245:		t.Fatalf("marshal eval_output: %v", err)
+248:	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw), string(raw)}}}
+250:		t.Fatalf("expected error for multiple eval_output values")
+267:	form := &multipart.Form{Value: map[string][]string{"eval_output": {" \n\t "}}}
+
+thinking
+**Preparing to open around line 260**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '240,300p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+		},
+		MaxSeverity: 0,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal eval_output: %v", err)
+	}
+
+	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw), string(raw)}}}
+	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
+		t.Fatalf("expected error for multiple eval_output values")
+	}
+}
+
+func TestParseEvalOutputOptional_IgnoresWhitespace(t *testing.T) {
+	spec := Spec{
+		SchemaVersion: 1,
+		Constraints: []Constraint{
+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+			{ID: "harm_enabling_content_risk", Enabled: true, AllowedMaxSeverity: 2},
+
+
+thinking
+**Reviewing input validation edge cases**
+
+Exploring various validation points reveals minor correctness improvements, like rejecting runIDs with leading/trailing whitespace in verify, though tests are missing and client impact should be checked first. The base64 decoding in verifyLegacyStub rejects whitespace, which is handled by trimming. Next focus may be adding stricter runID checks with accompanying tests.
+thinking
+**Identifying validation and error handling improvements**
+
+Noting several minor issues like potential whitespace checks on evaluation names and run IDs, MIME type parsing improvements, and error context enhancements. The most viable improvement is trimming and rejecting run IDs with leading/trailing whitespace in verification, paired with tests in the verify handler files. Next, I'll review existing tests before adding this change.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/verify/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package verify
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"noema/internal/config"
+
+	"github.com/gin-gonic/gin"
+)
+
+type errorResponse struct {
+	Error string `json:"error"`
+}
+
+func setupRouter() *gin.Engine {
+
+
+thinking
+**Considering stricter whitespace validation**
+
+Noticing the handler currently trims run IDs and accepts those with leading/trailing whitespace, there's an option to reject them for stricter validation by comparing trimmed versus original input, though this could be a minor change. Also considering similar stricter trimming rules on proof/public inputs and a small validation tweak to catch empty dataset files earlier, but these remain optional improvements.
+thinking
+**Planning stricter spec validation**
+
+Considering adding enforcement for required evaluation name and non-empty Title/Description in custom constraints, as the current spec lacks these checks despite likely requiring them. This entails updating parsing and adding tests while verifying usage in prompt building to confirm necessity and safety.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/prompt.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
+)
+
+const promptVersion = "noema-eval-v1"
+
+type PromptConstraint struct {
+	ID                 string
+	Description        string
+	SeverityLevels     map[string]string
+	AllowedMaxSeverity int
+}
+
+var presetConstraints = map[string]PromptConstraint{
+
+
+thinking
+**Reviewing validation and error handling for constraints and images**
+
+Noted that dataset image references already fail if containing path separators due to file name validation, though error messages could be clearer. Considering improvements like enforcing allowed MIME types on images, refining max images zero behavior, and strengthening updateRunsIndex to halt on rename failures instead of overwriting corrupted indexes.
+thinking
+**Planning strict evaluation_name validation and test updates**
+
+Decided to require evaluation_name to be non-empty and trimmed in validateSpec, improving index display consistency. Recognized need to update many validateSpec tests which currently omit evaluation_name to prevent failures.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "validateSpec" internal/evaluate/handler_test.go' in /Users/yani/Noema/backend succeeded in 52ms:
+440:	if err := validateSpec(spec); err == nil {
+452:	if err := validateSpec(spec); err == nil {
+465:	if err := validateSpec(spec); err == nil {
+477:	if err := validateSpec(spec); err == nil {
+
+thinking
+**Planning strict evaluation_name validation**
+
+I'm updating the validation to require non-empty evaluation_name, which may break clients but improves spec quality; I'll enhance parseSpec to catch missing evaluation_name with clear errors and add tests for invalid values while updating existing validateSpec tests accordingly.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/parse.go
+@@ -37,2 +37,9 @@
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+apply_patch(auto_approved=true) exited 0 in 30ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/parse.go
+file update:
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+file update:
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+
+thinking
+**Updating tests for evaluation name**
+
+I'm adding EvaluationName to the validateSpec tests in handler_test.go and creating new tests specifically for evaluation_name.
+file update:
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+
+thinking
+**Checking test-related code formatting**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '420,520p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+func TestParseUploads_RejectsDuplicateImageNames(t *testing.T) {
+	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"img.png"}]}`
+	form := buildMultipartForm(t, []formFile{
+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
+		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
+		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
+	})
+	if _, _, err := parseUploads(form); err == nil {
+		t.Fatalf("expected error for duplicate image filenames")
+	}
+}
+
+func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+	spec := Spec{
+		SchemaVersion: 1,
+		Constraints: []Constraint{
+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+		},
+	}
+file update:
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+
+thinking
+**Preparing test patch with context**
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
+@@ -434,2 +434,3 @@
+ 		SchemaVersion: 1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+@@ -447,2 +448,3 @@
+ 		SchemaVersion: 1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+@@ -459,2 +461,3 @@
+ 		SchemaVersion: 1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+@@ -472,2 +475,3 @@
+ 		SchemaVersion: 1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+@@ -481,2 +485,28 @@
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+apply_patch(auto_approved=true) exited 0 in 35ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
+file update:
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..bec8b7dc167dcc450edfc5a45a8ad42dfcedfa6c
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -432,6 +432,7 @@
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+ 		SchemaVersion: 1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -445,6 +446,7 @@
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+ 		SchemaVersion: 1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -457,6 +459,7 @@
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+ 		SchemaVersion: 1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -470,6 +473,7 @@
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+ 		SchemaVersion: 1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+file update:
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..bec8b7dc167dcc450edfc5a45a8ad42dfcedfa6c
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -432,6 +432,7 @@
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+ 		SchemaVersion: 1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -445,6 +446,7 @@
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+ 		SchemaVersion: 1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -457,6 +459,7 @@
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+ 		SchemaVersion: 1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -470,6 +473,7 @@
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+ 		SchemaVersion: 1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+
+thinking
+**Applying gofmt for alignment**
+
+I'll run gofmt with the write flag on the modified Go files to ensure consistent formatting and alignment of struct fields.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && gofmt -w internal/evaluate/parse.go internal/evaluate/handler_test.go' in /Users/yani/Noema/backend succeeded in 51ms:
+
+file update:
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..6eb494cd28a9318b44487065d4a450b487fde9c2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -431,7 +431,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -444,7 +445,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -456,7 +458,8 @@
+ 
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -469,7 +472,8 @@
+ 
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+
+thinking
+**Running full test suite**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend exited 1 in 557ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+ok  	noema/internal/config	(cached)
+?   	noema/internal/crypto	[no test files]
+--- FAIL: TestEvaluateHandler_WithImages (0.00s)
+    handler_integration_test.go:223: expected status 200, got 400: {"error":"evaluation_name is required"}
+FAIL
+FAIL	noema/internal/evaluate	0.051s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+FAIL
+file update:
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..6eb494cd28a9318b44487065d4a450b487fde9c2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -431,7 +431,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -444,7 +445,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -456,7 +458,8 @@
+ 
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -469,7 +472,8 @@
+ 
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+
+thinking
+**Updating integration test to include evaluation name**
+
+The integration test spec is missing evaluation_name, causing a failure, so I'll add it there to keep changes within three files as planned.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '180,260p' internal/evaluate/handler_integration_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+	}
+
+	body, contentType := buildMultipartEvalRequest(t, spec, evalOut, true)
+	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", body)
+	req.Header.Set("Content-Type", contentType)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	entries, err := os.ReadDir(runsDir)
+	if err != nil {
+		t.Fatalf("read runs dir: %v", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), "run_") {
+			t.Fatalf("expected failed runs to be cleaned up, found %s", entry.Name())
+		}
+file update:
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..6eb494cd28a9318b44487065d4a450b487fde9c2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -431,7 +431,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -444,7 +445,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -456,7 +458,8 @@
+ 
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -469,7 +472,8 @@
+ 
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+
+thinking
+**Searching for evaluation_name usage**
+
+I'm searching for evaluation_name references to see where else it might be needed, such as in handler_integration_test.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "EvaluationName" internal/evaluate/handler_integration_test.go' in /Users/yani/Noema/backend succeeded in 51ms:
+24:		EvaluationName: "test",
+74:		EvaluationName: "test",
+file update:
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..6eb494cd28a9318b44487065d4a450b487fde9c2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -431,7 +431,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -444,7 +445,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -456,7 +458,8 @@
+ 
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -469,7 +472,8 @@
+ 
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+
+thinking
+**Adding missing test spec detail**
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler_integration_test.go
+@@ -113,3 +113,4 @@
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+apply_patch(auto_approved=true) exited 0 in 40ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/handler_integration_test.go
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index cd5d5bf67ef02d6a14e481b366152274093e12a9..ecf163216f5528dd3a69685a4c8f30414ab3444f
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -111,7 +111,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..6eb494cd28a9318b44487065d4a450b487fde9c2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -431,7 +431,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -444,7 +445,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -456,7 +458,8 @@
+ 
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -469,7 +472,8 @@
+ 
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index cd5d5bf67ef02d6a14e481b366152274093e12a9..ecf163216f5528dd3a69685a4c8f30414ab3444f
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -111,7 +111,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..6eb494cd28a9318b44487065d4a450b487fde9c2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -431,7 +431,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -444,7 +445,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -456,7 +458,8 @@
+ 
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -469,7 +472,8 @@
+ 
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+
+thinking
+**Noting need for gofmt**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && gofmt -w internal/evaluate/handler_integration_test.go' in /Users/yani/Noema/backend succeeded in 52ms:
+
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index cd5d5bf67ef02d6a14e481b366152274093e12a9..c8f6438c93694dd3ebccec122e54713d4613e0a3
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -20,7 +20,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -70,7 +70,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -111,7 +111,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..6eb494cd28a9318b44487065d4a450b487fde9c2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -431,7 +431,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -444,7 +445,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -456,7 +458,8 @@
+ 
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -469,7 +472,8 @@
+ 
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+
+thinking
+**Running full Go test suite**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend exited 1 in 500ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+ok  	noema/internal/config	(cached)
+?   	noema/internal/crypto	[no test files]
+--- FAIL: TestEvaluateHandler_WithImages (0.00s)
+    handler_integration_test.go:224: expected status 200, got 400: {"error":"evaluation_name is required"}
+FAIL
+FAIL	noema/internal/evaluate	0.054s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+FAIL
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index cd5d5bf67ef02d6a14e481b366152274093e12a9..c8f6438c93694dd3ebccec122e54713d4613e0a3
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -20,7 +20,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -70,7 +70,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -111,7 +111,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..6eb494cd28a9318b44487065d4a450b487fde9c2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -431,7 +431,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -444,7 +445,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -456,7 +458,8 @@
+ 
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -469,7 +472,8 @@
+ 
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+
+thinking
+**Inspecting multipart request builder**
+
+I'm opening the multipart request builder to check if it properly includes the updated spec and the evaluation_name in its request payload.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "buildMultipartEvalRequestWithImages" -n internal/evaluate/handler_integration_test.go' in /Users/yani/Noema/backend succeeded in 52ms:
+217:	body, contentType := buildMultipartEvalRequestWithImages(t, spec)
+296:func buildMultipartEvalRequestWithImages(t *testing.T, spec Spec) (*bytes.Buffer, string) {
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index cd5d5bf67ef02d6a14e481b366152274093e12a9..c8f6438c93694dd3ebccec122e54713d4613e0a3
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -20,7 +20,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -70,7 +70,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -111,7 +111,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..6eb494cd28a9318b44487065d4a450b487fde9c2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -431,7 +431,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -444,7 +445,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -456,7 +458,8 @@
+ 
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -469,7 +472,8 @@
+ 
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '280,360p' internal/evaluate/handler_integration_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+
+	part, err := writer.CreateFormFile("dataset", "dataset.json")
+	if err != nil {
+		t.Fatalf("create dataset part: %v", err)
+	}
+	if _, err := part.Write([]byte(datasetJSON)); err != nil {
+		t.Fatalf("write dataset: %v", err)
+	}
+
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+
+	return &buf, writer.FormDataContentType()
+}
+
+func buildMultipartEvalRequestWithImages(t *testing.T, spec Spec) (*bytes.Buffer, string) {
+	t.Helper()
+
+	var buf bytes.Buffer
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index cd5d5bf67ef02d6a14e481b366152274093e12a9..c8f6438c93694dd3ebccec122e54713d4613e0a3
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -20,7 +20,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -70,7 +70,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -111,7 +111,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..6eb494cd28a9318b44487065d4a450b487fde9c2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -431,7 +431,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -444,7 +445,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -456,7 +458,8 @@
+ 
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -469,7 +472,8 @@
+ 
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+
+thinking
+**Investigating missing evaluation_name error**
+
+The test update added evaluation_name to the spec, but an error suggests it's still missing—possibly due to another spec or a build issue. Next, I'll verify the actual spec used in the failing test to confirm evaluation_name is properly included.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '204,240p' internal/evaluate/handler_integration_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+func TestEvaluateHandler_WithImages(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	runsDir := t.TempDir()
+	router.POST("/api/evaluate", Handler(runsDir, 0))
+
+	spec := Spec{
+		SchemaVersion: 1,
+		Constraints: []Constraint{
+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+		},
+	}
+
+	body, contentType := buildMultipartEvalRequestWithImages(t, spec)
+	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", body)
+	req.Header.Set("Content-Type", contentType)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index cd5d5bf67ef02d6a14e481b366152274093e12a9..c8f6438c93694dd3ebccec122e54713d4613e0a3
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -20,7 +20,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -70,7 +70,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -111,7 +111,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..6eb494cd28a9318b44487065d4a450b487fde9c2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -431,7 +431,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -444,7 +445,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -456,7 +458,8 @@
+ 
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -469,7 +472,8 @@
+ 
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+
+thinking
+**Fixing patch application lines**
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler_integration_test.go
+@@ -138,3 +138,4 @@
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+apply_patch(auto_approved=true) exited 0 in 49ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/handler_integration_test.go
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index cd5d5bf67ef02d6a14e481b366152274093e12a9..259a5a721f10545362717e1c62b5f11dd0701a31
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -20,7 +20,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -70,7 +70,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -111,7 +111,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -135,7 +136,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..6eb494cd28a9318b44487065d4a450b487fde9c2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -431,7 +431,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -444,7 +445,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -456,7 +458,8 @@
+ 
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -469,7 +472,8 @@
+ 
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index cd5d5bf67ef02d6a14e481b366152274093e12a9..259a5a721f10545362717e1c62b5f11dd0701a31
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -20,7 +20,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -70,7 +70,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -111,7 +111,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -135,7 +136,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..6eb494cd28a9318b44487065d4a450b487fde9c2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -431,7 +431,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -444,7 +445,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -456,7 +458,8 @@
+ 
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -469,7 +472,8 @@
+ 
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+
+thinking
+**Running gofmt again**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && gofmt -w internal/evaluate/handler_integration_test.go' in /Users/yani/Noema/backend succeeded in 52ms:
+
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index cd5d5bf67ef02d6a14e481b366152274093e12a9..259a5a721f10545362717e1c62b5f11dd0701a31
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -20,7 +20,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -70,7 +70,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -111,7 +111,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -135,7 +136,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..6eb494cd28a9318b44487065d4a450b487fde9c2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -431,7 +431,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -444,7 +445,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -456,7 +458,8 @@
+ 
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -469,7 +472,8 @@
+ 
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+
+thinking
+**Running Go tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend exited 1 in 485ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+ok  	noema/internal/config	(cached)
+?   	noema/internal/crypto	[no test files]
+--- FAIL: TestEvaluateHandler_WithImages (0.00s)
+    handler_integration_test.go:225: expected status 200, got 400: {"error":"evaluation_name is required"}
+FAIL
+FAIL	noema/internal/evaluate	0.059s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+FAIL
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index cd5d5bf67ef02d6a14e481b366152274093e12a9..259a5a721f10545362717e1c62b5f11dd0701a31
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -20,7 +20,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -70,7 +70,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -111,7 +111,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -135,7 +136,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..6eb494cd28a9318b44487065d4a450b487fde9c2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -431,7 +431,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -444,7 +445,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -456,7 +458,8 @@
+ 
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -469,7 +472,8 @@
+ 
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+
+
+thinking
+**Diagnosing missing evaluation_name error**
+
+The error suggests the spec’s evaluation_name is empty despite being set; this points to possible serialization or test setup issues where the spec JSON sent lacks or overwrites evaluation_name, so next I'll examine how parseSpec reads spec from form values and whether the test might be passing an outdated or incorrect spec JSON.
+thinking
+**Verifying multipart spec field handling**
+
+The spec is written as a raw JSON string in the multipart field, which should be correct, but the handler parses the multipart form differently and may see the spec field missing or empty; I'll confirm the test's spec sets evaluation_name properly and check multipart parsing differences.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '214,236p' internal/evaluate/handler_integration_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+		},
+	}
+
+	body, contentType := buildMultipartEvalRequestWithImages(t, spec)
+	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", body)
+	req.Header.Set("Content-Type", contentType)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func buildMultipartEvalRequest(t *testing.T, spec Spec, evalOut EvalOutput, includeEvalOutput bool) (*bytes.Buffer, string) {
+	t.Helper()
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index cd5d5bf67ef02d6a14e481b366152274093e12a9..259a5a721f10545362717e1c62b5f11dd0701a31
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -20,7 +20,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -70,7 +70,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -111,7 +111,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -135,7 +136,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..6eb494cd28a9318b44487065d4a450b487fde9c2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -431,7 +431,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -444,7 +445,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -456,7 +458,8 @@
+ 
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -469,7 +472,8 @@
+ 
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+
+thinking
+**Checking spec visibility for evaluation name**
+
+I'm verifying that the spec snippet includes the evaluation name, but it only shows schema version and ID so far. I'll expand the viewed lines to see if evaluation_name appears earlier.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '206,220p' internal/evaluate/handler_integration_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	runsDir := t.TempDir()
+	router.POST("/api/evaluate", Handler(runsDir, 0))
+
+	spec := Spec{
+		SchemaVersion: 1,
+		Constraints: []Constraint{
+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+		},
+	}
+
+	body, contentType := buildMultipartEvalRequestWithImages(t, spec)
+	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", body)
+	req.Header.Set("Content-Type", contentType)
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index cd5d5bf67ef02d6a14e481b366152274093e12a9..259a5a721f10545362717e1c62b5f11dd0701a31
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -20,7 +20,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -70,7 +70,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -111,7 +111,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -135,7 +136,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..6eb494cd28a9318b44487065d4a450b487fde9c2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -431,7 +431,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -444,7 +445,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -456,7 +458,8 @@
+ 
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -469,7 +472,8 @@
+ 
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+
+thinking
+**Investigating patch application failure**
+
+I discovered the file doesn't include the EvaluationName field despite applying the patch and running formatting; this likely means the patch didn't take effect or was overwritten. Now I'm checking for duplicate spec blocks or multiple file locations to locate where EvaluationName should appear.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "EvaluationName" internal/evaluate/handler_integration_test.go' in /Users/yani/Noema/backend succeeded in 52ms:
+24:		EvaluationName: "test",
+74:		EvaluationName: "test",
+115:		EvaluationName: "test",
+140:		EvaluationName: "test",
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index cd5d5bf67ef02d6a14e481b366152274093e12a9..259a5a721f10545362717e1c62b5f11dd0701a31
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -20,7 +20,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -70,7 +70,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -111,7 +111,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -135,7 +136,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..6eb494cd28a9318b44487065d4a450b487fde9c2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -431,7 +431,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -444,7 +445,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -456,7 +458,8 @@
+ 
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -469,7 +472,8 @@
+ 
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+
+thinking
+**Reapplying patch with precise context**
+
+I'll reapply the patch targeting the correct spec instance to ensure the evaluation name is inserted where intended.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler_integration_test.go
+@@ -170,3 +170,4 @@
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+apply_patch(auto_approved=true) exited 0 in 45ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/handler_integration_test.go
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index cd5d5bf67ef02d6a14e481b366152274093e12a9..0932b6d49ae2d09615f4f6dcb32385f16e2dc42f
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -20,7 +20,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -70,7 +70,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -111,7 +111,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -135,7 +136,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -166,7 +168,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..6eb494cd28a9318b44487065d4a450b487fde9c2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -431,7 +431,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -444,7 +445,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -456,7 +458,8 @@
+ 
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -469,7 +472,8 @@
+ 
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index cd5d5bf67ef02d6a14e481b366152274093e12a9..0932b6d49ae2d09615f4f6dcb32385f16e2dc42f
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -20,7 +20,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -70,7 +70,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -111,7 +111,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -135,7 +136,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -166,7 +168,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..6eb494cd28a9318b44487065d4a450b487fde9c2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -431,7 +431,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -444,7 +445,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -456,7 +458,8 @@
+ 
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -469,7 +472,8 @@
+ 
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '206,220p' internal/evaluate/handler_integration_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+func TestEvaluateHandler_WithImages(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	runsDir := t.TempDir()
+	router.POST("/api/evaluate", Handler(runsDir, 0))
+
+	spec := Spec{
+		SchemaVersion: 1,
+		Constraints: []Constraint{
+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+		},
+	}
+
+	body, contentType := buildMultipartEvalRequestWithImages(t, spec)
+	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", body)
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index cd5d5bf67ef02d6a14e481b366152274093e12a9..0932b6d49ae2d09615f4f6dcb32385f16e2dc42f
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -20,7 +20,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -70,7 +70,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -111,7 +111,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -135,7 +136,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -166,7 +168,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..6eb494cd28a9318b44487065d4a450b487fde9c2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -431,7 +431,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -444,7 +445,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -456,7 +458,8 @@
+ 
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -469,7 +472,8 @@
+ 
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+
+thinking
+**Diagnosing patch application issue**
+
+The patch added evaluation_name but the file remains unchanged, likely due to multiple similar blocks causing the patch to apply to the wrong one; next, I'll locate the specific block near the target test and re-apply the patch with unique context including the function name.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler_integration_test.go
+@@ -212,3 +212,4 @@
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+apply_patch(auto_approved=true) exited 0 in 50ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/handler_integration_test.go
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index cd5d5bf67ef02d6a14e481b366152274093e12a9..2e80c7b78f847a70882b7ff88d1f1ea49207653e
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -20,7 +20,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -70,7 +70,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -111,7 +111,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -135,7 +136,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -166,7 +168,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -207,7 +210,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..6eb494cd28a9318b44487065d4a450b487fde9c2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -431,7 +431,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -444,7 +445,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -456,7 +458,8 @@
+ 
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -469,7 +472,8 @@
+ 
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index cd5d5bf67ef02d6a14e481b366152274093e12a9..2e80c7b78f847a70882b7ff88d1f1ea49207653e
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -20,7 +20,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -70,7 +70,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -111,7 +111,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -135,7 +136,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -166,7 +168,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -207,7 +210,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..6eb494cd28a9318b44487065d4a450b487fde9c2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -431,7 +431,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -444,7 +445,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -456,7 +458,8 @@
+ 
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -469,7 +472,8 @@
+ 
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '206,220p' internal/evaluate/handler_integration_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+func TestEvaluateHandler_WithImages(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	runsDir := t.TempDir()
+	router.POST("/api/evaluate", Handler(runsDir, 0))
+
+	spec := Spec{
+		SchemaVersion:  1,
+		EvaluationName: "test",
+		Constraints: []Constraint{
+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+		},
+	}
+
+	body, contentType := buildMultipartEvalRequestWithImages(t, spec)
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index cd5d5bf67ef02d6a14e481b366152274093e12a9..2e80c7b78f847a70882b7ff88d1f1ea49207653e
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -20,7 +20,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -70,7 +70,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -111,7 +111,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -135,7 +136,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -166,7 +168,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -207,7 +210,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..6eb494cd28a9318b44487065d4a450b487fde9c2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -431,7 +431,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -444,7 +445,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -456,7 +458,8 @@
+ 
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -469,7 +472,8 @@
+ 
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+
+thinking
+**Confirming code formatting with gofmt**
+
+The file appears aligned but running gofmt will ensure consistent indentation with tabs; I'll run gofmt to maintain formatting standards.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && gofmt -w internal/evaluate/handler_integration_test.go' in /Users/yani/Noema/backend succeeded in 52ms:
+
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index cd5d5bf67ef02d6a14e481b366152274093e12a9..2e80c7b78f847a70882b7ff88d1f1ea49207653e
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -20,7 +20,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -70,7 +70,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -111,7 +111,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -135,7 +136,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -166,7 +168,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -207,7 +210,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..6eb494cd28a9318b44487065d4a450b487fde9c2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -431,7 +431,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -444,7 +445,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -456,7 +458,8 @@
+ 
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -469,7 +472,8 @@
+ 
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+
+thinking
+**Running all Go tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 532ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+ok  	noema/internal/config	(cached)
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.103s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index cd5d5bf67ef02d6a14e481b366152274093e12a9..2e80c7b78f847a70882b7ff88d1f1ea49207653e
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -20,7 +20,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -70,7 +70,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -111,7 +111,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -135,7 +136,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -166,7 +168,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -207,7 +210,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..6eb494cd28a9318b44487065d4a450b487fde9c2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -431,7 +431,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -444,7 +445,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -456,7 +458,8 @@
+ 
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -469,7 +472,8 @@
+ 
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+
+thinking
+**Summarizing code changes and tests**
+
+The changes affected three files: parse.go for main logic updates, handler_test.go for unit tests, and handler_integration_test.go for integration tests. All relevant tests were run to validate the modifications.
+codex
+What you changed (short)
+- Enforced non-empty, trimmed `evaluation_name` in `validateSpec` to prevent unnamed evaluations.
+- Updated evaluation spec tests and integration test to include `evaluation_name`, plus added coverage for missing/whitespace names.
+
+Tests run
+- `go test ./...`
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index cd5d5bf67ef02d6a14e481b366152274093e12a9..2e80c7b78f847a70882b7ff88d1f1ea49207653e
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -20,7 +20,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -70,7 +70,7 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
+ 		EvaluationName: "test",
+ 		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
+ 		Constraints: []Constraint{
+@@ -111,7 +111,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -135,7 +136,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -166,7 +168,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -207,7 +210,8 @@
+ 	router.POST("/api/evaluate", Handler(runsDir, 0))
+ 
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "test",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8786d43d8b3342aad2195a514e2dffc746da04f9..6eb494cd28a9318b44487065d4a450b487fde9c2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -431,7 +431,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+@@ -444,7 +445,8 @@
+ 
+ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		CustomConstraints: []CustomConstraint{
+ 			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -456,7 +458,8 @@
+ 
+ func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+ 			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+@@ -469,7 +472,8 @@
+ 
+ func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+-		SchemaVersion: 1,
++		SchemaVersion:  1,
++		EvaluationName: "eval",
+ 		Constraints: []Constraint{
+ 			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+ 		},
+@@ -479,6 +483,32 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: "",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for missing evaluation_name")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
++	spec := Spec{
++		SchemaVersion:  1,
++		EvaluationName: " eval ",
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in evaluation_name")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 5da5c766cf6be84d247c765f4384dd55bab9ace1..278f7461b702eeee501304117c53fc45260331f4
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -35,6 +35,13 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	trimmedName := strings.TrimSpace(spec.EvaluationName)
++	if trimmedName == "" {
++		return fmt.Errorf("evaluation_name is required")
++	}
++	if trimmedName != spec.EvaluationName {
++		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
++	}
+ 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+ 		id := strings.TrimSpace(cn.ID)
+
+tokens used
+63,173
+What you changed (short)
+- Enforced non-empty, trimmed `evaluation_name` in `validateSpec` to prevent unnamed evaluations.
+- Updated evaluation spec tests and integration test to include `evaluation_name`, plus added coverage for missing/whitespace names.
+
+Tests run
+- `go test ./...`

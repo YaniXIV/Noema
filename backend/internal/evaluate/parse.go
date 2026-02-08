@@ -35,6 +35,13 @@ func validateSpec(spec Spec) error {
 	if spec.SchemaVersion != 1 {
 		return fmt.Errorf("unsupported schema_version")
 	}
+	trimmedName := strings.TrimSpace(spec.EvaluationName)
+	if trimmedName == "" {
+		return fmt.Errorf("evaluation_name is required")
+	}
+	if trimmedName != spec.EvaluationName {
+		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
+	}
 	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
 	for _, cn := range spec.Constraints {
 		id := strings.TrimSpace(cn.ID)
