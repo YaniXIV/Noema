@@ -26,6 +26,9 @@ func genRunID() string {
 }
 
 func createRunDir(runsDir string) (string, string, error) {
+	if err := os.MkdirAll(runsDir, 0755); err != nil {
+		return "", "", err
+	}
 	const maxAttempts = 5
 	for i := 0; i < maxAttempts; i++ {
 		runID := genRunID()

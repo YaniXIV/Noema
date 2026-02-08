@@ -1,0 +1,968 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3cc0-b16b-7991-aecd-c2d03f2c29fb
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Running tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 98ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+ok  	noema/internal/config	(cached)
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Preparing to inspect repo for improvements**
+
+Tests are passing, so now I'll analyze the repo with ripgrep to identify meaningful improvements limited to three files, focusing beyond just cosmetic changes.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME|panic|Assert|assert" internal cmd' in /Users/yani/Noema/backend exited 1 in 52ms:
+
+
+thinking
+**Identifying missing reliability handling**
+
+No matches found with the search, indicating the need to inspect the handler tree for areas to add error handling to improve reliability.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "error" internal | head -n 200' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/prompt.go:160:func marshalSampledDataset(ds Dataset) ([]byte, error) {
+internal/evaluate/parse.go:14:func parseSpec(form *multipart.Form) (Spec, error) {
+internal/evaluate/parse.go:34:func validateSpec(spec Spec) error {
+internal/evaluate/parse.go:81:func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.FileHeader, error) {
+internal/evaluate/parse.go:123:func validateDatasetJSON(fh *multipart.FileHeader, imageFiles []*multipart.FileHeader) error {
+internal/evaluate/output.go:23:func parseEvalOutput(raw string) (EvalOutput, error) {
+internal/evaluate/output.go:50:func validateEvalOutput(out EvalOutput, enabled map[string]ConstraintRule) error {
+internal/evaluate/handler_test.go:68:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:74:		t.Fatalf("parseEvalOutputOptional error: %v", err)
+internal/evaluate/handler_test.go:119:		t.Fatalf("expected error for image filename with whitespace")
+internal/evaluate/handler_test.go:121:		t.Fatalf("unexpected error: %v", err)
+internal/evaluate/handler_test.go:137:		t.Fatalf("expected error for image_ref with path separators")
+internal/evaluate/handler_test.go:139:		t.Fatalf("unexpected error: %v", err)
+internal/evaluate/handler_test.go:153:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:172:		t.Fatalf("parseEvalOutputOptional error: %v", err)
+internal/evaluate/handler_test.go:191:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:208:		t.Fatalf("expected validation error for unknown constraint")
+internal/evaluate/handler_test.go:221:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:238:		t.Fatalf("expected error for trailing garbage")
+internal/evaluate/handler_test.go:251:		t.Fatalf("enabledConstraints error: %v", err)
+
+thinking
+**Identifying potential index corruption**
+
+I'm considering whether the update process might cause index handle corruption and will examine internal/evaluate/storage.go to assess reliability issues.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math/big"
+	"mime/multipart"
+	"os"
+	"path/filepath"
+	"strconv"
+	"sync/atomic"
+	"time"
+)
+
+var runIDCounter uint64
+
+func genRunID() string {
+	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
+
+thinking
+**Assessing error handling in index update**
+
+Noticed that even if the index update succeeds, returning a corrupted error triggers failure in the handler; planning to inspect how this error is used to decide if the logic needs adjustment.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "updateRunsIndex" -S' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/storage.go:145:func updateRunsIndex(runsDir string, limit int, entry RunIndexEntry) error {
+internal/evaluate/handler.go:156:		if err := updateRunsIndex(runsDir, config.RunsIndexLimit(), RunIndexEntry{
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '120,200p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+		}
+		evalJSON, err := jsonBytes(evalOut)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode evaluation output"})
+			return
+		}
+		commitment := zk.CommitmentSHA256([]byte("spec"), specJSON, []byte("eval"), evalJSON)
+		proof, err := zk.GenerateProof(zk.PublicInputs{
+			PolicyThreshold: policyThreshold,
+			MaxSeverity:     maxSeverity,
+			OverallPass:     overallPass,
+			Commitment:      commitment,
+		})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "proof generation failed"})
+			return
+		}
+		verified, reason, err := zk.VerifyProof(proof.ProofB64, proof.PublicInputsB64)
+		if err != nil {
+			log.Printf("proof verify error: %v", err)
+
+thinking
+**Reviewing error handling and data integrity**
+
+I'm noting that updateRunsIndex errors are only logged without failing responses and considering if corruptedErr logging is still valuable. The saveRunFiles process uses writeAtomic, which already fsyncs files and directories, so extra fsync might be redundant. I'm planning to check parseUploads for possible upload size validation improvements.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"path/filepath"
+	"strings"
+
+	"noema/internal/config"
+)
+
+func parseSpec(form *multipart.Form) (Spec, error) {
+	specStrs := form.Value["spec"]
+	if len(specStrs) == 0 || specStrs[0] == "" {
+		return Spec{}, fmt.Errorf("missing field: spec")
+	}
+	if len(specStrs) > 1 {
+		return Spec{}, fmt.Errorf("only one spec value allowed")
+
+thinking
+**Planning error message improvements**
+
+I'm considering removing detailed errors from parseSpec messages to avoid information leaks but may keep them during debugging; next, I'll review dataset.go's readDatasetFile for further improvements.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"path/filepath"
+	"strings"
+
+	"noema/internal/config"
+)
+
+type Dataset struct {
+	Items []DatasetItem `json:"items"`
+}
+
+type DatasetItem struct {
+	ID       string         `json:"id"`
+
+thinking
+**Spotting small optimization opportunities**
+
+Considering adjusting validation to allow whitespace-only text, improving error messages for UX, and verifying multipart request size limits in evaluate/handler.go; also noting redundant JSON parsing in readDatasetFile but deferring change for now.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,140p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+thinking
+**Noticing JSON formatting usage**
+
+I saw that `jsonBytes` uses json.MarshalIndent, which suggests JSON output is formatted for readability rather than compactness.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '200,340p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	var runs []runEntry
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if !strings.HasPrefix(entry.Name(), "run_") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		runs = append(runs, runEntry{
+			path:    filepath.Join(runsDir, entry.Name()),
+
+thinking
+**Reviewing error handling and validation**
+
+I'm considering improvements around error messaging consistency, handling corrupted index errors during update and rename, and checking validation gaps like spec constraint duplicates; dataset metadata size likely not needed. Next, I'll explore potential enhancement in the HTTP body size check.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,120p' internal/httputil/body.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package httputil
+
+import (
+	"errors"
+	"net/http"
+	"strings"
+)
+
+// IsBodyTooLarge reports whether the error indicates the request body exceeded MaxBytesReader.
+func IsBodyTooLarge(err error) bool {
+	if err == nil {
+		return false
+	}
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "request body too large") ||
+		strings.Contains(msg, "multipart: message too large")
+
+thinking
+**Identifying output location**
+
+Considering evaluate/output.go as the possible place for the relevant output logic to investigate next.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/output.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+)
+
+type EvalConstraintResult struct {
+	ID        string `json:"id"`
+	Severity  int    `json:"severity"`
+	Rationale string `json:"rationale"`
+}
+
+type EvalOutput struct {
+	SchemaVersion int                    `json:"schema_version"`
+	Constraints   []EvalConstraintResult `json:"constraints"`
+	MaxSeverity   int                    `json:"max_severity"`
+	Confidence    *float64               `json:"confidence,omitempty"`
+
+thinking
+**Considering evaluate/cache.go improvements**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/cache.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+type CachedGeminiOutput struct {
+	Model         string       `json:"model"`
+	PromptVersion string       `json:"prompt_version"`
+	Output        EvalOutput   `json:"output"`
+	RawText       string       `json:"raw_text"`
+	Usage         *GeminiUsage `json:"usage,omitempty"`
+	CachedAt      string       `json:"cached_at"`
+}
+
+thinking
+**Assessing error handling and directory creation**
+
+I'm analyzing potential reliability issues in run index updating, noting that failed renames may still lead to overwriting corrupted files but with logged errors. Also considering ensuring the runs directory exists before creating run subdirectories, which might require checking the config.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "RunsDir|runsDir" internal -S' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/storage.go:28:func createRunDir(runsDir string) (string, string, error) {
+internal/evaluate/storage.go:32:		path := filepath.Join(runsDir, runID)
+internal/evaluate/storage.go:145:func updateRunsIndex(runsDir string, limit int, entry RunIndexEntry) error {
+internal/evaluate/storage.go:149:	indexPath := filepath.Join(runsDir, "index.json")
+internal/evaluate/storage_test.go:11:	runsDir := t.TempDir()
+internal/evaluate/storage_test.go:12:	runID, runPath, err := createRunDir(runsDir)
+internal/evaluate/storage_test.go:19:	if runPath != filepath.Join(runsDir, runID) {
+internal/evaluate/handler_integration_test.go:19:	runsDir := t.TempDir()
+internal/evaluate/handler_integration_test.go:20:	router.POST("/api/evaluate", Handler(runsDir, 0))
+internal/evaluate/handler_integration_test.go:69:	runsDir := t.TempDir()
+internal/evaluate/handler_integration_test.go:70:	router.POST("/api/evaluate", Handler(runsDir, 0))
+internal/evaluate/handler_integration_test.go:110:	runsDir := t.TempDir()
+internal/evaluate/handler_integration_test.go:111:	router.POST("/api/evaluate", Handler(runsDir, 0))
+internal/evaluate/handler_integration_test.go:135:	runsDir := t.TempDir()
+internal/evaluate/handler_integration_test.go:136:	router.POST("/api/evaluate", Handler(runsDir, 0))
+internal/evaluate/handler_integration_test.go:167:	runsDir := t.TempDir()
+internal/evaluate/handler_integration_test.go:168:	router.POST("/api/evaluate", Handler(runsDir, 0))
+internal/evaluate/handler_integration_test.go:195:	entries, err := os.ReadDir(runsDir)
+internal/evaluate/handler_integration_test.go:209:	runsDir := t.TempDir()
+internal/evaluate/handler_integration_test.go:210:	router.POST("/api/evaluate", Handler(runsDir, 0))
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,120p' internal/config/config.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package config
+
+import (
+	"os"
+	"strconv"
+
+	"github.com/joho/godotenv"
+)
+
+const devCookieSecret = "dev-secret-change-in-production"
+
+// Load reads .env from the current directory and sets env vars.
+// Safe to call multiple times; existing env vars are not overwritten.
+func Load() error {
+	return godotenv.Load()
+}
+
+// JudgeKey returns the judge key used to gate protected routes.
+func JudgeKey() string {
+	return os.Getenv("JUDGE_KEY")
+
+thinking
+**Checking directory creation for runs/uploads**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' cmd/server/main.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package main
+
+import (
+	"context"
+	"log"
+	"os"
+	"strings"
+
+	"noema/internal/auth"
+	"noema/internal/config"
+	"noema/internal/evaluate"
+	"noema/internal/gemini"
+	"noema/internal/verify"
+	"noema/internal/web"
+
+	"github.com/gin-gonic/gin"
+)
+
+func main() {
+	if err := config.Load(); err != nil {
+
+thinking
+**Planning non-ASCII tests**
+
+I'm considering adding tests for non-ASCII inputs and will check evaluate/gemini_eval.go next to assess its reliability and suitability.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/gemini_eval.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"context"
+	"log"
+	"mime/multipart"
+	"os"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/gemini"
+)
+
+const geminiEvalTimeout = 45 * time.Second
+
+func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
+	if out, provided, err := parseEvalOutputProvided(form, enabled); err != nil {
+		return EvalOutput{}, err
+	} else if provided {
+		return out, nil
+
+thinking
+**Reviewing image read security**
+
+I'm checking the image reading code for potential security issues and validation improvements around severity parsing and output fallback.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/images.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"fmt"
+	"io"
+	"mime"
+	"mime/multipart"
+	"path/filepath"
+	"strings"
+
+	"noema/internal/config"
+)
+
+type ImageInfo struct {
+	Filename string
+	MIMEType string
+	Data     []byte
+}
+
+func readImages(files []*multipart.FileHeader) ([]ImageInfo, error) {
+
+
+thinking
+**Reviewing potential robustness and test improvements**
+
+I'm considering adding tests for handling updateRunsIndex corruption and ensuring run directory creation if missing, plus improving createRunDir to use recursive mkdir for safety; I'll also validate whether error messages can be more informative and confirm cleanup happens properly on partial save failures.
+thinking
+**Noting index corruption handling and pruning nuances**
+
+The updateRunsIndex handles corrupted reads by logging errors but proceeds if rename succeeds, ensuring progress. The pruneRuns sorting by modTime might not reflect metadata saves, suggesting possible minor inconsistency. Considering reviewing the verify handler for further improvements.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/verify/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package verify
+
+import (
+	"encoding/base64"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+// VerifyRequest is the JSON body for POST /api/verify.
+type VerifyRequest struct {
+	RunID           string `json:"run_id"`
+	ProofB64        string `json:"proof_b64"`
+	PublicInputsB64 string `json:"public_inputs_b64"`
+
+thinking
+**Considering TryLegacy for invalid base64**
+
+I'm weighing if TryLegacy should handle invalid base64 cases, possibly moving that logic to the authentication middleware instead.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/auth/middleware.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package auth
+
+import (
+	"crypto/subtle"
+	"net/http"
+	"net/url"
+	"strings"
+
+	"noema/internal/config"
+	"noema/internal/session"
+
+	"github.com/gin-gonic/gin"
+)
+
+// JudgeKey checks the request for a valid judge key (header or query).
+// Use for API routes only. Expects X-Judge-Key header or judge_key query param to match JUDGE_KEY in .env.
+func JudgeKey() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		expect := config.JudgeKey()
+		if expect == "" {
+
+thinking
+**Checking file name safety in uploads**
+
+I'm verifying that file extensions come from client filenames but the saved image names use a safe pattern, while datasets are saved with fixed names ignoring client input. Next, I'll review the upload handling code to confirm no path traversal risk from client filenames.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/web/upload.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package web
+
+import (
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+
+	"github.com/gin-gonic/gin"
+)
+
+// UploadData is passed to the upload template.
+type UploadData struct {
+	Error    string
+
+
+thinking
+**Identifying potential improvements in validation**
+
+I’m considering adding a meaningful validation improvement, such as enforcing case-insensitive uniqueness for image file references or enhancing error messages for JSON parsing, but most current checks already cover key cases and file saving avoids collisions by using generated names.
+thinking
+**Spotting cache validation and atomic write nuances**
+
+I identified that cache keys already include model and prompt version, so mismatches are handled by ignoring corrupted cache files. I also noted potential edge cases in atomic file writes, like cross-device rename errors or platform-specific rename behaviors, but these are unlikely to cause issues.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/policy.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import "fmt"
+
+type ConstraintRule struct {
+	ID                 string
+	AllowedMaxSeverity int
+}
+
+func enabledConstraints(spec Spec) (map[string]ConstraintRule, error) {
+	out := make(map[string]ConstraintRule)
+	for _, c := range spec.Constraints {
+		if !c.Enabled {
+			continue
+		}
+		if _, exists := out[c.ID]; exists {
+			return nil, fmt.Errorf("duplicate constraint id: %s", c.ID)
+		}
+		out[c.ID] = ConstraintRule{ID: c.ID, AllowedMaxSeverity: c.AllowedMaxSeverity}
+	}
+
+
+thinking
+**Considering small meaningful validations**
+
+The focus is on adding non-cosmetic, small but meaningful validations like checking dataset item length or enforcing no duplicate filenames in uploads since existing errors are mostly generic; also considering adding a test for saving uploads and reviewing concurrency in run index updates.
+thinking
+**Identifying small reliability improvements**
+
+Noticed that `readImages` could more reliably defer closing files, and `writeAtomic` lacks syncing on write errors; also spotted potential minor spec validation gaps and subtle multipart memory handling details—considering these for small but meaningful reliability fixes.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,160p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package zk
+
+import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+const (
+	ProofSystem = "groth16"
+	ProofCurve  = "bn254"
+
+	publicInputsPrefix = "noema_public_inputs_v1|"
+	proofPrefix        = "noema_stub_proof_v1|"
+)
+
+// PublicInputs define the public inputs for policy aggregation.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '160,320p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 52ms:
+				return PublicInputs{}, fmt.Errorf("duplicate commitment")
+			}
+			if kv[1] == "" {
+				return PublicInputs{}, fmt.Errorf("commitment required")
+			}
+			if !strings.HasPrefix(kv[1], "0x") {
+				return PublicInputs{}, fmt.Errorf("commitment must have 0x prefix")
+			}
+			if _, err := hex.DecodeString(strings.TrimPrefix(kv[1], "0x")); err != nil {
+				return PublicInputs{}, fmt.Errorf("commitment must be hex")
+			}
+			out.Commitment = kv[1]
+			seenC = true
+		default:
+			return PublicInputs{}, fmt.Errorf("unknown public inputs field")
+		}
+	}
+	if !seenPT || !seenMS || !seenOP || !seenC {
+		return PublicInputs{}, fmt.Errorf("missing public inputs field")
+	}
+
+
+thinking
+**Scanning for meaningful improvements**
+
+Evaluated various minor improvements but found most are handled or non-critical; focusing on ensuring atomic writes properly sync temp directories on Windows seems most impactful next.
+thinking
+**Prioritizing reliability by ensuring run directory creation**
+
+Decided to improve reliability by modifying run directory creation to ensure the base runs directory exists via MkdirAll, plus adding a test to cover this; this approach touches two files and adds meaningful robustness.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/storage_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestCreateRunDir(t *testing.T) {
+	runsDir := t.TempDir()
+	runID, runPath, err := createRunDir(runsDir)
+	if err != nil {
+		t.Fatalf("createRunDir error: %v", err)
+	}
+	if !strings.HasPrefix(runID, "run_") {
+		t.Fatalf("expected runID to start with run_, got %q", runID)
+	}
+	if runPath != filepath.Join(runsDir, runID) {
+		t.Fatalf("unexpected runPath: %q", runPath)
+
+thinking
+**Adding test and updating run directory creation**
+
+I'm adding a test for the case when the run directory is missing and will update the creation logic to use os.MkdirAll with proper permissions, ensuring it correctly errors if the path exists as a file. Next, I'll modify storage.go and storage_test.go accordingly.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/storage.go
+@@ -28,2 +28,5 @@
+ func createRunDir(runsDir string) (string, string, error) {
++	if err := os.MkdirAll(runsDir, 0755); err != nil {
++		return "", "", err
++	}
+ 	const maxAttempts = 5
+apply_patch(auto_approved=true) exited 0 in 30ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/storage.go
+file update:
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 1a1309f14971ac765573b84271aac76ec595020f..55f87d388a0ee916b9df6659365c068ec26e9512
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -26,6 +26,9 @@
+ }
+ 
+ func createRunDir(runsDir string) (string, string, error) {
++	if err := os.MkdirAll(runsDir, 0755); err != nil {
++		return "", "", err
++	}
+ 	const maxAttempts = 5
+ 	for i := 0; i < maxAttempts; i++ {
+ 		runID := genRunID()
+
+file update:
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 1a1309f14971ac765573b84271aac76ec595020f..55f87d388a0ee916b9df6659365c068ec26e9512
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -26,6 +26,9 @@
+ }
+ 
+ func createRunDir(runsDir string) (string, string, error) {
++	if err := os.MkdirAll(runsDir, 0755); err != nil {
++		return "", "", err
++	}
+ 	const maxAttempts = 5
+ 	for i := 0; i < maxAttempts; i++ {
+ 		runID := genRunID()
+
+
+thinking
+**Adding a test**
+file update
+M /Users/yani/Noema/backend/internal/evaluate/storage_test.go
+@@ -29 +29,23 @@
+ }
++
++func TestCreateRunDirCreatesBase(t *testing.T) {
++	baseDir := t.TempDir()
++	runsDir := filepath.Join(baseDir, "nested", "runs")
++	if _, err := os.Stat(runsDir); !os.IsNotExist(err) {
++		t.Fatalf("expected runsDir to not exist yet")
++	}
++	runID, runPath, err := createRunDir(runsDir)
++	if err != nil {
++		t.Fatalf("createRunDir error: %v", err)
++	}
++	if !strings.HasPrefix(runID, "run_") {
++		t.Fatalf("expected runID to start with run_, got %q", runID)
++	}
++	info, err := os.Stat(runPath)
++	if err != nil {
++		t.Fatalf("stat runPath error: %v", err)
++	}
++	if !info.IsDir() {
++		t.Fatalf("expected runPath to be a directory")
++	}
++}
+apply_patch(auto_approved=true) exited 0 in 34ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/storage_test.go
+file update:
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 1a1309f14971ac765573b84271aac76ec595020f..55f87d388a0ee916b9df6659365c068ec26e9512
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -26,6 +26,9 @@
+ }
+ 
+ func createRunDir(runsDir string) (string, string, error) {
++	if err := os.MkdirAll(runsDir, 0755); err != nil {
++		return "", "", err
++	}
+ 	const maxAttempts = 5
+ 	for i := 0; i < maxAttempts; i++ {
+ 		runID := genRunID()
+diff --git a/backend/internal/evaluate/storage_test.go b/backend/internal/evaluate/storage_test.go
+index 65dbc8aef8258cf8a3369cf03d7f064c8837f00e..17dab87c8210693ef62c69a1c2bf1d13a8120877
+--- a/backend/internal/evaluate/storage_test.go
++++ b/backend/internal/evaluate/storage_test.go
+@@ -27,3 +27,25 @@
+ 		t.Fatalf("expected runPath to be a directory")
+ 	}
+ }
++
++func TestCreateRunDirCreatesBase(t *testing.T) {
++	baseDir := t.TempDir()
++	runsDir := filepath.Join(baseDir, "nested", "runs")
++	if _, err := os.Stat(runsDir); !os.IsNotExist(err) {
++		t.Fatalf("expected runsDir to not exist yet")
++	}
++	runID, runPath, err := createRunDir(runsDir)
++	if err != nil {
++		t.Fatalf("createRunDir error: %v", err)
++	}
++	if !strings.HasPrefix(runID, "run_") {
++		t.Fatalf("expected runID to start with run_, got %q", runID)
++	}
++	info, err := os.Stat(runPath)
++	if err != nil {
++		t.Fatalf("stat runPath error: %v", err)
++	}
++	if !info.IsDir() {
++		t.Fatalf("expected runPath to be a directory")
++	}
++}
+
+file update:
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 1a1309f14971ac765573b84271aac76ec595020f..55f87d388a0ee916b9df6659365c068ec26e9512
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -26,6 +26,9 @@
+ }
+ 
+ func createRunDir(runsDir string) (string, string, error) {
++	if err := os.MkdirAll(runsDir, 0755); err != nil {
++		return "", "", err
++	}
+ 	const maxAttempts = 5
+ 	for i := 0; i < maxAttempts; i++ {
+ 		runID := genRunID()
+diff --git a/backend/internal/evaluate/storage_test.go b/backend/internal/evaluate/storage_test.go
+index 65dbc8aef8258cf8a3369cf03d7f064c8837f00e..17dab87c8210693ef62c69a1c2bf1d13a8120877
+--- a/backend/internal/evaluate/storage_test.go
++++ b/backend/internal/evaluate/storage_test.go
+@@ -27,3 +27,25 @@
+ 		t.Fatalf("expected runPath to be a directory")
+ 	}
+ }
++
++func TestCreateRunDirCreatesBase(t *testing.T) {
++	baseDir := t.TempDir()
++	runsDir := filepath.Join(baseDir, "nested", "runs")
++	if _, err := os.Stat(runsDir); !os.IsNotExist(err) {
++		t.Fatalf("expected runsDir to not exist yet")
++	}
++	runID, runPath, err := createRunDir(runsDir)
++	if err != nil {
++		t.Fatalf("createRunDir error: %v", err)
++	}
++	if !strings.HasPrefix(runID, "run_") {
++		t.Fatalf("expected runID to start with run_, got %q", runID)
++	}
++	info, err := os.Stat(runPath)
++	if err != nil {
++		t.Fatalf("stat runPath error: %v", err)
++	}
++	if !info.IsDir() {
++		t.Fatalf("expected runPath to be a directory")
++	}
++}
+
+
+thinking
+**Running all tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 644ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+ok  	noema/internal/config	(cached)
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.157s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 1a1309f14971ac765573b84271aac76ec595020f..55f87d388a0ee916b9df6659365c068ec26e9512
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -26,6 +26,9 @@
+ }
+ 
+ func createRunDir(runsDir string) (string, string, error) {
++	if err := os.MkdirAll(runsDir, 0755); err != nil {
++		return "", "", err
++	}
+ 	const maxAttempts = 5
+ 	for i := 0; i < maxAttempts; i++ {
+ 		runID := genRunID()
+diff --git a/backend/internal/evaluate/storage_test.go b/backend/internal/evaluate/storage_test.go
+index 65dbc8aef8258cf8a3369cf03d7f064c8837f00e..17dab87c8210693ef62c69a1c2bf1d13a8120877
+--- a/backend/internal/evaluate/storage_test.go
++++ b/backend/internal/evaluate/storage_test.go
+@@ -27,3 +27,25 @@
+ 		t.Fatalf("expected runPath to be a directory")
+ 	}
+ }
++
++func TestCreateRunDirCreatesBase(t *testing.T) {
++	baseDir := t.TempDir()
++	runsDir := filepath.Join(baseDir, "nested", "runs")
++	if _, err := os.Stat(runsDir); !os.IsNotExist(err) {
++		t.Fatalf("expected runsDir to not exist yet")
++	}
++	runID, runPath, err := createRunDir(runsDir)
++	if err != nil {
++		t.Fatalf("createRunDir error: %v", err)
++	}
++	if !strings.HasPrefix(runID, "run_") {
++		t.Fatalf("expected runID to start with run_, got %q", runID)
++	}
++	info, err := os.Stat(runPath)
++	if err != nil {
++		t.Fatalf("stat runPath error: %v", err)
++	}
++	if !info.IsDir() {
++		t.Fatalf("expected runPath to be a directory")
++	}
++}
+
+codex
+What you changed (short)
+- Ensured `createRunDir` creates the base runs directory if missing to avoid errors when the path doesn’t exist. (`internal/evaluate/storage.go`)
+- Added a test to cover creating a run dir under a missing nested path. (`internal/evaluate/storage_test.go`)
+
+Tests run
+- `go test ./...`
+
+If you want another iteration, tell me which area to focus on next.
+file update:
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 1a1309f14971ac765573b84271aac76ec595020f..55f87d388a0ee916b9df6659365c068ec26e9512
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -26,6 +26,9 @@
+ }
+ 
+ func createRunDir(runsDir string) (string, string, error) {
++	if err := os.MkdirAll(runsDir, 0755); err != nil {
++		return "", "", err
++	}
+ 	const maxAttempts = 5
+ 	for i := 0; i < maxAttempts; i++ {
+ 		runID := genRunID()
+diff --git a/backend/internal/evaluate/storage_test.go b/backend/internal/evaluate/storage_test.go
+index 65dbc8aef8258cf8a3369cf03d7f064c8837f00e..17dab87c8210693ef62c69a1c2bf1d13a8120877
+--- a/backend/internal/evaluate/storage_test.go
++++ b/backend/internal/evaluate/storage_test.go
+@@ -27,3 +27,25 @@
+ 		t.Fatalf("expected runPath to be a directory")
+ 	}
+ }
++
++func TestCreateRunDirCreatesBase(t *testing.T) {
++	baseDir := t.TempDir()
++	runsDir := filepath.Join(baseDir, "nested", "runs")
++	if _, err := os.Stat(runsDir); !os.IsNotExist(err) {
++		t.Fatalf("expected runsDir to not exist yet")
++	}
++	runID, runPath, err := createRunDir(runsDir)
++	if err != nil {
++		t.Fatalf("createRunDir error: %v", err)
++	}
++	if !strings.HasPrefix(runID, "run_") {
++		t.Fatalf("expected runID to start with run_, got %q", runID)
++	}
++	info, err := os.Stat(runPath)
++	if err != nil {
++		t.Fatalf("stat runPath error: %v", err)
++	}
++	if !info.IsDir() {
++		t.Fatalf("expected runPath to be a directory")
++	}
++}
+
+tokens used
+59,602
+What you changed (short)
+- Ensured `createRunDir` creates the base runs directory if missing to avoid errors when the path doesn’t exist. (`internal/evaluate/storage.go`)
+- Added a test to cover creating a run dir under a missing nested path. (`internal/evaluate/storage_test.go`)
+
+Tests run
+- `go test ./...`
+
+If you want another iteration, tell me which area to focus on next.
