@@ -166,6 +166,36 @@ func TestParseEvalOutputOptional_RejectsInvalidOutput(t *testing.T) {
 	}
 }
 
+func TestParseEvalOutputOptional_RejectsTrailingGarbage(t *testing.T) {
+	spec := Spec{
+		SchemaVersion: 1,
+		Constraints: []Constraint{
+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+		},
+	}
+	enabled, err := enabledConstraints(spec)
+	if err != nil {
+		t.Fatalf("enabledConstraints error: %v", err)
+	}
+
+	payload := EvalOutput{
+		SchemaVersion: 1,
+		Constraints: []EvalConstraintResult{
+			{ID: "pii_exposure_risk", Severity: 0, Rationale: "ok"},
+		},
+		MaxSeverity: 0,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal eval_output: %v", err)
+	}
+
+	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw) + " trailing"}}}
+	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
+		t.Fatalf("expected error for trailing garbage")
+	}
+}
+
 func TestComputePolicyResult(t *testing.T) {
 	enabled := map[string]ConstraintRule{
 		"pii":    {ID: "pii", AllowedMaxSeverity: 1},

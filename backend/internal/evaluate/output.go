@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 )
 
 type EvalConstraintResult struct {
@@ -26,7 +27,7 @@ func parseEvalOutput(raw string) (EvalOutput, error) {
 	if err := dec.Decode(&out); err != nil {
 		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
 	}
-	if err := dec.Decode(&struct{}{}); err == nil {
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
 		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
 	}
 	if out.SchemaVersion != 1 {

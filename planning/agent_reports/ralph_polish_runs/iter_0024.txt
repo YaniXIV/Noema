@@ -1,0 +1,680 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3c92-3cf2-7680-8fa7-10398b2a366c
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 92ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Evaluating test reliability versus maintainability**
+
+Tests are passing but an improvement is needed, so I'm planning to explore the repo with ripgrep to decide whether to prioritize test reliability or maintainability next.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && rg \"TODO|FIXME|panic|\\berror\\b\" internal -g'*.go'" in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/prompt.go:func marshalSampledDataset(ds Dataset) ([]byte, error) {
+internal/evaluate/parse.go:func parseSpec(form *multipart.Form) (Spec, error) {
+internal/evaluate/parse.go:func validateSpec(spec Spec) error {
+internal/evaluate/parse.go:func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.FileHeader, error) {
+internal/evaluate/parse.go:func validateDatasetJSON(fh *multipart.FileHeader, imageFiles []*multipart.FileHeader) error {
+internal/evaluate/output.go:func parseEvalOutput(raw string) (EvalOutput, error) {
+internal/evaluate/output.go:func validateEvalOutput(out EvalOutput, enabled map[string]ConstraintRule) error {
+internal/evaluate/handler_test.go:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:		t.Fatalf("parseEvalOutputOptional error: %v", err)
+internal/evaluate/handler_test.go:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:		t.Fatalf("parseEvalOutputOptional error: %v", err)
+internal/evaluate/handler_test.go:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:		t.Fatalf("expected validation error for unknown constraint")
+internal/evaluate/handler_test.go:		t.Fatalf("expected error for image_ref without images")
+internal/evaluate/handler_test.go:		t.Fatalf("unexpected error: %v", err)
+internal/evaluate/handler_test.go:		t.Fatalf("expected error for duplicate dataset ids")
+internal/evaluate/handler_test.go:		t.Fatalf("expected error for unknown dataset fields")
+internal/evaluate/handler_test.go:		t.Fatalf("expected error for empty dataset file")
+internal/evaluate/handler_test.go:		t.Fatalf("expected error for multiple dataset files")
+internal/evaluate/handler_test.go:		t.Fatalf("expected error for duplicate image filenames")
+
+thinking
+**Inspecting run index update for edge cases**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math/big"
+	"mime/multipart"
+	"os"
+	"path/filepath"
+	"strconv"
+	"sync/atomic"
+	"time"
+)
+
+var runIDCounter uint64
+
+func genRunID() string {
+	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
+
+thinking
+**Considering saveJSON durability improvements**
+
+I'm evaluating adding fsync and atomic rename with temp files in saveJSON to enhance durability but noting current temp file use in the same directory may suffice; also spotting that updateRunsIndex error handling could be improved for index corruption cases.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"strings"
+
+	"noema/internal/config"
+)
+
+func parseSpec(form *multipart.Form) (Spec, error) {
+	specStrs := form.Value["spec"]
+	if len(specStrs) == 0 || specStrs[0] == "" {
+		return Spec{}, fmt.Errorf("missing field: spec")
+	}
+	var spec Spec
+	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
+	dec.DisallowUnknownFields()
+
+thinking
+**Reviewing dataset file reading**
+
+Noted that reading dataset files involves JSON decoding in dataset.go; next step is to examine this file to confirm how data is processed.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+)
+
+type Dataset struct {
+	Items []DatasetItem `json:"items"`
+}
+
+type DatasetItem struct {
+	ID       string         `json:"id"`
+	Text     string         `json:"text"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+	ImageRef string         `json:"image_ref,omitempty"`
+}
+
+thinking
+**Considering metadata validation options**
+
+I'm evaluating if enforcing metadata as an object or checking for non-empty image references is worthwhile but leaning toward minimal changes since the current parseSpec error messaging suffices.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/output.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+)
+
+type EvalConstraintResult struct {
+	ID        string `json:"id"`
+	Severity  int    `json:"severity"`
+	Rationale string `json:"rationale"`
+}
+
+type EvalOutput struct {
+	SchemaVersion int                    `json:"schema_version"`
+	Constraints   []EvalConstraintResult `json:"constraints"`
+	MaxSeverity   int                    `json:"max_severity"`
+	Confidence    *float64               `json:"confidence,omitempty"`
+}
+
+thinking
+**Evaluating error handling and reliability improvements**
+
+I'm considering enhancing error messages with more context where it aids debugging, especially for client use, and reviewing saveJSON's atomic write approach for Windows compatibility. Also, I noted that updateRunsIndex may return a corrupted error even if backup and save succeed, potentially causing unnecessary handler errors—I'll verify that behavior.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+// EvaluateResponse is the JSON response for POST /api/evaluate.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '240,480p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+		})
+	}
+	sort.Slice(out.Constraints, func(i, j int) bool {
+		return out.Constraints[i].ID < out.Constraints[j].ID
+	})
+	return out
+}
+
+func jsonBytes(v any) ([]byte, error) {
+	return json.Marshal(v)
+}
+
+
+thinking
+**Identifying bug in extra token handling**
+
+I noticed that parseEvalOutput incorrectly treats non-EOF decode errors when checking for extra JSON tokens, potentially accepting invalid trailing garbage; this differs from parseSpec which fails properly on such errors, indicating a bug to fix for stricter validation.
+thinking
+**Planning to fix trailing garbage check**
+
+I'm confirming that parseEvalOutput should be updated to reject decode errors for trailing garbage by checking err != io.EOF like parseSpec does, and I plan to add tests to validate this behavior.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"mime/multipart"
+	"net/textproto"
+	"os"
+	"path/filepath"
+	"sort"
+	"testing"
+	"time"
+)
+
+type formFile struct {
+	field       string
+	filename    string
+	contentType string
+	content     []byte
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '240,520p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+func TestValidateDatasetJSON_RejectsEmptyFile(t *testing.T) {
+	form := buildMultipartForm(t, []formFile{
+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte{}},
+	})
+	datasetFile := form.File["dataset"][0]
+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
+		t.Fatalf("expected error for empty dataset file")
+	}
+}
+
+func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
+	dataset := `{"items":[{"id":"1","text":"hello"}]}`
+	form := buildMultipartForm(t, []formFile{
+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
+		{field: "dataset", filename: "dataset2.json", contentType: "application/json", content: []byte(dataset)},
+	})
+	if _, _, err := parseUploads(form); err == nil {
+		t.Fatalf("expected error for multiple dataset files")
+	}
+}
+
+thinking
+**Adding trailing garbage rejection to parsing**
+
+I'm updating parseEvalOutput to reject trailing data by checking for io.EOF after decoding, and adding a test to confirm parseEvalOutputOptional errors on input with valid JSON plus trailing garbage.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/output.go
+@@ -6,2 +6,3 @@
+ 	"fmt"
++	"io"
+ )
+@@ -28,3 +29,3 @@
+ 	}
+-	if err := dec.Decode(&struct{}{}); err == nil {
++	if err := dec.Decode(&struct{}{}); err != io.EOF {
+ 		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
+apply_patch(auto_approved=true) exited 0 in 29ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/output.go
+file update:
+diff --git a/backend/internal/evaluate/output.go b/backend/internal/evaluate/output.go
+index 07e7dbe74e461751bb2d97be1b9fed77555e610f..a3364b2ebf35d84a47b6487a623890d38f7200a4
+--- a/backend/internal/evaluate/output.go
++++ b/backend/internal/evaluate/output.go
+@@ -4,6 +4,7 @@
+ 	"bytes"
+ 	"encoding/json"
+ 	"fmt"
++	"io"
+ )
+ 
+ type EvalConstraintResult struct {
+@@ -26,7 +27,7 @@
+ 	if err := dec.Decode(&out); err != nil {
+ 		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
+ 	}
+-	if err := dec.Decode(&struct{}{}); err == nil {
++	if err := dec.Decode(&struct{}{}); err != io.EOF {
+ 		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
+ 	}
+ 	if out.SchemaVersion != 1 {
+
+file update:
+diff --git a/backend/internal/evaluate/output.go b/backend/internal/evaluate/output.go
+index 07e7dbe74e461751bb2d97be1b9fed77555e610f..a3364b2ebf35d84a47b6487a623890d38f7200a4
+--- a/backend/internal/evaluate/output.go
++++ b/backend/internal/evaluate/output.go
+@@ -4,6 +4,7 @@
+ 	"bytes"
+ 	"encoding/json"
+ 	"fmt"
++	"io"
+ )
+ 
+ type EvalConstraintResult struct {
+@@ -26,7 +27,7 @@
+ 	if err := dec.Decode(&out); err != nil {
+ 		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
+ 	}
+-	if err := dec.Decode(&struct{}{}); err == nil {
++	if err := dec.Decode(&struct{}{}); err != io.EOF {
+ 		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
+ 	}
+ 	if out.SchemaVersion != 1 {
+
+
+thinking
+**Adding test**
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
+@@ -168,2 +168,32 @@
+ 
++func TestParseEvalOutputOptional_RejectsTrailingGarbage(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	enabled, err := enabledConstraints(spec)
++	if err != nil {
++		t.Fatalf("enabledConstraints error: %v", err)
++	}
++
++	payload := EvalOutput{
++		SchemaVersion: 1,
++		Constraints: []EvalConstraintResult{
++			{ID: "pii_exposure_risk", Severity: 0, Rationale: "ok"},
++		},
++		MaxSeverity: 0,
++	}
++	raw, err := json.Marshal(payload)
++	if err != nil {
++		t.Fatalf("marshal eval_output: %v", err)
++	}
++
++	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw) + " trailing"}}}
++	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
++		t.Fatalf("expected error for trailing garbage")
++	}
++}
++
+ func TestComputePolicyResult(t *testing.T) {
+apply_patch(auto_approved=true) exited 0 in 34ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
+file update:
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 79e3111bbacf0a897b1339dfe48b04c10b372075..2327c77b3fc12627ef79c95c3df0c0eeaa092646
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -166,6 +166,36 @@
+ 	}
+ }
+ 
++func TestParseEvalOutputOptional_RejectsTrailingGarbage(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	enabled, err := enabledConstraints(spec)
++	if err != nil {
++		t.Fatalf("enabledConstraints error: %v", err)
++	}
++
++	payload := EvalOutput{
++		SchemaVersion: 1,
++		Constraints: []EvalConstraintResult{
++			{ID: "pii_exposure_risk", Severity: 0, Rationale: "ok"},
++		},
++		MaxSeverity: 0,
++	}
++	raw, err := json.Marshal(payload)
++	if err != nil {
++		t.Fatalf("marshal eval_output: %v", err)
++	}
++
++	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw) + " trailing"}}}
++	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
++		t.Fatalf("expected error for trailing garbage")
++	}
++}
++
+ func TestComputePolicyResult(t *testing.T) {
+ 	enabled := map[string]ConstraintRule{
+ 		"pii":    {ID: "pii", AllowedMaxSeverity: 1},
+diff --git a/backend/internal/evaluate/output.go b/backend/internal/evaluate/output.go
+index 07e7dbe74e461751bb2d97be1b9fed77555e610f..a3364b2ebf35d84a47b6487a623890d38f7200a4
+--- a/backend/internal/evaluate/output.go
++++ b/backend/internal/evaluate/output.go
+@@ -4,6 +4,7 @@
+ 	"bytes"
+ 	"encoding/json"
+ 	"fmt"
++	"io"
+ )
+ 
+ type EvalConstraintResult struct {
+@@ -26,7 +27,7 @@
+ 	if err := dec.Decode(&out); err != nil {
+ 		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
+ 	}
+-	if err := dec.Decode(&struct{}{}); err == nil {
++	if err := dec.Decode(&struct{}{}); err != io.EOF {
+ 		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
+ 	}
+ 	if out.SchemaVersion != 1 {
+
+file update:
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 79e3111bbacf0a897b1339dfe48b04c10b372075..2327c77b3fc12627ef79c95c3df0c0eeaa092646
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -166,6 +166,36 @@
+ 	}
+ }
+ 
++func TestParseEvalOutputOptional_RejectsTrailingGarbage(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	enabled, err := enabledConstraints(spec)
++	if err != nil {
++		t.Fatalf("enabledConstraints error: %v", err)
++	}
++
++	payload := EvalOutput{
++		SchemaVersion: 1,
++		Constraints: []EvalConstraintResult{
++			{ID: "pii_exposure_risk", Severity: 0, Rationale: "ok"},
++		},
++		MaxSeverity: 0,
++	}
++	raw, err := json.Marshal(payload)
++	if err != nil {
++		t.Fatalf("marshal eval_output: %v", err)
++	}
++
++	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw) + " trailing"}}}
++	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
++		t.Fatalf("expected error for trailing garbage")
++	}
++}
++
+ func TestComputePolicyResult(t *testing.T) {
+ 	enabled := map[string]ConstraintRule{
+ 		"pii":    {ID: "pii", AllowedMaxSeverity: 1},
+diff --git a/backend/internal/evaluate/output.go b/backend/internal/evaluate/output.go
+index 07e7dbe74e461751bb2d97be1b9fed77555e610f..a3364b2ebf35d84a47b6487a623890d38f7200a4
+--- a/backend/internal/evaluate/output.go
++++ b/backend/internal/evaluate/output.go
+@@ -4,6 +4,7 @@
+ 	"bytes"
+ 	"encoding/json"
+ 	"fmt"
++	"io"
+ )
+ 
+ type EvalConstraintResult struct {
+@@ -26,7 +27,7 @@
+ 	if err := dec.Decode(&out); err != nil {
+ 		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
+ 	}
+-	if err := dec.Decode(&struct{}{}); err == nil {
++	if err := dec.Decode(&struct{}{}); err != io.EOF {
+ 		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
+ 	}
+ 	if out.SchemaVersion != 1 {
+
+
+thinking
+**Running tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 501ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.053s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 79e3111bbacf0a897b1339dfe48b04c10b372075..2327c77b3fc12627ef79c95c3df0c0eeaa092646
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -166,6 +166,36 @@
+ 	}
+ }
+ 
++func TestParseEvalOutputOptional_RejectsTrailingGarbage(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	enabled, err := enabledConstraints(spec)
++	if err != nil {
++		t.Fatalf("enabledConstraints error: %v", err)
++	}
++
++	payload := EvalOutput{
++		SchemaVersion: 1,
++		Constraints: []EvalConstraintResult{
++			{ID: "pii_exposure_risk", Severity: 0, Rationale: "ok"},
++		},
++		MaxSeverity: 0,
++	}
++	raw, err := json.Marshal(payload)
++	if err != nil {
++		t.Fatalf("marshal eval_output: %v", err)
++	}
++
++	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw) + " trailing"}}}
++	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
++		t.Fatalf("expected error for trailing garbage")
++	}
++}
++
+ func TestComputePolicyResult(t *testing.T) {
+ 	enabled := map[string]ConstraintRule{
+ 		"pii":    {ID: "pii", AllowedMaxSeverity: 1},
+diff --git a/backend/internal/evaluate/output.go b/backend/internal/evaluate/output.go
+index 07e7dbe74e461751bb2d97be1b9fed77555e610f..a3364b2ebf35d84a47b6487a623890d38f7200a4
+--- a/backend/internal/evaluate/output.go
++++ b/backend/internal/evaluate/output.go
+@@ -4,6 +4,7 @@
+ 	"bytes"
+ 	"encoding/json"
+ 	"fmt"
++	"io"
+ )
+ 
+ type EvalConstraintResult struct {
+@@ -26,7 +27,7 @@
+ 	if err := dec.Decode(&out); err != nil {
+ 		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
+ 	}
+-	if err := dec.Decode(&struct{}{}); err == nil {
++	if err := dec.Decode(&struct{}{}); err != io.EOF {
+ 		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
+ 	}
+ 	if out.SchemaVersion != 1 {
+
+codex
+What you changed (short)
+- Fixed `parseEvalOutput` to reject any trailing data after valid JSON.
+- Added a test to ensure `eval_output` with trailing garbage is rejected.
+
+Tests run
+- `go test ./...`
+
+Natural next steps
+1. Review `parseEvalOutput` error messaging if you want more specific client feedback.
+2. Add similar trailing-data checks for other JSON inputs if needed.
+file update:
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 79e3111bbacf0a897b1339dfe48b04c10b372075..2327c77b3fc12627ef79c95c3df0c0eeaa092646
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -166,6 +166,36 @@
+ 	}
+ }
+ 
++func TestParseEvalOutputOptional_RejectsTrailingGarbage(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	enabled, err := enabledConstraints(spec)
++	if err != nil {
++		t.Fatalf("enabledConstraints error: %v", err)
++	}
++
++	payload := EvalOutput{
++		SchemaVersion: 1,
++		Constraints: []EvalConstraintResult{
++			{ID: "pii_exposure_risk", Severity: 0, Rationale: "ok"},
++		},
++		MaxSeverity: 0,
++	}
++	raw, err := json.Marshal(payload)
++	if err != nil {
++		t.Fatalf("marshal eval_output: %v", err)
++	}
++
++	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw) + " trailing"}}}
++	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
++		t.Fatalf("expected error for trailing garbage")
++	}
++}
++
+ func TestComputePolicyResult(t *testing.T) {
+ 	enabled := map[string]ConstraintRule{
+ 		"pii":    {ID: "pii", AllowedMaxSeverity: 1},
+diff --git a/backend/internal/evaluate/output.go b/backend/internal/evaluate/output.go
+index 07e7dbe74e461751bb2d97be1b9fed77555e610f..a3364b2ebf35d84a47b6487a623890d38f7200a4
+--- a/backend/internal/evaluate/output.go
++++ b/backend/internal/evaluate/output.go
+@@ -4,6 +4,7 @@
+ 	"bytes"
+ 	"encoding/json"
+ 	"fmt"
++	"io"
+ )
+ 
+ type EvalConstraintResult struct {
+@@ -26,7 +27,7 @@
+ 	if err := dec.Decode(&out); err != nil {
+ 		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
+ 	}
+-	if err := dec.Decode(&struct{}{}); err == nil {
++	if err := dec.Decode(&struct{}{}); err != io.EOF {
+ 		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
+ 	}
+ 	if out.SchemaVersion != 1 {
+
+tokens used
+23,836
+What you changed (short)
+- Fixed `parseEvalOutput` to reject any trailing data after valid JSON.
+- Added a test to ensure `eval_output` with trailing garbage is rejected.
+
+Tests run
+- `go test ./...`
+
+Natural next steps
+1. Review `parseEvalOutput` error messaging if you want more specific client feedback.
+2. Add similar trailing-data checks for other JSON inputs if needed.
