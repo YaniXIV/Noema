@@ -31,7 +31,7 @@ func ensureRunDir(path string) error {
 
 func saveRunFiles(runPath string, dataset *multipart.FileHeader, images []*multipart.FileHeader) error {
 	if err := saveUpload(dataset, filepath.Join(runPath, "dataset.json")); err != nil {
-		return fmt.Errorf("failed to save dataset")
+		return fmt.Errorf("failed to save dataset: %w", err)
 	}
 	for i, f := range images {
 		ext := filepath.Ext(f.Filename)
@@ -40,7 +40,7 @@ func saveRunFiles(runPath string, dataset *multipart.FileHeader, images []*multi
 		}
 		dst := filepath.Join(runPath, fmt.Sprintf("image_%d%s", i, ext))
 		if err := saveUpload(f, dst); err != nil {
-			return fmt.Errorf("failed to save image")
+			return fmt.Errorf("failed to save image %d: %w", i, err)
 		}
 	}
 	return nil
@@ -49,16 +49,19 @@ func saveRunFiles(runPath string, dataset *multipart.FileHeader, images []*multi
 func saveUpload(fh *multipart.FileHeader, dst string) error {
 	src, err := fh.Open()
 	if err != nil {
-		return err
+		return fmt.Errorf("open upload: %w", err)
 	}
 	defer src.Close()
 	out, err := os.Create(dst)
 	if err != nil {
-		return err
+		return fmt.Errorf("create %s: %w", dst, err)
 	}
 	defer out.Close()
 	_, err = io.Copy(out, src)
-	return err
+	if err != nil {
+		return fmt.Errorf("copy to %s: %w", dst, err)
+	}
+	return nil
 }
 
 func saveJSON(path string, v any) error {
