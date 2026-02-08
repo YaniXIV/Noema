@@ -41,7 +41,9 @@ func readDatasetFile(fh *multipart.FileHeader) ([]byte, Dataset, error) {
 	}
 
 	var ds Dataset
-	if err := json.Unmarshal(raw, &ds); err != nil {
+	dec = json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&ds); err != nil {
 		return nil, Dataset{}, fmt.Errorf("dataset must match schema")
 	}
 	if len(ds.Items) == 0 {

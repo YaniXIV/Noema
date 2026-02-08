@@ -226,6 +226,17 @@ func TestValidateDatasetJSON_RejectsDuplicateIDs(t *testing.T) {
 	}
 }
 
+func TestValidateDatasetJSON_RejectsUnknownFields(t *testing.T) {
+	dataset := `{"items":[{"id":"1","text":"hello","extra":"nope"}]}`
+	form := buildMultipartForm(t, []formFile{
+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
+	})
+	datasetFile := form.File["dataset"][0]
+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
+		t.Fatalf("expected error for unknown dataset fields")
+	}
+}
+
 func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
 	dataset := `{"items":[{"id":"1","text":"hello"}]}`
 	form := buildMultipartForm(t, []formFile{
@@ -271,6 +282,17 @@ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
 	}
 	if err := validateSpec(spec); err == nil {
 		t.Fatalf("expected error for empty custom constraint id")
+	}
+}
+
+func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+	form := &multipart.Form{
+		Value: map[string][]string{
+			"spec": {`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[],"extra":true}`},
+		},
+	}
+	if _, err := parseSpec(form); err == nil {
+		t.Fatalf("expected error for unknown spec fields")
 	}
 }
 

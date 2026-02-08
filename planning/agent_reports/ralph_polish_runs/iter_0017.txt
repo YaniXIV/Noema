@@ -1,0 +1,1033 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3c8a-f51d-7e82-8484-65b11c8c8999
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Running go test**
+
+I'm running the Go tests using exec_command to check the current test results.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 301ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Planning targeted improvement**
+
+Tests pass, so I'm reviewing the repo to pick a meaningful improvement affecting at most three files, considering TODOs and error handling as candidates.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME|panic|Must|nil" internal | head -100' in /Users/yani/Noema/backend succeeded in 51ms:
+internal/session/session.go:19:	sig := hex.EncodeToString(mac.Sum(nil))
+internal/session/session.go:32:	if err != nil || len(sig) != sha256.Size {
+internal/session/session.go:36:	if err != nil {
+internal/session/session.go:42:	expected := mac.Sum(nil)
+internal/evaluate/parse.go:18:	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
+internal/evaluate/parse.go:21:	return spec, nil
+internal/evaluate/parse.go:44:	return nil
+internal/evaluate/parse.go:50:		return nil, nil, fmt.Errorf("missing required file: dataset")
+internal/evaluate/parse.go:53:		return nil, nil, fmt.Errorf("only one dataset file allowed")
+internal/evaluate/parse.go:57:		return nil, nil, fmt.Errorf("dataset exceeds 50MB limit")
+internal/evaluate/parse.go:61:		return nil, nil, fmt.Errorf("maximum 10 images allowed")
+internal/evaluate/parse.go:66:			return nil, nil, fmt.Errorf("image filenames must be unique")
+internal/evaluate/parse.go:70:			return nil, nil, fmt.Errorf("each image must be at most 5MB")
+internal/evaluate/parse.go:73:	if err := validateDatasetJSON(datasetFile, imageFiles); err != nil {
+internal/evaluate/parse.go:74:		return nil, nil, err
+internal/evaluate/parse.go:76:	return datasetFile, imageFiles, nil
+internal/evaluate/parse.go:81:	if err != nil {
+internal/evaluate/parse.go:90:		return nil
+internal/evaluate/parse.go:104:	return nil
+internal/verify/handler_test.go:31:	if err != nil {
+
+thinking
+**Inspecting evaluation handler for validation**
+
+I'm opening evaluate/handler.go to check for missing input validation or content-type handling that could cause bugs.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+// EvaluateResponse is the JSON response for POST /api/evaluate.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
+	if err != nil {
+		return EvalOutput{}, err
+	}
+	if err := validateEvalOutput(out, enabled); err != nil {
+		return EvalOutput{}, err
+	}
+	return out, nil
+}
+
+func stubEvalOutput(enabled map[string]ConstraintRule) EvalOutput {
+	out := EvalOutput{
+		SchemaVersion: 1,
+		Constraints:   make([]EvalConstraintResult, 0, len(enabled)),
+		MaxSeverity:   0,
+	}
+	for id := range enabled {
+		out.Constraints = append(out.Constraints, EvalConstraintResult{
+			ID:        id,
+			Severity:  0,
+			Rationale: "stub",
+
+thinking
+**Considering parseUploads for improvement**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"mime/multipart"
+	"strings"
+
+	"noema/internal/config"
+)
+
+func parseSpec(form *multipart.Form) (Spec, error) {
+	specStrs := form.Value["spec"]
+	if len(specStrs) == 0 || specStrs[0] == "" {
+		return Spec{}, fmt.Errorf("missing field: spec")
+	}
+	var spec Spec
+	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
+		return Spec{}, fmt.Errorf("invalid spec JSON")
+	}
+
+thinking
+**Reviewing evaluation output parsing**
+
+I'm checking the evaluation output parsing in output.go to confirm how parseEvalOutput handles large eval_output and if it uses form.Value, aiming to spot potential issues or duplicate data handling.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/output.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+)
+
+type EvalConstraintResult struct {
+	ID        string `json:"id"`
+	Severity  int    `json:"severity"`
+	Rationale string `json:"rationale"`
+}
+
+type EvalOutput struct {
+	SchemaVersion int                    `json:"schema_version"`
+	Constraints   []EvalConstraintResult `json:"constraints"`
+	MaxSeverity   int                    `json:"max_severity"`
+	Confidence    *float64               `json:"confidence,omitempty"`
+}
+
+thinking
+**Identifying validation gaps**
+
+Considering adding output size limits to prevent resource issues and exploring stricter JSON parsing to avoid unknown fields, but uncertain about schema flexibility. Noting lack of duplicate constraint ID checks across constraints and custom constraints, which could impact correctness and enabled constraint mapping; planning to inspect those areas next.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/constraints.go" in /Users/yani/Noema/backend exited 1 in 52ms:
+sed: internal/evaluate/constraints.go: No such file or directory
+
+thinking
+**Locating target file**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "enabledConstraints|ConstraintRule" internal/evaluate' in /Users/yani/Noema/backend succeeded in 51ms:
+internal/evaluate/output.go:49:func validateEvalOutput(out EvalOutput, enabled map[string]ConstraintRule) error {
+internal/evaluate/handler_test.go:65:	enabled, err := enabledConstraints(spec)
+internal/evaluate/handler_test.go:67:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:108:	enabled, err := enabledConstraints(spec)
+internal/evaluate/handler_test.go:110:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:146:	enabled, err := enabledConstraints(spec)
+internal/evaluate/handler_test.go:148:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:170:	enabled := map[string]ConstraintRule{
+internal/evaluate/policy.go:5:type ConstraintRule struct {
+internal/evaluate/policy.go:10:func enabledConstraints(spec Spec) (map[string]ConstraintRule, error) {
+internal/evaluate/policy.go:11:	out := make(map[string]ConstraintRule)
+internal/evaluate/policy.go:19:		out[c.ID] = ConstraintRule{ID: c.ID, AllowedMaxSeverity: c.AllowedMaxSeverity}
+internal/evaluate/policy.go:28:		out[c.ID] = ConstraintRule{ID: c.ID, AllowedMaxSeverity: c.AllowedMaxSeverity}
+internal/evaluate/policy.go:36:func computePolicyResult(out EvalOutput, enabled map[string]ConstraintRule) (overallPass bool, maxSeverity int, policyThreshold int) {
+internal/evaluate/gemini_eval.go:15:func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
+internal/evaluate/gemini_eval.go:30:func evalWithGemini(ctx context.Context, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) EvalOutput {
+internal/evaluate/handler.go:88:		enabled, err := enabledConstraints(spec)
+internal/evaluate/handler.go:214:func parseEvalOutputOptional(form *multipart.Form, enabled map[string]ConstraintRule) (EvalOutput, error) {
+internal/evaluate/handler.go:229:func stubEvalOutput(enabled map[string]ConstraintRule) EvalOutput {
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,160p' internal/evaluate/policy.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import "fmt"
+
+type ConstraintRule struct {
+	ID                 string
+	AllowedMaxSeverity int
+}
+
+func enabledConstraints(spec Spec) (map[string]ConstraintRule, error) {
+	out := make(map[string]ConstraintRule)
+	for _, c := range spec.Constraints {
+		if !c.Enabled {
+			continue
+		}
+		if _, exists := out[c.ID]; exists {
+			return nil, fmt.Errorf("duplicate constraint id: %s", c.ID)
+		}
+		out[c.ID] = ConstraintRule{ID: c.ID, AllowedMaxSeverity: c.AllowedMaxSeverity}
+	}
+
+thinking
+**Considering stricter spec validation**
+
+I'm thinking about using JSON decoding with strict unknown field checks in the spec to catch errors early, balancing reliability against client compatibility risks. Also considering enhanced duplicate ID checks across all constraints, not just enabled ones, to improve clarity.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+)
+
+type Dataset struct {
+	Items []DatasetItem `json:"items"`
+}
+
+type DatasetItem struct {
+	ID       string         `json:"id"`
+	Text     string         `json:"text"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+	ImageRef string         `json:"image_ref,omitempty"`
+}
+
+
+thinking
+**Considering stricter JSON decoding**
+
+I'm evaluating using DisallowUnknownFields in dataset decoding to catch unexpected top-level keys while allowing arbitrary fields inside metadata maps; this could improve schema validation but requires careful handling since current decoding is two-pass and metadata needs to permit unknown fields.
+thinking
+**Planning stricter spec and dataset validation**
+
+I'm leaning toward enforcing DisallowUnknownFields for both spec and dataset to ensure correctness under schema_version 1, acknowledging this might break clients sending extra fields. Next, I'll review existing tests to support adding this strict decoding and ensure parseSpec uses a decoder with DisallowUnknownFields.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"mime/multipart"
+	"net/textproto"
+	"os"
+	"path/filepath"
+	"sort"
+	"testing"
+	"time"
+)
+
+type formFile struct {
+	field       string
+	filename    string
+	contentType string
+	content     []byte
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+	form := buildMultipartForm(t, []formFile{
+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
+	})
+	datasetFile := form.File["dataset"][0]
+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
+		t.Fatalf("expected error for duplicate dataset ids")
+	}
+}
+
+func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
+	dataset := `{"items":[{"id":"1","text":"hello"}]}`
+	form := buildMultipartForm(t, []formFile{
+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
+		{field: "dataset", filename: "dataset2.json", contentType: "application/json", content: []byte(dataset)},
+	})
+	if _, _, err := parseUploads(form); err == nil {
+		t.Fatalf("expected error for multiple dataset files")
+	}
+}
+
+
+
+thinking
+**Planning strict JSON validation**
+
+I'm updating spec parsing to use a JSON decoder with DisallowUnknownFields and EOF checks for stricter validation, replacing json.Unmarshal. For datasets, I'll apply similar stricter decoding to ensure valid JSON and a single value, aligning error messages while keeping changes within three files.
+thinking
+**Refining dataset JSON validation**
+
+I'm keeping a two-pass dataset decode: first generic to check valid JSON and single value, then strict decode with DisallowUnknownFields for schema validation. This preserves clear error distinctions while replacing json.Unmarshal with decoder use.
+
+**Planning strict spec field rejection test**
+
+I'll add a test crafting a multipart form with a spec JSON including an unknown field to verify parseSpec rejects it via DisallowUnknownFields, ensuring proper error handling for unexpected spec fields.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/spec.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+// Spec is the parsed evaluation spec (schema_version 1).
+type Spec struct {
+	SchemaVersion     int                `json:"schema_version"`
+	EvaluationName    string             `json:"evaluation_name"`
+	Policy            Policy             `json:"policy"`
+	Constraints       []Constraint       `json:"constraints"`
+	CustomConstraints []CustomConstraint `json:"custom_constraints"`
+}
+
+type Policy struct {
+	Reveal RevealPolicy `json:"reveal"`
+}
+
+type RevealPolicy struct {
+	MaxSeverity bool `json:"max_severity"`
+	Commitment  bool `json:"commitment"`
+}
+
+
+
+thinking
+**Adding strict unknown field validation**
+
+I'm updating spec and dataset parsing to reject unknown JSON fields using DisallowUnknownFields, adding tests that confirm errors occur when unexpected fields appear in specs and datasets. Parsing updates span parse.go, dataset.go, and handler_test.go.
+thinking
+**Enhancing dataset decoding with strict validation**
+
+I'm refining dataset file reading to first decode generically, then re-decode with DisallowUnknownFields to enforce schema adherence, while considering eliminating redundant EOF checks to balance strictness and efficiency.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/parse.go
+@@ -5,2 +5,3 @@
+ 	"fmt"
++	"io"
+ 	"mime/multipart"
+@@ -17,3 +18,8 @@
+ 	var spec Spec
+-	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
++	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
++	dec.DisallowUnknownFields()
++	if err := dec.Decode(&spec); err != nil {
++		return Spec{}, fmt.Errorf("invalid spec JSON")
++	}
++	if err := dec.Decode(&struct{}{}); err != io.EOF {
+ 		return Spec{}, fmt.Errorf("invalid spec JSON")
+apply_patch(auto_approved=true) exited 0 in 30ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/parse.go
+file update:
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index e0245ab5f0766803235fb31405e5c90a03ed180d..1bdabd2155f1907fa9725b41753a1d9e5c2f4250
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -3,6 +3,7 @@
+ import (
+ 	"encoding/json"
+ 	"fmt"
++	"io"
+ 	"mime/multipart"
+ 	"strings"
+ 
+@@ -15,7 +16,12 @@
+ 		return Spec{}, fmt.Errorf("missing field: spec")
+ 	}
+ 	var spec Spec
+-	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
++	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
++	dec.DisallowUnknownFields()
++	if err := dec.Decode(&spec); err != nil {
++		return Spec{}, fmt.Errorf("invalid spec JSON")
++	}
++	if err := dec.Decode(&struct{}{}); err != io.EOF {
+ 		return Spec{}, fmt.Errorf("invalid spec JSON")
+ 	}
+ 	return spec, nil
+
+file update:
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index e0245ab5f0766803235fb31405e5c90a03ed180d..1bdabd2155f1907fa9725b41753a1d9e5c2f4250
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -3,6 +3,7 @@
+ import (
+ 	"encoding/json"
+ 	"fmt"
++	"io"
+ 	"mime/multipart"
+ 	"strings"
+ 
+@@ -15,7 +16,12 @@
+ 		return Spec{}, fmt.Errorf("missing field: spec")
+ 	}
+ 	var spec Spec
+-	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
++	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
++	dec.DisallowUnknownFields()
++	if err := dec.Decode(&spec); err != nil {
++		return Spec{}, fmt.Errorf("invalid spec JSON")
++	}
++	if err := dec.Decode(&struct{}{}); err != io.EOF {
+ 		return Spec{}, fmt.Errorf("invalid spec JSON")
+ 	}
+ 	return spec, nil
+
+
+thinking
+**Updating dataset.go**
+file update
+M /Users/yani/Noema/backend/internal/evaluate/dataset.go
+@@ -43,3 +43,5 @@
+ 	var ds Dataset
+-	if err := json.Unmarshal(raw, &ds); err != nil {
++	dec = json.NewDecoder(bytes.NewReader(raw))
++	dec.DisallowUnknownFields()
++	if err := dec.Decode(&ds); err != nil {
+ 		return nil, Dataset{}, fmt.Errorf("dataset must match schema")
+apply_patch(auto_approved=true) exited 0 in 36ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/dataset.go
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 97fa69fff87ebf6b84ec903b2e8fa3cb8ae657a0..3c407a6426f3acc932c81e6750b6089793597e8d
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -41,7 +41,9 @@
+ 	}
+ 
+ 	var ds Dataset
+-	if err := json.Unmarshal(raw, &ds); err != nil {
++	dec = json.NewDecoder(bytes.NewReader(raw))
++	dec.DisallowUnknownFields()
++	if err := dec.Decode(&ds); err != nil {
+ 		return nil, Dataset{}, fmt.Errorf("dataset must match schema")
+ 	}
+ 	if len(ds.Items) == 0 {
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index e0245ab5f0766803235fb31405e5c90a03ed180d..1bdabd2155f1907fa9725b41753a1d9e5c2f4250
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -3,6 +3,7 @@
+ import (
+ 	"encoding/json"
+ 	"fmt"
++	"io"
+ 	"mime/multipart"
+ 	"strings"
+ 
+@@ -15,7 +16,12 @@
+ 		return Spec{}, fmt.Errorf("missing field: spec")
+ 	}
+ 	var spec Spec
+-	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
++	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
++	dec.DisallowUnknownFields()
++	if err := dec.Decode(&spec); err != nil {
++		return Spec{}, fmt.Errorf("invalid spec JSON")
++	}
++	if err := dec.Decode(&struct{}{}); err != io.EOF {
+ 		return Spec{}, fmt.Errorf("invalid spec JSON")
+ 	}
+ 	return spec, nil
+
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 97fa69fff87ebf6b84ec903b2e8fa3cb8ae657a0..3c407a6426f3acc932c81e6750b6089793597e8d
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -41,7 +41,9 @@
+ 	}
+ 
+ 	var ds Dataset
+-	if err := json.Unmarshal(raw, &ds); err != nil {
++	dec = json.NewDecoder(bytes.NewReader(raw))
++	dec.DisallowUnknownFields()
++	if err := dec.Decode(&ds); err != nil {
+ 		return nil, Dataset{}, fmt.Errorf("dataset must match schema")
+ 	}
+ 	if len(ds.Items) == 0 {
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index e0245ab5f0766803235fb31405e5c90a03ed180d..1bdabd2155f1907fa9725b41753a1d9e5c2f4250
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -3,6 +3,7 @@
+ import (
+ 	"encoding/json"
+ 	"fmt"
++	"io"
+ 	"mime/multipart"
+ 	"strings"
+ 
+@@ -15,7 +16,12 @@
+ 		return Spec{}, fmt.Errorf("missing field: spec")
+ 	}
+ 	var spec Spec
+-	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
++	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
++	dec.DisallowUnknownFields()
++	if err := dec.Decode(&spec); err != nil {
++		return Spec{}, fmt.Errorf("invalid spec JSON")
++	}
++	if err := dec.Decode(&struct{}{}); err != io.EOF {
+ 		return Spec{}, fmt.Errorf("invalid spec JSON")
+ 	}
+ 	return spec, nil
+
+
+thinking
+**Adding tests for parseSpec and dataset validation**
+
+I'm preparing to add tests in handler_test.go using multipart.Form for parseSpec with extra unknown fields to ensure it errors correctly without calling validate, and for dataset JSON with unknown fields to confirm schema validation fails as expected.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
+@@ -228,2 +228,13 @@
+ 
++func TestValidateDatasetJSON_RejectsUnknownFields(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello","extra":"nope"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++	})
++	datasetFile := form.File["dataset"][0]
++	if err := validateDatasetJSON(datasetFile, nil); err == nil {
++		t.Fatalf("expected error for unknown dataset fields")
++	}
++}
++
+ func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
+@@ -276,2 +287,13 @@
+ 
++func TestParseSpec_RejectsUnknownFields(t *testing.T) {
++	form := &multipart.Form{
++		Value: map[string][]string{
++			"spec": {`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[],"extra":true}`},
++		},
++	}
++	if _, err := parseSpec(form); err == nil {
++		t.Fatalf("expected error for unknown spec fields")
++	}
++}
++
+ func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
+apply_patch(auto_approved=true) exited 0 in 43ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 97fa69fff87ebf6b84ec903b2e8fa3cb8ae657a0..3c407a6426f3acc932c81e6750b6089793597e8d
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -41,7 +41,9 @@
+ 	}
+ 
+ 	var ds Dataset
+-	if err := json.Unmarshal(raw, &ds); err != nil {
++	dec = json.NewDecoder(bytes.NewReader(raw))
++	dec.DisallowUnknownFields()
++	if err := dec.Decode(&ds); err != nil {
+ 		return nil, Dataset{}, fmt.Errorf("dataset must match schema")
+ 	}
+ 	if len(ds.Items) == 0 {
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index f456593dd1b6d6e8f1c6db2425313749347a13d3..fa17d3d6c8a1a5e7e04b55620d7e537c9af5cb1f
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -226,6 +226,17 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsUnknownFields(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello","extra":"nope"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++	})
++	datasetFile := form.File["dataset"][0]
++	if err := validateDatasetJSON(datasetFile, nil); err == nil {
++		t.Fatalf("expected error for unknown dataset fields")
++	}
++}
++
+ func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
+ 	dataset := `{"items":[{"id":"1","text":"hello"}]}`
+ 	form := buildMultipartForm(t, []formFile{
+@@ -274,6 +285,17 @@
+ 	}
+ }
+ 
++func TestParseSpec_RejectsUnknownFields(t *testing.T) {
++	form := &multipart.Form{
++		Value: map[string][]string{
++			"spec": {`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[],"extra":true}`},
++		},
++	}
++	if _, err := parseSpec(form); err == nil {
++		t.Fatalf("expected error for unknown spec fields")
++	}
++}
++
+ func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
+ 	base := t.TempDir()
+ 
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index e0245ab5f0766803235fb31405e5c90a03ed180d..1bdabd2155f1907fa9725b41753a1d9e5c2f4250
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -3,6 +3,7 @@
+ import (
+ 	"encoding/json"
+ 	"fmt"
++	"io"
+ 	"mime/multipart"
+ 	"strings"
+ 
+@@ -15,7 +16,12 @@
+ 		return Spec{}, fmt.Errorf("missing field: spec")
+ 	}
+ 	var spec Spec
+-	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
++	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
++	dec.DisallowUnknownFields()
++	if err := dec.Decode(&spec); err != nil {
++		return Spec{}, fmt.Errorf("invalid spec JSON")
++	}
++	if err := dec.Decode(&struct{}{}); err != io.EOF {
+ 		return Spec{}, fmt.Errorf("invalid spec JSON")
+ 	}
+ 	return spec, nil
+
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 97fa69fff87ebf6b84ec903b2e8fa3cb8ae657a0..3c407a6426f3acc932c81e6750b6089793597e8d
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -41,7 +41,9 @@
+ 	}
+ 
+ 	var ds Dataset
+-	if err := json.Unmarshal(raw, &ds); err != nil {
++	dec = json.NewDecoder(bytes.NewReader(raw))
++	dec.DisallowUnknownFields()
++	if err := dec.Decode(&ds); err != nil {
+ 		return nil, Dataset{}, fmt.Errorf("dataset must match schema")
+ 	}
+ 	if len(ds.Items) == 0 {
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index f456593dd1b6d6e8f1c6db2425313749347a13d3..fa17d3d6c8a1a5e7e04b55620d7e537c9af5cb1f
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -226,6 +226,17 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsUnknownFields(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello","extra":"nope"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++	})
++	datasetFile := form.File["dataset"][0]
++	if err := validateDatasetJSON(datasetFile, nil); err == nil {
++		t.Fatalf("expected error for unknown dataset fields")
++	}
++}
++
+ func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
+ 	dataset := `{"items":[{"id":"1","text":"hello"}]}`
+ 	form := buildMultipartForm(t, []formFile{
+@@ -274,6 +285,17 @@
+ 	}
+ }
+ 
++func TestParseSpec_RejectsUnknownFields(t *testing.T) {
++	form := &multipart.Form{
++		Value: map[string][]string{
++			"spec": {`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[],"extra":true}`},
++		},
++	}
++	if _, err := parseSpec(form); err == nil {
++		t.Fatalf("expected error for unknown spec fields")
++	}
++}
++
+ func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
+ 	base := t.TempDir()
+ 
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index e0245ab5f0766803235fb31405e5c90a03ed180d..1bdabd2155f1907fa9725b41753a1d9e5c2f4250
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -3,6 +3,7 @@
+ import (
+ 	"encoding/json"
+ 	"fmt"
++	"io"
+ 	"mime/multipart"
+ 	"strings"
+ 
+@@ -15,7 +16,12 @@
+ 		return Spec{}, fmt.Errorf("missing field: spec")
+ 	}
+ 	var spec Spec
+-	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
++	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
++	dec.DisallowUnknownFields()
++	if err := dec.Decode(&spec); err != nil {
++		return Spec{}, fmt.Errorf("invalid spec JSON")
++	}
++	if err := dec.Decode(&struct{}{}); err != io.EOF {
+ 		return Spec{}, fmt.Errorf("invalid spec JSON")
+ 	}
+ 	return spec, nil
+
+
+thinking
+**Rechecking Go tests**
+
+I'm preparing to run all Go tests again to verify formatting and correctness, noting that tabs are acceptable in the tests.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backendfile update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 97fa69fff87ebf6b84ec903b2e8fa3cb8ae657a0..3c407a6426f3acc932c81e6750b6089793597e8d
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -41,7 +41,9 @@
+ 	}
+ 
+ 	var ds Dataset
+-	if err := json.Unmarshal(raw, &ds); err != nil {
++	dec = json.NewDecoder(bytes.NewReader(raw))
++	dec.DisallowUnknownFields()
++	if err := dec.Decode(&ds); err != nil {
+ 		return nil, Dataset{}, fmt.Errorf("dataset must match schema")
+ 	}
+ 	if len(ds.Items) == 0 {
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index f456593dd1b6d6e8f1c6db2425313749347a13d3..fa17d3d6c8a1a5e7e04b55620d7e537c9af5cb1f
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -226,6 +226,17 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsUnknownFields(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello","extra":"nope"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++	})
++	datasetFile := form.File["dataset"][0]
++	if err := validateDatasetJSON(datasetFile, nil); err == nil {
++		t.Fatalf("expected error for unknown dataset fields")
++	}
++}
++
+ func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
+ 	dataset := `{"items":[{"id":"1","text":"hello"}]}`
+ 	form := buildMultipartForm(t, []formFile{
+@@ -274,6 +285,17 @@
+ 	}
+ }
+ 
++func TestParseSpec_RejectsUnknownFields(t *testing.T) {
++	form := &multipart.Form{
++		Value: map[string][]string{
++			"spec": {`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[],"extra":true}`},
++		},
++	}
++	if _, err := parseSpec(form); err == nil {
++		t.Fatalf("expected error for unknown spec fields")
++	}
++}
++
+ func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
+ 	base := t.TempDir()
+ 
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index e0245ab5f0766803235fb31405e5c90a03ed180d..1bdabd2155f1907fa9725b41753a1d9e5c2f4250
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -3,6 +3,7 @@
+ import (
+ 	"encoding/json"
+ 	"fmt"
++	"io"
+ 	"mime/multipart"
+ 	"strings"
+ 
+@@ -15,7 +16,12 @@
+ 		return Spec{}, fmt.Errorf("missing field: spec")
+ 	}
+ 	var spec Spec
+-	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
++	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
++	dec.DisallowUnknownFields()
++	if err := dec.Decode(&spec); err != nil {
++		return Spec{}, fmt.Errorf("invalid spec JSON")
++	}
++	if err := dec.Decode(&struct{}{}); err != io.EOF {
+ 		return Spec{}, fmt.Errorf("invalid spec JSON")
+ 	}
+ 	return spec, nil
+
+ succeeded in 1.96s:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.031s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 97fa69fff87ebf6b84ec903b2e8fa3cb8ae657a0..3c407a6426f3acc932c81e6750b6089793597e8d
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -41,7 +41,9 @@
+ 	}
+ 
+ 	var ds Dataset
+-	if err := json.Unmarshal(raw, &ds); err != nil {
++	dec = json.NewDecoder(bytes.NewReader(raw))
++	dec.DisallowUnknownFields()
++	if err := dec.Decode(&ds); err != nil {
+ 		return nil, Dataset{}, fmt.Errorf("dataset must match schema")
+ 	}
+ 	if len(ds.Items) == 0 {
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index f456593dd1b6d6e8f1c6db2425313749347a13d3..fa17d3d6c8a1a5e7e04b55620d7e537c9af5cb1f
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -226,6 +226,17 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsUnknownFields(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello","extra":"nope"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++	})
++	datasetFile := form.File["dataset"][0]
++	if err := validateDatasetJSON(datasetFile, nil); err == nil {
++		t.Fatalf("expected error for unknown dataset fields")
++	}
++}
++
+ func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
+ 	dataset := `{"items":[{"id":"1","text":"hello"}]}`
+ 	form := buildMultipartForm(t, []formFile{
+@@ -274,6 +285,17 @@
+ 	}
+ }
+ 
++func TestParseSpec_RejectsUnknownFields(t *testing.T) {
++	form := &multipart.Form{
++		Value: map[string][]string{
++			"spec": {`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[],"extra":true}`},
++		},
++	}
++	if _, err := parseSpec(form); err == nil {
++		t.Fatalf("expected error for unknown spec fields")
++	}
++}
++
+ func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
+ 	base := t.TempDir()
+ 
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index e0245ab5f0766803235fb31405e5c90a03ed180d..1bdabd2155f1907fa9725b41753a1d9e5c2f4250
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -3,6 +3,7 @@
+ import (
+ 	"encoding/json"
+ 	"fmt"
++	"io"
+ 	"mime/multipart"
+ 	"strings"
+ 
+@@ -15,7 +16,12 @@
+ 		return Spec{}, fmt.Errorf("missing field: spec")
+ 	}
+ 	var spec Spec
+-	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
++	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
++	dec.DisallowUnknownFields()
++	if err := dec.Decode(&spec); err != nil {
++		return Spec{}, fmt.Errorf("invalid spec JSON")
++	}
++	if err := dec.Decode(&struct{}{}); err != io.EOF {
+ 		return Spec{}, fmt.Errorf("invalid spec JSON")
+ 	}
+ 	return spec, nil
+
+
+thinking
+**Summarizing changes and tests**
+
+I've added strict JSON parsing for both spec and dataset inputs to improve robustness. The key files changed include the main parser handling these inputs and the tests covering edge cases for invalid JSON. Tests run verify correct parsing behavior and error handling on malformed data.
+codex
+What you changed
+- Enforced strict JSON decoding for `spec` (disallow unknown fields, single value) and dataset schema (disallow unknown fields).
+- Added tests to cover unknown fields in `spec` and dataset items.
+
+Tests run
+- `go test ./...`
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 97fa69fff87ebf6b84ec903b2e8fa3cb8ae657a0..3c407a6426f3acc932c81e6750b6089793597e8d
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -41,7 +41,9 @@
+ 	}
+ 
+ 	var ds Dataset
+-	if err := json.Unmarshal(raw, &ds); err != nil {
++	dec = json.NewDecoder(bytes.NewReader(raw))
++	dec.DisallowUnknownFields()
++	if err := dec.Decode(&ds); err != nil {
+ 		return nil, Dataset{}, fmt.Errorf("dataset must match schema")
+ 	}
+ 	if len(ds.Items) == 0 {
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index f456593dd1b6d6e8f1c6db2425313749347a13d3..fa17d3d6c8a1a5e7e04b55620d7e537c9af5cb1f
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -226,6 +226,17 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsUnknownFields(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello","extra":"nope"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++	})
++	datasetFile := form.File["dataset"][0]
++	if err := validateDatasetJSON(datasetFile, nil); err == nil {
++		t.Fatalf("expected error for unknown dataset fields")
++	}
++}
++
+ func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
+ 	dataset := `{"items":[{"id":"1","text":"hello"}]}`
+ 	form := buildMultipartForm(t, []formFile{
+@@ -274,6 +285,17 @@
+ 	}
+ }
+ 
++func TestParseSpec_RejectsUnknownFields(t *testing.T) {
++	form := &multipart.Form{
++		Value: map[string][]string{
++			"spec": {`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[],"extra":true}`},
++		},
++	}
++	if _, err := parseSpec(form); err == nil {
++		t.Fatalf("expected error for unknown spec fields")
++	}
++}
++
+ func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
+ 	base := t.TempDir()
+ 
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index e0245ab5f0766803235fb31405e5c90a03ed180d..1bdabd2155f1907fa9725b41753a1d9e5c2f4250
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -3,6 +3,7 @@
+ import (
+ 	"encoding/json"
+ 	"fmt"
++	"io"
+ 	"mime/multipart"
+ 	"strings"
+ 
+@@ -15,7 +16,12 @@
+ 		return Spec{}, fmt.Errorf("missing field: spec")
+ 	}
+ 	var spec Spec
+-	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
++	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
++	dec.DisallowUnknownFields()
++	if err := dec.Decode(&spec); err != nil {
++		return Spec{}, fmt.Errorf("invalid spec JSON")
++	}
++	if err := dec.Decode(&struct{}{}); err != io.EOF {
+ 		return Spec{}, fmt.Errorf("invalid spec JSON")
+ 	}
+ 	return spec, nil
+
+tokens used
+21,004
+What you changed
+- Enforced strict JSON decoding for `spec` (disallow unknown fields, single value) and dataset schema (disallow unknown fields).
+- Added tests to cover unknown fields in `spec` and dataset items.
+
+Tests run
+- `go test ./...`

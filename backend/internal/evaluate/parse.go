@@ -3,6 +3,7 @@ package evaluate
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"strings"
 
@@ -15,7 +16,12 @@ func parseSpec(form *multipart.Form) (Spec, error) {
 		return Spec{}, fmt.Errorf("missing field: spec")
 	}
 	var spec Spec
-	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
+	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&spec); err != nil {
+		return Spec{}, fmt.Errorf("invalid spec JSON")
+	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
 		return Spec{}, fmt.Errorf("invalid spec JSON")
 	}
 	return spec, nil
