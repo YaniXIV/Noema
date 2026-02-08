@@ -819,6 +819,7 @@ pre,
   max-height: 320px;
   overflow: auto;
   font-size: 0.85rem;
+  line-height: 1.5;
 }
 
 /* ===== Responsive ===== */
@@ -870,6 +871,17 @@ pre,
 
   .wizard-nav {
     flex-direction: column;
+  }
+
+  .upload-details {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .results-pre,
+  .dataset-preview {
+    white-space: pre-wrap;
+    word-break: break-word;
   }
 }
 

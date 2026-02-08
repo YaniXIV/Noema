@@ -7,7 +7,7 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3c7c-c6f7-74f0-8609-3947ad33e399
+session id: 019c3ec2-4e29-75d2-b358-58acbff2741d
 --------
 user
 You are an autonomous coding agent polishing the Noema repository.
@@ -18,8 +18,9 @@ Hard rules:
 - Keep changes small: max 3 files per iteration.
 - No cosmetic-only edits.
 - No new dependencies unless absolutely necessary.
+- keep all the same ui functionality, the end user should be able to do the same stuff but the experiance and design should be better.
 
-Goal: continuously improve production quality.
+Goal: continuously improve production quality. continuously improve front end quality and polish.
 
 Iteration:
 1) Run: cd backend && go test ./...
@@ -29,7 +30,7 @@ Iteration:
 Pick the highest-value improvement:
 A) Reliability/correctness: validation, error handling, run persistence, verify robustness
 B) Tests: add/strengthen tests for the change you made
-C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+C) upgrading the user interface so that it looks better.
 D) Maintainability: reduce duplication with tiny refactors
 E) UX: wizard/results/verify clarity (small, safe changes)
 F) Docs: README/DEPLOYMENT polish
@@ -41,526 +42,395 @@ Finish with:
 mcp startup: no servers
 
 thinking
-**Running tests using exec_command**
+**Running tests**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 129ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 190ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
 ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
-?   	noema/internal/session	[no test files]
-?   	noema/internal/verify	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
 
 thinking
-**Preparing for targeted improvement**
+**Planning frontend inspection**
 
-I'm planning to inspect the repo for one meaningful improvement, focusing on error handling as a potential high-value target before proceeding.
+Tests pass, so next I’ll inspect the repo specifically for frontend code to identify where improvements can be made.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME|panic|Fatal|Must" internal cmd || true' in /Users/yani/Noema/backend succeeded in 52ms:
-cmd/server/main.go:127:		log.Fatal(err)
-internal/evaluate/handler_test.go:33:			t.Fatalf("create part: %v", err)
-internal/evaluate/handler_test.go:36:			t.Fatalf("write part: %v", err)
-internal/evaluate/handler_test.go:40:		t.Fatalf("close writer: %v", err)
-internal/evaluate/handler_test.go:46:		t.Fatalf("read form: %v", err)
-internal/evaluate/handler_test.go:64:		t.Fatalf("enabledConstraints error: %v", err)
-internal/evaluate/handler_test.go:70:		t.Fatalf("parseEvalOutputOptional error: %v", err)
-internal/evaluate/handler_test.go:73:		t.Fatalf("expected schema_version 1, got %d", out.SchemaVersion)
-internal/evaluate/handler_test.go:76:		t.Fatalf("expected max_severity 0, got %d", out.MaxSeverity)
-internal/evaluate/handler_test.go:79:		t.Fatalf("expected %d constraints, got %d", len(enabled), len(out.Constraints))
-internal/evaluate/handler_test.go:85:			t.Fatalf("expected severity 0 for %s, got %d", c.ID, c.Severity)
-internal/evaluate/handler_test.go:88:			t.Fatalf("expected rationale for %s", c.ID)
-internal/evaluate/handler_test.go:93:		t.Fatalf("expected constraints sorted by id, got %v", ids)
-internal/evaluate/handler_test.go:107:		t.Fatalf("enabledConstraints error: %v", err)
-internal/evaluate/handler_test.go:120:		t.Fatalf("marshal eval_output: %v", err)
-internal/evaluate/handler_test.go:126:		t.Fatalf("parseEvalOutputOptional error: %v", err)
-internal/evaluate/handler_test.go:129:		t.Fatalf("expected max_severity 1, got %d", out.MaxSeverity)
-internal/evaluate/handler_test.go:132:		t.Fatalf("expected 2 constraints, got %d", len(out.Constraints))
-internal/evaluate/handler_test.go:145:		t.Fatalf("enabledConstraints error: %v", err)
-internal/evaluate/handler_test.go:157:		t.Fatalf("marshal eval_output: %v", err)
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "frontend|ui|tailwind|css|html|template" .' in /Users/yani/Noema/backend succeeded in 52ms:
+./go.sum:68:github.com/google/uuid v1.1.2/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
+./go.sum:77:github.com/klauspost/cpuid/v2 v2.3.0 h1:S4CRMLnYUhGeDFDqkGriYKdfoFlDnMtqTiI/sFzhA9Y=
+./go.sum:78:github.com/klauspost/cpuid/v2 v2.3.0/go.mod h1:hqwkgyIinND0mEev00jJYCxPNVRVXFQeu1XKlok6oO0=
+./go.sum:92:github.com/quic-go/qpack v0.5.1 h1:giqksBPnT/HDtZ6VhtFKgoLOWmlyo9Ei6u9PqzIMbhI=
+./go.sum:93:github.com/quic-go/qpack v0.5.1/go.mod h1:+PC4XFrEskIVkcLzpEkbLqq1uCoxPhQuvK5rH1ZgaEg=
+./go.sum:94:github.com/quic-go/quic-go v0.54.0 h1:6s1YB9QotYI6Ospeiguknbp2Znb/jZYjZLRXn9kMQBg=
+./go.sum:95:github.com/quic-go/quic-go v0.54.0/go.mod h1:e68ZEaCdyviluZmy44P6Iey98v/Wfz6HCjQEm+l8zTY=
+./go.sum:105:github.com/twitchyliquid64/golang-asm v0.15.1 h1:SU5vSMR7hnwNxj24w34ZyCi/FmDZTkS4MhqMhdFk5YI=
+./go.sum:106:github.com/twitchyliquid64/golang-asm v0.15.1/go.mod h1:a1lVb/DtPvCB8fslRZhAngC2+aY1QWCk3Cedj/Gdt08=
+./internal/evaluate/prompt.go:50:		Description: "Assess whether the dataset contains safety-critical guidance such as medical, legal, engineering, or operational instructions that could cause harm if followed incorrectly.",
+./internal/evaluate/prompt.go:77:func buildSystemPrompt() string {
+./internal/evaluate/prompt.go:86:func buildUserPrompt(spec Spec, datasetJSON []byte, images []ImageInfo) string {
+./internal/evaluate/parse.go:40:		return fmt.Errorf("evaluation_name is required")
+./internal/evaluate/parse.go:84:		return nil, nil, fmt.Errorf("missing required file: dataset")
+./internal/evaluate/handler_test.go:24:func buildMultipartForm(t *testing.T, files []formFile) *multipart.Form {
+./internal/evaluate/handler_test.go:103:	form := buildMultipartForm(t, []formFile{
+./internal/evaluate/handler_test.go:127:	form := buildMultipartForm(t, []formFile{
+./internal/evaluate/handler_test.go:316:func TestValidateDatasetJSON_ImageRefRequiresImages(t *testing.T) {
+./internal/evaluate/handler_test.go:318:	form := buildMultipartForm(t, []formFile{
+./internal/evaluate/handler_test.go:329:	form := buildMultipartForm(t, []formFile{
 
 thinking
-**Reviewing error handling with log.Fatal**
+**Planning minor UI enhancements**
+
+I'm preparing to inspect styles to improve buttons and cards visually through CSS tweaks.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' cmd/server/main.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package main
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap');
 
-import (
-	"context"
-	"log"
-	"os"
-	"strings"
-
-	"noema/internal/auth"
-	"noema/internal/config"
-	"noema/internal/evaluate"
-	"noema/internal/gemini"
-	"noema/internal/verify"
-	"noema/internal/web"
-
-	"github.com/gin-gonic/gin"
-)
-
-func main() {
-	if err := config.Load(); err != nil {
-
-thinking
-**Reviewing error handling and readiness checks**
-
-Considering replacing log.Fatal with safer error handling for reliability, adding readiness checks like gin release mode, and ensuring template/static loading errors are checked despite gin not returning them. Planning to inspect evaluation handler code next for potential improvements.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"encoding/json"
-	"log"
-	"mime/multipart"
-	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
-	"time"
-
-	"noema/internal/config"
-	"noema/internal/zk"
-
-	"github.com/gin-gonic/gin"
-)
-
-// EvaluateResponse is the JSON response for POST /api/evaluate.
-type EvaluateResponse struct {
-
-thinking
-**Evaluating error handling and upload parsing**
-
-Considering that mustJSON returning nil on error might mask issues, so it may be safer to log errors instead of returning nil; also contemplating checks on multipart form sizes and upload file sizes for better safety.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/uploads.go" in /Users/yani/Noema/backend exited 1 in 51ms:
-sed: internal/evaluate/uploads.go: No such file or directory
-
-thinking
-**Requesting file list**
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
-cache.go
-commitment.go
-dataset.go
-gemini_eval.go
-handler.go
-handler_integration_test.go
-handler_test.go
-images.go
-output.go
-parse.go
-policy.go
-prompt.go
-schema.go
-spec.go
-storage.go
-
-thinking
-**Checking dataset images**
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package evaluate
-
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io"
-	"mime/multipart"
-)
-
-type Dataset struct {
-	Items []DatasetItem `json:"items"`
+:root {
+  --bg: #05060a;
+  --bg-card: rgba(9, 12, 18, 0.9);
+  --text: #f4f6fb;
+  --text-muted: #9aa3b2;
+  --accent: #45d4ff;
+  --accent-strong: #2c7bff;
+  --accent-glow: rgba(69, 212, 255, 0.35);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(69, 212, 255, 0.4);
+  --error: #f87171;
+  --success: #22c55e;
+  --warning: #fbbf24;
+  --shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
 }
 
-type DatasetItem struct {
-	ID       string         `json:"id"`
-	Text     string         `json:"text"`
-	Metadata map[string]any `json:"metadata,omitempty"`
-	ImageRef string         `json:"image_ref,omitempty"`
+*,
+*::before,
+
+thinking
+**Considering UI improvements**
+
+I'm focusing on enhancing buttons, tables, or empty states for a meaningful UI upgrade, starting by inspecting button styles and behavior.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 51ms:
+
+.input.is-invalid {
+  border-color: rgba(248, 113, 113, 0.65);
+  box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.2);
 }
 
-thinking
-**Considering dataset size limits**
+.textarea { min-height: 160px; resize: vertical; }
 
-I'm noting the importance of limiting dataset size during read operations to prevent excessive memory usage, although multipart memory limits are already set; image handling may also need attention.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/images.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package evaluate
-
-import (
-	"fmt"
-	"io"
-	"mime"
-	"mime/multipart"
-	"path/filepath"
-	"strings"
-)
-
-type ImageInfo struct {
-	Filename string
-	MIMEType string
-	Data     []byte
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
 }
 
-func readImages(files []*multipart.FileHeader) ([]ImageInfo, error) {
-	out := make([]ImageInfo, 0, len(files))
-	for _, fh := range files {
-
-thinking
-**Considering image size limits and resource handling**
+.policy-reveal {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem 1.2rem;
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"crypto/rand"
-	"encoding/json"
-	"fmt"
-	"io"
-	"math/big"
-	"mime/multipart"
-	"os"
-	"path/filepath"
-	"strconv"
-	"time"
-)
-
-func genRunID() string {
-	n, _ := rand.Int(rand.Reader, big.NewInt(1e9))
-	return fmt.Sprintf("run_%d_%d", time.Now().UnixMilli(), n.Int64())
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '520,980p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
 }
 
-
-thinking
-**Considering reliability improvements**
-
-Identifying potential reliability gains by handling random ID errors gracefully with a timestamp-based fallback and improving cleanup of temporary files on write failures; also noted validating dataset image references may be needed.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "image_ref|ImageRef" internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
-internal/evaluate/prompt.go:103:		buf.WriteString("Images attached (matched by items[].image_ref to filename):\n")
-internal/evaluate/parse.go:71:			if item.ImageRef != "" {
-internal/evaluate/parse.go:72:				return fmt.Errorf("dataset.items[%d].image_ref provided but no images uploaded", i)
-internal/evaluate/parse.go:82:		if item.ImageRef == "" {
-internal/evaluate/parse.go:85:		if _, ok := imageNames[item.ImageRef]; !ok {
-internal/evaluate/parse.go:86:			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
-internal/evaluate/handler_test.go:191:func TestValidateDatasetJSON_ImageRefRequiresImages(t *testing.T) {
-internal/evaluate/handler_test.go:192:	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"img1.png"}]}`
-internal/evaluate/handler_test.go:198:		t.Fatalf("expected error for image_ref without images")
-internal/evaluate/handler_test.go:202:func TestValidateDatasetJSON_ImageRefMatchesUpload(t *testing.T) {
-internal/evaluate/handler_test.go:203:	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"img1.png"}]}`
-internal/evaluate/dataset.go:19:	ImageRef string         `json:"image_ref,omitempty"`
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package evaluate
-
-import (
-	"encoding/json"
-	"fmt"
-	"mime/multipart"
-
-	"noema/internal/config"
-)
-
-func parseSpec(form *multipart.Form) (Spec, error) {
-	specStrs := form.Value["spec"]
-	if len(specStrs) == 0 || specStrs[0] == "" {
-		return Spec{}, fmt.Errorf("missing field: spec")
-	}
-	var spec Spec
-	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
-		return Spec{}, fmt.Errorf("invalid spec JSON")
-	}
-	return spec, nil
-
-thinking
-**Reviewing verification handler**
-
-I'm checking the existing verification logic in internal/verify to identify improvements for validation handling.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/verify/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package verify
-
-import (
-	"encoding/base64"
-	"net/http"
-	"strings"
-
-	"noema/internal/zk"
-
-	"github.com/gin-gonic/gin"
-)
-
-// VerifyRequest is the JSON body for POST /api/verify.
-type VerifyRequest struct {
-	RunID           string `json:"run_id"`
-	ProofB64        string `json:"proof_b64"`
-	PublicInputsB64 string `json:"public_inputs_b64"`
+.constraints-count {
+  font-size: 0.85rem;
+  color: var(--text-muted);
 }
 
-// VerifyResponse is the JSON response for POST /api/verify.
+.constraints-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
 
-
-thinking
-**Noting potential correctness and error handling improvements**
-
-I'm considering adding explicit base64 validation before verification to improve correctness and tightening error handling in several places like proof verification, dataset parsing, image reading, and run indexing. These could enhance reliability without breaking current flows.
-thinking
-**Identifying small UX and error handling refinements**
-
-I'm focusing on adding friendly error responses for invalid base64 in legacy verification and preserving error details in dataset reading for better debugging, while weighing leakage risks. Test additions seem low priority given small changes.
+.constraint-group {
+  padding: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.05);
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/policy.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import "fmt"
-
-type ConstraintRule struct {
-	ID                 string
-	AllowedMaxSeverity int
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '980,1320p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+.verify-run-name {
+  color: var(--text-muted);
+  font-size: 0.85rem;
 }
 
-func enabledConstraints(spec Spec) (map[string]ConstraintRule, error) {
-	out := make(map[string]ConstraintRule)
-	for _, c := range spec.Constraints {
-		if !c.Enabled {
-			continue
-		}
-		if _, exists := out[c.ID]; exists {
-			return nil, fmt.Errorf("duplicate constraint id: %s", c.ID)
-		}
-		out[c.ID] = ConstraintRule{ID: c.ID, AllowedMaxSeverity: c.AllowedMaxSeverity}
-	}
+.verify-status {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.verify-status-pass {
+  color: #86efac;
+  border-color: rgba(34, 197, 94, 0.5);
+  background: rgba(34, 197, 94, 0.12);
+}
+.verify-status-fail {
+  color: #fca5a5;
+
 
 thinking
-**Verifying constraint coverage**
+**Planning meaningful UI improvements**
 
-I'm checking output.go to confirm whether validateEvalOutput guarantees that all enabled constraints are included, ensuring computePolicyResult doesn't miss any.
+Considering subtle visual enhancements like focus states, separators, badges, and spacing to improve usability and readability without adding functional changes; aiming for tweaks that clearly enhance user experience and justify UI polish beyond cosmetic-only edits.
+thinking
+**Scoping targeted UI refinements**
+
+Focusing on improving readability and scannability of results and verify lists with CSS-only enhancements like consistent hover/focus states, spacing adjustments for mobile, and subtle background contrasts, while avoiding HTML or JS changes to maintain existing functionality.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/output.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/templates/app_results.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "app_results"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Results</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body data-run-id="{{.RunID}}">
+  {{template "header_app" .}}
 
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-)
-
-type EvalConstraintResult struct {
-	ID        string `json:"id"`
-	Severity  int    `json:"severity"`
-	Rationale string `json:"rationale"`
-}
-
-type EvalOutput struct {
-	SchemaVersion int                    `json:"schema_version"`
-	Constraints   []EvalConstraintResult `json:"constraints"`
-	MaxSeverity   int                    `json:"max_severity"`
-	Confidence    *float64               `json:"confidence,omitempty"`
-}
+  <main class="main main-results">
+    {{template "orb" .}}
+    <div class="card results-card">
+      <div class="results-header">
+        <div>
+          <h1 class="card-title">Evaluation results</h1>
+          <p class="text-muted" id="results-run-id">Run ID: {{.RunID}}</p>
+        </div>
 
 thinking
-**Improving runID generation reliability**
+**Evaluating UI enhancements**
 
-I'm enhancing runID generation to fall back to a timestamp, process ID, and atomic counter if cryptographic random number generation fails, improving robustness without ignoring errors. This involves a small change in storage.go adding a package-level atomic counter and necessary imports.
+Considering CSS-only improvements like adding a "copy" button style, improving banners with gradients, or implementing a sticky action bar, though most require HTML or JS changes; focusing next on assessing the verify template for possible accessibility and interactivity upgrades.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,180p' web/templates/verify.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "verify"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Verify</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_public" .}}
+
+  <main class="main main-verify">
+    {{template "orb" .}}
+    <div class="card verify-card">
+      <div class="verify-header">
+        <div>
+          <div class="card-kicker">Public</div>
+          <h1 class="card-title">Public verification</h1>
+          <p class="card-text">Verify recent proofs without revealing datasets. Recent runs are loaded from this browser.</p>
+
+
+thinking
+**Planning responsive JSON wrapping**
+
+I'm considering adding CSS rules to make JSON results wrap on small screens to improve readability and avoid horizontal scrolling, targeting media widths below 900px with properties like `white-space: pre-wrap` and `word-break: break-word`. This change aims for a meaningful UX boost on mobile without altering desktop behavior.
+thinking
+**Adding mobile stacking and readability CSS**
+
+Planning to enhance mobile UX by making `.upload-details` stack with flex-direction column under 720px width, and adding line-height plus responsive wrapping for `.results-pre` and `.dataset-preview` to improve readability and avoid overflow. All changes will be consolidated in `styles.css`.
 file update
-M /Users/yani/Noema/backend/internal/evaluate/storage.go
-@@ -12,2 +12,3 @@
- 	"strconv"
-+	"sync/atomic"
- 	"time"
-@@ -15,5 +16,11 @@
- 
-+var runIDCounter uint64
-+
- func genRunID() string {
--	n, _ := rand.Int(rand.Reader, big.NewInt(1e9))
--	return fmt.Sprintf("run_%d_%d", time.Now().UnixMilli(), n.Int64())
-+	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
-+	if err == nil {
-+		return fmt.Sprintf("run_%d_%d", time.Now().UnixMilli(), n.Int64())
-+	}
-+	counter := atomic.AddUint64(&runIDCounter, 1)
-+	return fmt.Sprintf("run_%d_%d_%d", time.Now().UnixMilli(), os.Getpid(), counter)
+M /Users/yani/Noema/backend/web/static/styles.css
+@@ -821,2 +821,3 @@
+   font-size: 0.85rem;
++  line-height: 1.5;
  }
-apply_patch(auto_approved=true) exited 0 in 26ms:
+@@ -873,2 +874,13 @@
+   }
++
++  .upload-details {
++    flex-direction: column;
++    align-items: flex-start;
++  }
++
++  .results-pre,
++  .dataset-preview {
++    white-space: pre-wrap;
++    word-break: break-word;
++  }
+ }
+apply_patch(auto_approved=true) exited 0 in 31ms:
 Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/storage.go
+M /Users/yani/Noema/backend/web/static/styles.css
 file update:
-diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
-index feee4fa4267200936cb5a908180b9464719a6c55..031a838955372225b792ac338f7b7ef55fb4c240
---- a/backend/internal/evaluate/storage.go
-+++ b/backend/internal/evaluate/storage.go
-@@ -10,12 +10,19 @@
- 	"os"
- 	"path/filepath"
- 	"strconv"
-+	"sync/atomic"
- 	"time"
- )
- 
-+var runIDCounter uint64
-+
- func genRunID() string {
--	n, _ := rand.Int(rand.Reader, big.NewInt(1e9))
--	return fmt.Sprintf("run_%d_%d", time.Now().UnixMilli(), n.Int64())
-+	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
-+	if err == nil {
-+		return fmt.Sprintf("run_%d_%d", time.Now().UnixMilli(), n.Int64())
-+	}
-+	counter := atomic.AddUint64(&runIDCounter, 1)
-+	return fmt.Sprintf("run_%d_%d_%d", time.Now().UnixMilli(), os.Getpid(), counter)
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index ef5a6808c54db945177da07906ee7508cfef6f12..2c23fa29963b2f86ad17b867399f0a0110e8afb5
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -819,6 +819,7 @@
+   max-height: 320px;
+   overflow: auto;
+   font-size: 0.85rem;
++  line-height: 1.5;
  }
  
- func ensureRunDir(path string) error {
+ /* ===== Responsive ===== */
+@@ -871,6 +872,17 @@
+   .wizard-nav {
+     flex-direction: column;
+   }
++
++  .upload-details {
++    flex-direction: column;
++    align-items: flex-start;
++  }
++
++  .results-pre,
++  .dataset-preview {
++    white-space: pre-wrap;
++    word-break: break-word;
++  }
+ }
+ 
+ /* ===== Public Verify ===== */
 
 file update:
-diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
-index feee4fa4267200936cb5a908180b9464719a6c55..031a838955372225b792ac338f7b7ef55fb4c240
---- a/backend/internal/evaluate/storage.go
-+++ b/backend/internal/evaluate/storage.go
-@@ -10,12 +10,19 @@
- 	"os"
- 	"path/filepath"
- 	"strconv"
-+	"sync/atomic"
- 	"time"
- )
- 
-+var runIDCounter uint64
-+
- func genRunID() string {
--	n, _ := rand.Int(rand.Reader, big.NewInt(1e9))
--	return fmt.Sprintf("run_%d_%d", time.Now().UnixMilli(), n.Int64())
-+	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
-+	if err == nil {
-+		return fmt.Sprintf("run_%d_%d", time.Now().UnixMilli(), n.Int64())
-+	}
-+	counter := atomic.AddUint64(&runIDCounter, 1)
-+	return fmt.Sprintf("run_%d_%d_%d", time.Now().UnixMilli(), os.Getpid(), counter)
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index ef5a6808c54db945177da07906ee7508cfef6f12..2c23fa29963b2f86ad17b867399f0a0110e8afb5
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -819,6 +819,7 @@
+   max-height: 320px;
+   overflow: auto;
+   font-size: 0.85rem;
++  line-height: 1.5;
  }
  
- func ensureRunDir(path string) error {
+ /* ===== Responsive ===== */
+@@ -871,6 +872,17 @@
+   .wizard-nav {
+     flex-direction: column;
+   }
++
++  .upload-details {
++    flex-direction: column;
++    align-items: flex-start;
++  }
++
++  .results-pre,
++  .dataset-preview {
++    white-space: pre-wrap;
++    word-break: break-word;
++  }
+ }
+ 
+ /* ===== Public Verify ===== */
 
 
 thinking
-**Running tests**
+**Running tests to verify dataset-preview**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backendfile update:
-diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
-index feee4fa4267200936cb5a908180b9464719a6c55..031a838955372225b792ac338f7b7ef55fb4c240
---- a/backend/internal/evaluate/storage.go
-+++ b/backend/internal/evaluate/storage.go
-@@ -10,12 +10,19 @@
- 	"os"
- 	"path/filepath"
- 	"strconv"
-+	"sync/atomic"
- 	"time"
- )
- 
-+var runIDCounter uint64
-+
- func genRunID() string {
--	n, _ := rand.Int(rand.Reader, big.NewInt(1e9))
--	return fmt.Sprintf("run_%d_%d", time.Now().UnixMilli(), n.Int64())
-+	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
-+	if err == nil {
-+		return fmt.Sprintf("run_%d_%d", time.Now().UnixMilli(), n.Int64())
-+	}
-+	counter := atomic.AddUint64(&runIDCounter, 1)
-+	return fmt.Sprintf("run_%d_%d_%d", time.Now().UnixMilli(), os.Getpid(), counter)
- }
- 
- func ensureRunDir(path string) error {
-
- succeeded in 1.60s:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 203ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	0.013s
+ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
-?   	noema/internal/session	[no test files]
-?   	noema/internal/verify	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
-
-thinking
-**Waiting for command completion**
 file update:
-diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
-index feee4fa4267200936cb5a908180b9464719a6c55..031a838955372225b792ac338f7b7ef55fb4c240
---- a/backend/internal/evaluate/storage.go
-+++ b/backend/internal/evaluate/storage.go
-@@ -10,12 +10,19 @@
- 	"os"
- 	"path/filepath"
- 	"strconv"
-+	"sync/atomic"
- 	"time"
- )
- 
-+var runIDCounter uint64
-+
- func genRunID() string {
--	n, _ := rand.Int(rand.Reader, big.NewInt(1e9))
--	return fmt.Sprintf("run_%d_%d", time.Now().UnixMilli(), n.Int64())
-+	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
-+	if err == nil {
-+		return fmt.Sprintf("run_%d_%d", time.Now().UnixMilli(), n.Int64())
-+	}
-+	counter := atomic.AddUint64(&runIDCounter, 1)
-+	return fmt.Sprintf("run_%d_%d_%d", time.Now().UnixMilli(), os.Getpid(), counter)
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index ef5a6808c54db945177da07906ee7508cfef6f12..2c23fa29963b2f86ad17b867399f0a0110e8afb5
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -819,6 +819,7 @@
+   max-height: 320px;
+   overflow: auto;
+   font-size: 0.85rem;
++  line-height: 1.5;
  }
  
- func ensureRunDir(path string) error {
+ /* ===== Responsive ===== */
+@@ -871,6 +872,17 @@
+   .wizard-nav {
+     flex-direction: column;
+   }
++
++  .upload-details {
++    flex-direction: column;
++    align-items: flex-start;
++  }
++
++  .results-pre,
++  .dataset-preview {
++    white-space: pre-wrap;
++    word-break: break-word;
++  }
+ }
+ 
+ /* ===== Public Verify ===== */
 
 codex
 What you changed (short)
-- Made `genRunID` resilient to crypto RNG failure with a deterministic fallback using PID + atomic counter in `internal/evaluate/storage.go`.
+- Improved mobile readability by wrapping long JSON blocks and dataset previews, added line-height for results JSON, and stacked upload details on small screens. (`web/static/styles.css`)
 
-Tests run (must include go test ./...)
+Tests run
 - `go test ./...`
+
+If you want another iteration, pick the next focus area (UI, reliability, tests, etc.) and I’ll proceed.
 file update:
-diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
-index feee4fa4267200936cb5a908180b9464719a6c55..031a838955372225b792ac338f7b7ef55fb4c240
---- a/backend/internal/evaluate/storage.go
-+++ b/backend/internal/evaluate/storage.go
-@@ -10,12 +10,19 @@
- 	"os"
- 	"path/filepath"
- 	"strconv"
-+	"sync/atomic"
- 	"time"
- )
- 
-+var runIDCounter uint64
-+
- func genRunID() string {
--	n, _ := rand.Int(rand.Reader, big.NewInt(1e9))
--	return fmt.Sprintf("run_%d_%d", time.Now().UnixMilli(), n.Int64())
-+	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
-+	if err == nil {
-+		return fmt.Sprintf("run_%d_%d", time.Now().UnixMilli(), n.Int64())
-+	}
-+	counter := atomic.AddUint64(&runIDCounter, 1)
-+	return fmt.Sprintf("run_%d_%d_%d", time.Now().UnixMilli(), os.Getpid(), counter)
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index ef5a6808c54db945177da07906ee7508cfef6f12..2c23fa29963b2f86ad17b867399f0a0110e8afb5
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -819,6 +819,7 @@
+   max-height: 320px;
+   overflow: auto;
+   font-size: 0.85rem;
++  line-height: 1.5;
  }
  
- func ensureRunDir(path string) error {
+ /* ===== Responsive ===== */
+@@ -871,6 +872,17 @@
+   .wizard-nav {
+     flex-direction: column;
+   }
++
++  .upload-details {
++    flex-direction: column;
++    align-items: flex-start;
++  }
++
++  .results-pre,
++  .dataset-preview {
++    white-space: pre-wrap;
++    word-break: break-word;
++  }
+ }
+ 
+ /* ===== Public Verify ===== */
 
 tokens used
-25,710
+29,569
 What you changed (short)
-- Made `genRunID` resilient to crypto RNG failure with a deterministic fallback using PID + atomic counter in `internal/evaluate/storage.go`.
+- Improved mobile readability by wrapping long JSON blocks and dataset previews, added line-height for results JSON, and stacked upload details on small screens. (`web/static/styles.css`)
 
-Tests run (must include go test ./...)
+Tests run
 - `go test ./...`
+
+If you want another iteration, pick the next focus area (UI, reliability, tests, etc.) and I’ll proceed.
