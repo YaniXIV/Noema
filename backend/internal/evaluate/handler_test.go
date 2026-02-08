@@ -226,6 +226,29 @@ func TestValidateDatasetJSON_RejectsDuplicateIDs(t *testing.T) {
 	}
 }
 
+func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
+	dataset := `{"items":[{"id":"1","text":"hello"}]}`
+	form := buildMultipartForm(t, []formFile{
+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
+		{field: "dataset", filename: "dataset2.json", contentType: "application/json", content: []byte(dataset)},
+	})
+	if _, _, err := parseUploads(form); err == nil {
+		t.Fatalf("expected error for multiple dataset files")
+	}
+}
+
+func TestParseUploads_RejectsDuplicateImageNames(t *testing.T) {
+	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"img.png"}]}`
+	form := buildMultipartForm(t, []formFile{
+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
+		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
+		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
+	})
+	if _, _, err := parseUploads(form); err == nil {
+		t.Fatalf("expected error for duplicate image filenames")
+	}
+}
+
 func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
 	spec := Spec{
 		SchemaVersion: 1,

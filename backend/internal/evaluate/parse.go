@@ -49,6 +49,9 @@ func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.Fil
 	if len(datasetFiles) == 0 {
 		return nil, nil, fmt.Errorf("missing required file: dataset")
 	}
+	if len(datasetFiles) > 1 {
+		return nil, nil, fmt.Errorf("only one dataset file allowed")
+	}
 	datasetFile := datasetFiles[0]
 	if datasetFile.Size > config.MaxDatasetBytes {
 		return nil, nil, fmt.Errorf("dataset exceeds 50MB limit")
@@ -57,7 +60,12 @@ func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.Fil
 	if len(imageFiles) > config.MaxImages {
 		return nil, nil, fmt.Errorf("maximum 10 images allowed")
 	}
+	seenImageNames := make(map[string]struct{}, len(imageFiles))
 	for _, f := range imageFiles {
+		if _, exists := seenImageNames[f.Filename]; exists {
+			return nil, nil, fmt.Errorf("image filenames must be unique")
+		}
+		seenImageNames[f.Filename] = struct{}{}
 		if f.Size > config.MaxImageBytes {
 			return nil, nil, fmt.Errorf("each image must be at most 5MB")
 		}
