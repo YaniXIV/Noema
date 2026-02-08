@@ -1,0 +1,529 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3c8e-2da9-7c43-b4b8-36c543426ab4
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Confirming test execution plan**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 197ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Planning reliability improvement**
+
+Tests are passing, so now I'll inspect the repo with a focus on a small reliability fix affecting at most three files, using ripgrep to locate potential issues.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME|panic" internal' in /Users/yani/Noema/backend exited 1 in 52ms:
+
+
+thinking
+**Considering improvements to pick error handling**
+
+No matches found on searching for errors related to pick; planning to check internal/web, internal/session, and verify directories for relevant code to improve validation or error handling.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"log\\.Printf|fmt\\.Printf\" internal" in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/gemini_eval.go:37:		log.Printf("gemini read dataset: %v", err)
+internal/evaluate/gemini_eval.go:45:		log.Printf("gemini marshal spec: %v", err)
+internal/evaluate/gemini_eval.go:58:		log.Printf("gemini marshal dataset: %v", err)
+internal/evaluate/gemini_eval.go:64:		log.Printf("gemini read images: %v", err)
+internal/evaluate/gemini_eval.go:82:		log.Printf("gemini evaluate: %v", err)
+internal/evaluate/gemini_eval.go:88:		log.Printf("gemini parse output: %v", err)
+internal/evaluate/gemini_eval.go:92:		log.Printf("gemini validate output: %v", err)
+internal/evaluate/gemini_eval.go:104:		log.Printf("gemini cache save: %v", err)
+internal/evaluate/handler.go:136:			log.Printf("runs index update: %v", err)
+internal/evaluate/handler.go:140:			log.Printf("prune runs: %v", err)
+
+thinking
+**Opening evaluation file**
+
+I'm opening gemini_eval.go to assess how the Gemini output is evaluated and understand the evaluation logic.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/gemini_eval.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"context"
+	"log"
+	"mime/multipart"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/gemini"
+)
+
+const geminiEvalTimeout = 45 * time.Second
+
+func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
+	if form != nil && len(form.Value["eval_output"]) > 0 && form.Value["eval_output"][0] != "" {
+		raw := form.Value["eval_output"][0]
+		out, err := parseEvalOutput(raw)
+		if err != nil {
+			return EvalOutput{}, err
+
+thinking
+**Verifying dataset file nil handling**
+
+Planning to inspect readDatasetFile to confirm that a nil datasetFile leads to a stub, ensuring resolveEvalOutput correctly falls back to re-evaluation when cached output is invalid.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+)
+
+type Dataset struct {
+	Items []DatasetItem `json:"items"`
+}
+
+type DatasetItem struct {
+	ID       string         `json:"id"`
+	Text     string         `json:"text"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+	ImageRef string         `json:"image_ref,omitempty"`
+}
+
+thinking
+**Checking dataset file presence**
+
+I'm verifying whether the handler guarantees the dataset file exists to avoid potential panics when opening it if nil during evaluation.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+// EvaluateResponse is the JSON response for POST /api/evaluate.
+
+thinking
+**Checking optional eval output usage**
+
+I'm verifying whether the optional eval output parser is used anywhere else in the code to determine if it can be safely removed.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+	if err != nil {
+		return EvalOutput{}, err
+	}
+	if err := validateEvalOutput(out, enabled); err != nil {
+		return EvalOutput{}, err
+	}
+	return out, nil
+}
+
+func stubEvalOutput(enabled map[string]ConstraintRule) EvalOutput {
+	out := EvalOutput{
+		SchemaVersion: 1,
+		Constraints:   make([]EvalConstraintResult, 0, len(enabled)),
+		MaxSeverity:   0,
+	}
+	for id := range enabled {
+		out.Constraints = append(out.Constraints, EvalConstraintResult{
+			ID:        id,
+			Severity:  0,
+			Rationale: "stub",
+
+thinking
+**Checking error handling in file parsing**
+
+I'm verifying whether file handle nil checks in readDatasetFile are safely guarded by parseUploads to prevent panics, aiming to improve robustness without unnecessary cosmetic removals.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/upload.go" in /Users/yani/Noema/backend exited 1 in 52ms:
+sed: internal/evaluate/upload.go: No such file or directory
+
+thinking
+**Locating parseUploads function**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "parseUploads" -S internal' in /Users/yani/Noema/backend succeeded in 51ms:
+internal/evaluate/parse.go:53:func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.FileHeader, error) {
+internal/evaluate/handler_test.go:246:	if _, _, err := parseUploads(form); err == nil {
+internal/evaluate/handler_test.go:258:	if _, _, err := parseUploads(form); err == nil {
+internal/evaluate/handler.go:64:		datasetFile, imageFiles, err := parseUploads(form)
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"strings"
+
+	"noema/internal/config"
+)
+
+func parseSpec(form *multipart.Form) (Spec, error) {
+	specStrs := form.Value["spec"]
+	if len(specStrs) == 0 || specStrs[0] == "" {
+		return Spec{}, fmt.Errorf("missing field: spec")
+	}
+	var spec Spec
+	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
+	dec.DisallowUnknownFields()
+
+
+thinking
+**Identifying correctness improvements in dataset parsing**
+
+Noticed `readDatasetFile` lacks trimming for IDs and text and doesn't reject whitespace-only entries, risking incorrect data; planning to add `strings.TrimSpace` checks and reject empty trimmed strings to improve correctness while considering duplicate detection based on trimmed values.
+thinking
+**Refining dataset validation and error handling**
+
+Planning to enforce no leading/trailing spaces on IDs while allowing text to keep user formatting; also aiming to improve error messages in dataset reading by explicitly rejecting empty files to clarify issues and considering adding tests for empty dataset files and whitespace-only IDs to cover these cases.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"mime/multipart"
+	"net/textproto"
+	"os"
+	"path/filepath"
+	"sort"
+	"testing"
+	"time"
+)
+
+type formFile struct {
+	field       string
+	filename    string
+	contentType string
+	content     []byte
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+	form := buildMultipartForm(t, []formFile{
+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
+	})
+	datasetFile := form.File["dataset"][0]
+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
+		t.Fatalf("expected error for duplicate dataset ids")
+	}
+}
+
+func TestValidateDatasetJSON_RejectsUnknownFields(t *testing.T) {
+	dataset := `{"items":[{"id":"1","text":"hello","extra":"nope"}]}`
+	form := buildMultipartForm(t, []formFile{
+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
+	})
+	datasetFile := form.File["dataset"][0]
+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
+		t.Fatalf("expected error for unknown dataset fields")
+	}
+}
+
+
+thinking
+**Adding empty dataset file validation and tests**
+
+I'm implementing a check in the dataset file reader to error on empty files and adding a corresponding test in the validation suite to ensure the error triggers as expected.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/dataset.go
+@@ -32,2 +32,5 @@
+ 	}
++	if len(raw) == 0 {
++		return nil, Dataset{}, fmt.Errorf("dataset file is empty")
++	}
+ 
+apply_patch(auto_approved=true) exited 0 in 30ms:
+Success. Updated the following files:
+M internal/evaluate/dataset.go
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 3c407a6426f3acc932c81e6750b6089793597e8d..ffa11acc0e60bcfe54d98f69de9195986df56f76
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -30,6 +30,9 @@
+ 	if err != nil {
+ 		return nil, Dataset{}, fmt.Errorf("could not read dataset")
+ 	}
++	if len(raw) == 0 {
++		return nil, Dataset{}, fmt.Errorf("dataset file is empty")
++	}
+ 
+ 	dec := json.NewDecoder(bytes.NewReader(raw))
+ 	var v any
+
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 3c407a6426f3acc932c81e6750b6089793597e8d..ffa11acc0e60bcfe54d98f69de9195986df56f76
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -30,6 +30,9 @@
+ 	if err != nil {
+ 		return nil, Dataset{}, fmt.Errorf("could not read dataset")
+ 	}
++	if len(raw) == 0 {
++		return nil, Dataset{}, fmt.Errorf("dataset file is empty")
++	}
+ 
+ 	dec := json.NewDecoder(bytes.NewReader(raw))
+ 	var v any
+
+
+thinking
+**Switching to apply_patch tool**
+
+The file was already edited via exec_command despite the initial warning, so now I'll add tests and switch to using the apply_patch tool properly.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
+@@ -239,2 +239,12 @@
+ 
++func TestValidateDatasetJSON_RejectsEmptyFile(t *testing.T) {
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte{}},
++	})
++	datasetFile := form.File["dataset"][0]
++	if err := validateDatasetJSON(datasetFile, nil); err == nil {
++		t.Fatalf("expected error for empty dataset file")
++	}
++}
++
+ func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
+apply_patch(auto_approved=true) exited 0 in 40ms:
+Success. Updated the following files:
+M internal/evaluate/handler_test.go
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 3c407a6426f3acc932c81e6750b6089793597e8d..ffa11acc0e60bcfe54d98f69de9195986df56f76
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -30,6 +30,9 @@
+ 	if err != nil {
+ 		return nil, Dataset{}, fmt.Errorf("could not read dataset")
+ 	}
++	if len(raw) == 0 {
++		return nil, Dataset{}, fmt.Errorf("dataset file is empty")
++	}
+ 
+ 	dec := json.NewDecoder(bytes.NewReader(raw))
+ 	var v any
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index fa17d3d6c8a1a5e7e04b55620d7e537c9af5cb1f..79e3111bbacf0a897b1339dfe48b04c10b372075
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -237,6 +237,16 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsEmptyFile(t *testing.T) {
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte{}},
++	})
++	datasetFile := form.File["dataset"][0]
++	if err := validateDatasetJSON(datasetFile, nil); err == nil {
++		t.Fatalf("expected error for empty dataset file")
++	}
++}
++
+ func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
+ 	dataset := `{"items":[{"id":"1","text":"hello"}]}`
+ 	form := buildMultipartForm(t, []formFile{
+
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 3c407a6426f3acc932c81e6750b6089793597e8d..ffa11acc0e60bcfe54d98f69de9195986df56f76
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -30,6 +30,9 @@
+ 	if err != nil {
+ 		return nil, Dataset{}, fmt.Errorf("could not read dataset")
+ 	}
++	if len(raw) == 0 {
++		return nil, Dataset{}, fmt.Errorf("dataset file is empty")
++	}
+ 
+ 	dec := json.NewDecoder(bytes.NewReader(raw))
+ 	var v any
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index fa17d3d6c8a1a5e7e04b55620d7e537c9af5cb1f..79e3111bbacf0a897b1339dfe48b04c10b372075
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -237,6 +237,16 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsEmptyFile(t *testing.T) {
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte{}},
++	})
++	datasetFile := form.File["dataset"][0]
++	if err := validateDatasetJSON(datasetFile, nil); err == nil {
++		t.Fatalf("expected error for empty dataset file")
++	}
++}
++
+ func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
+ 	dataset := `{"items":[{"id":"1","text":"hello"}]}`
+ 	form := buildMultipartForm(t, []formFile{
+
+
+thinking
+**Running tests after patch**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 456ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.013s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 3c407a6426f3acc932c81e6750b6089793597e8d..ffa11acc0e60bcfe54d98f69de9195986df56f76
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -30,6 +30,9 @@
+ 	if err != nil {
+ 		return nil, Dataset{}, fmt.Errorf("could not read dataset")
+ 	}
++	if len(raw) == 0 {
++		return nil, Dataset{}, fmt.Errorf("dataset file is empty")
++	}
+ 
+ 	dec := json.NewDecoder(bytes.NewReader(raw))
+ 	var v any
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index fa17d3d6c8a1a5e7e04b55620d7e537c9af5cb1f..79e3111bbacf0a897b1339dfe48b04c10b372075
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -237,6 +237,16 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsEmptyFile(t *testing.T) {
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte{}},
++	})
++	datasetFile := form.File["dataset"][0]
++	if err := validateDatasetJSON(datasetFile, nil); err == nil {
++		t.Fatalf("expected error for empty dataset file")
++	}
++}
++
+ func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
+ 	dataset := `{"items":[{"id":"1","text":"hello"}]}`
+ 	form := buildMultipartForm(t, []formFile{
+
+codex
+What you changed (short)
+- Reject empty dataset files early in `readDatasetFile` and added a test covering the empty-file case.
+
+Tests run
+- `go test ./...`
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 3c407a6426f3acc932c81e6750b6089793597e8d..ffa11acc0e60bcfe54d98f69de9195986df56f76
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -30,6 +30,9 @@
+ 	if err != nil {
+ 		return nil, Dataset{}, fmt.Errorf("could not read dataset")
+ 	}
++	if len(raw) == 0 {
++		return nil, Dataset{}, fmt.Errorf("dataset file is empty")
++	}
+ 
+ 	dec := json.NewDecoder(bytes.NewReader(raw))
+ 	var v any
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index fa17d3d6c8a1a5e7e04b55620d7e537c9af5cb1f..79e3111bbacf0a897b1339dfe48b04c10b372075
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -237,6 +237,16 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsEmptyFile(t *testing.T) {
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte{}},
++	})
++	datasetFile := form.File["dataset"][0]
++	if err := validateDatasetJSON(datasetFile, nil); err == nil {
++		t.Fatalf("expected error for empty dataset file")
++	}
++}
++
+ func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
+ 	dataset := `{"items":[{"id":"1","text":"hello"}]}`
+ 	form := buildMultipartForm(t, []formFile{
+
+tokens used
+25,586
+What you changed (short)
+- Reject empty dataset files early in `readDatasetFile` and added a test covering the empty-file case.
+
+Tests run
+- `go test ./...`

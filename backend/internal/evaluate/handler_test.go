@@ -237,6 +237,16 @@ func TestValidateDatasetJSON_RejectsUnknownFields(t *testing.T) {
 	}
 }
 
+func TestValidateDatasetJSON_RejectsEmptyFile(t *testing.T) {
+	form := buildMultipartForm(t, []formFile{
+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte{}},
+	})
+	datasetFile := form.File["dataset"][0]
+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
+		t.Fatalf("expected error for empty dataset file")
+	}
+}
+
 func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
 	dataset := `{"items":[{"id":"1","text":"hello"}]}`
 	form := buildMultipartForm(t, []formFile{

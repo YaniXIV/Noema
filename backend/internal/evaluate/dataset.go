@@ -30,6 +30,9 @@ func readDatasetFile(fh *multipart.FileHeader) ([]byte, Dataset, error) {
 	if err != nil {
 		return nil, Dataset{}, fmt.Errorf("could not read dataset")
 	}
+	if len(raw) == 0 {
+		return nil, Dataset{}, fmt.Errorf("dataset file is empty")
+	}
 
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	var v any
