@@ -42,7 +42,11 @@
     container.innerHTML = '';
 
     if (!list || !list.length) {
-      container.innerHTML = '<div class="text-muted">No per-constraint summary available.</div>';
+      container.innerHTML =
+        '<div class="empty-state">' +
+          '<div class="empty-state-title">No constraint summary</div>' +
+          '<p class="empty-state-text">This run did not include per-constraint results.</p>' +
+        '</div>';
       return;
     }
 
@@ -114,16 +118,38 @@
   if (data.verified !== undefined) metaText.push('Verified: ' + (data.verified ? 'Yes' : 'No'));
   metaEl.textContent = metaText.join(' · ');
 
+  var publicPre = document.getElementById('results-public-output-json');
+  var publicSection = document.getElementById('results-public-output');
   if (data.public_output) {
-    document.getElementById('results-public-output-json').textContent = JSON.stringify(data.public_output, null, 2);
+    if (publicPre) publicPre.textContent = JSON.stringify(data.public_output, null, 2);
+  } else if (publicSection) {
+    if (publicPre) publicPre.style.display = 'none';
+    var publicEmpty = document.createElement('div');
+    publicEmpty.className = 'empty-state';
+    publicEmpty.innerHTML =
+      '<div class="empty-state-title">No public output stored</div>' +
+      '<p class="empty-state-text">This run did not save a public output payload.</p>';
+    publicSection.appendChild(publicEmpty);
   }
 
+  var proofSection = document.getElementById('results-proof');
+  var proofPre = document.getElementById('results-proof-json');
+  var proofMetaEl = document.getElementById('results-proof-meta');
   if (data.proof) {
-    document.getElementById('results-proof-json').textContent = JSON.stringify(data.proof, null, 2);
+    if (proofPre) proofPre.textContent = JSON.stringify(data.proof, null, 2);
     var proofMeta = [];
     if (data.proof.system) proofMeta.push('System: ' + data.proof.system);
     if (data.proof.curve) proofMeta.push('Curve: ' + data.proof.curve);
-    document.getElementById('results-proof-meta').textContent = proofMeta.join(' · ');
+    if (proofMetaEl) proofMetaEl.textContent = proofMeta.join(' · ');
+  } else if (proofSection) {
+    if (proofPre) proofPre.style.display = 'none';
+    if (proofMetaEl) proofMetaEl.textContent = '';
+    var proofEmpty = document.createElement('div');
+    proofEmpty.className = 'empty-state';
+    proofEmpty.innerHTML =
+      '<div class="empty-state-title">No proof stored</div>' +
+      '<p class="empty-state-text">This run does not have a proof available for download.</p>';
+    proofSection.appendChild(proofEmpty);
   }
 
   var constraints = data.constraint_results || data.constraints || data.per_constraint || [];
@@ -131,9 +157,14 @@
 
   var copyPublic = document.getElementById('copy-public-output');
   if (copyPublic) {
-    copyPublic.addEventListener('click', function() {
-      copyText(JSON.stringify(data.public_output || {}, null, 2), copyPublic);
-    });
+    if (!data.public_output) {
+      copyPublic.textContent = 'No output';
+      copyPublic.disabled = true;
+    } else {
+      copyPublic.addEventListener('click', function() {
+        copyText(JSON.stringify(data.public_output || {}, null, 2), copyPublic);
+      });
+    }
   }
 
   var copyRunId = document.getElementById('copy-run-id');
@@ -145,16 +176,26 @@
 
   var copyProof = document.getElementById('copy-proof');
   if (copyProof) {
-    copyProof.addEventListener('click', function() {
-      copyText(JSON.stringify(data.proof || {}, null, 2), copyProof);
-    });
+    if (!data.proof) {
+      copyProof.textContent = 'No proof';
+      copyProof.disabled = true;
+    } else {
+      copyProof.addEventListener('click', function() {
+        copyText(JSON.stringify(data.proof || {}, null, 2), copyProof);
+      });
+    }
   }
 
   var copyInputs = document.getElementById('copy-public-inputs');
   if (copyInputs) {
-    copyInputs.addEventListener('click', function() {
-      var inputs = (data.proof && (data.proof.public_inputs_b64 || data.proof.public_inputs)) || (data.public_output && data.public_output.public_inputs) || '';
-      copyText(typeof inputs === 'string' ? inputs : JSON.stringify(inputs, null, 2), copyInputs);
-    });
+    var inputs = (data.proof && (data.proof.public_inputs_b64 || data.proof.public_inputs)) || (data.public_output && data.public_output.public_inputs) || '';
+    if (!inputs) {
+      copyInputs.textContent = 'No inputs';
+      copyInputs.disabled = true;
+    } else {
+      copyInputs.addEventListener('click', function() {
+        copyText(typeof inputs === 'string' ? inputs : JSON.stringify(inputs, null, 2), copyInputs);
+      });
+    }
   }
 })();
