@@ -80,8 +80,17 @@
 
   document.getElementById('results-body').style.display = 'block';
   var statusEl = document.getElementById('results-status');
-  var status = data.status || (data.public_output && data.public_output.overall_pass ? 'PASS' : 'FAIL') || '—';
-  statusEl.className = 'results-status results-status-' + (status === 'PASS' ? 'pass' : 'fail');
+  var status = data.status;
+  if (status === true) status = 'PASS';
+  if (status === false) status = 'FAIL';
+  if (!status && data.public_output) {
+    status = data.public_output.overall_pass ? 'PASS' : 'FAIL';
+  }
+  status = status || '—';
+  var statusClass = 'unknown';
+  if (status === 'PASS') statusClass = 'pass';
+  if (status === 'FAIL') statusClass = 'fail';
+  statusEl.className = 'results-status results-status-' + statusClass;
   statusEl.textContent = status;
 
   var metaEl = document.getElementById('results-summary-meta');
@@ -124,6 +133,13 @@
   if (copyPublic) {
     copyPublic.addEventListener('click', function() {
       copyText(JSON.stringify(data.public_output || {}, null, 2), copyPublic);
+    });
+  }
+
+  var copyRunId = document.getElementById('copy-run-id');
+  if (copyRunId) {
+    copyRunId.addEventListener('click', function() {
+      copyText(runId, copyRunId);
     });
   }
 

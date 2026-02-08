@@ -778,6 +778,23 @@ pre,
   flex-wrap: wrap;
 }
 
+.results-runline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.results-run-id {
+  display: inline-flex;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.35);
+  font-size: 0.85rem;
+  letter-spacing: 0.02em;
+}
+
 .results-status {
   padding: 0.65rem 1.2rem;
   border-radius: 999px;
@@ -797,6 +814,12 @@ pre,
   background: rgba(248, 113, 113, 0.15);
   color: #fecaca;
   border: 1px solid rgba(248, 113, 113, 0.4);
+}
+
+.results-status-unknown {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-muted);
+  border: 1px solid rgba(255, 255, 255, 0.16);
 }
 
 .results-summary-meta {

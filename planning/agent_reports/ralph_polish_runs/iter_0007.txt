@@ -7,7 +7,7 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3c81-070e-7e83-84ef-ad260461d984
+session id: 019c3ec6-d2bd-7210-b2ce-eba8e98e11b2
 --------
 user
 You are an autonomous coding agent polishing the Noema repository.
@@ -18,8 +18,9 @@ Hard rules:
 - Keep changes small: max 3 files per iteration.
 - No cosmetic-only edits.
 - No new dependencies unless absolutely necessary.
+- keep all the same ui functionality, the end user should be able to do the same stuff but the experiance and design should be better.
 
-Goal: continuously improve production quality.
+Goal: continuously improve production quality. continuously improve front end quality and polish.
 
 Iteration:
 1) Run: cd backend && go test ./...
@@ -29,7 +30,7 @@ Iteration:
 Pick the highest-value improvement:
 A) Reliability/correctness: validation, error handling, run persistence, verify robustness
 B) Tests: add/strengthen tests for the change you made
-C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+C) upgrading the user interface so that it looks better.
 D) Maintainability: reduce duplication with tiny refactors
 E) UX: wizard/results/verify clarity (small, safe changes)
 F) Docs: README/DEPLOYMENT polish
@@ -41,511 +42,900 @@ Finish with:
 mcp startup: no servers
 
 thinking
-**Identifying need for agent instructions**
-
-The user provided instructions in AGENTS but no skill is defined, so I'll check the repo for AGENTS details and prepare to run tests using exec_command.
+**Running tests using exec**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 220ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 194ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
 ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
-?   	noema/internal/verify	[no test files]
+ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
 
 thinking
-**Checking AGENTS.md for requirements**
+**Listing frontend files**
 
-I plan to inspect the AGENTS.md file with a search tool to clarify if there's a mandatory agent-related requirement or special instructions for the current task.
+I'm identifying frontend files to target for polish and limit changes to a maximum of three files.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && rg --files -g 'AGENTS.md'" in /Users/yani/Noema/backend exited 1 in 52ms:
-
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
+cmd
+data
+go.mod
+go.sum
+internal
+main
+web
 
 thinking
-**Scoping search for error handling**
+**Identifying frontend tech stack**
 
-I'm focusing on up to three files to improve reliability, targeting areas with TODO comments or potential error handling gaps, likely involving Gemini or related file operations.
+The frontend appears to be a web-based list interface, suggesting focus on typical web UI frameworks and list rendering components.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME|panic|fatal|Must|must" internal' in /Users/yani/Noema/backend succeeded in 52ms:
-internal/evaluate/dataset.go:37:		return nil, Dataset{}, fmt.Errorf("dataset must be valid JSON")
-internal/evaluate/dataset.go:40:		return nil, Dataset{}, fmt.Errorf("dataset must be a single JSON value")
-internal/evaluate/dataset.go:45:		return nil, Dataset{}, fmt.Errorf("dataset must match schema")
-internal/evaluate/dataset.go:48:		return nil, Dataset{}, fmt.Errorf("dataset.items must be a non-empty array")
-internal/evaluate/parse.go:30:			return fmt.Errorf("constraint id must be non-empty")
-internal/evaluate/parse.go:33:			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
-internal/evaluate/parse.go:38:			return fmt.Errorf("custom_constraint id must be non-empty")
-internal/evaluate/parse.go:41:			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
-internal/evaluate/parse.go:62:			return nil, nil, fmt.Errorf("each image must be at most 5MB")
-internal/evaluate/parse.go:93:			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
-internal/evaluate/handler.go:99:		commitment := zk.CommitmentSHA256([]byte("spec"), mustJSON(spec), []byte("eval"), mustJSON(evalOut))
-internal/evaluate/handler.go:224:func mustJSON(v any) []byte {
-internal/evaluate/gemini_eval.go:43:	key := cacheKey(rawDataset, mustJSON(spec), model, sampleLimit)
-internal/zk/zk.go:86:		return nil, fmt.Errorf("policy threshold must be 0..2")
-internal/zk/zk.go:89:		return nil, fmt.Errorf("max severity must be 0..2")
-internal/evaluate/policy.go:31:		return nil, fmt.Errorf("at least one constraint must be enabled")
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web' in /Users/yani/Noema/backend succeeded in 52ms:
+static
+templates
 
 thinking
-**Checking potential JSON panics**
-
-I'm verifying if the mustJSON function can panic within the handler to ensure safe error handling.
+**Checking templates**
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package evaluate
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/templates' in /Users/yani/Noema/backend succeeded in 52ms:
+app.html
+app_new.html
+app_results.html
+index.html
+partial_header_app.html
+partial_header_public.html
+partial_header_upload.html
+partial_orb.html
+upload.html
+verify.html
+verify_results.html
 
-import (
-	"encoding/json"
-	"log"
-	"mime/multipart"
-	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
-	"time"
+thinking
+**Identifying frontend polish areas**
 
-	"noema/internal/config"
-	"noema/internal/zk"
-
-	"github.com/gin-gonic/gin"
-)
-
-// EvaluateResponse is the JSON response for POST /api/evaluate.
-type EvaluateResponse struct {
+I'm focusing on improving the frontend by reviewing CSS files in the web/static directory to identify areas for polish and enhancement.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
-	})
-	return out
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/static' in /Users/yani/Noema/backend succeeded in 52ms:
+app.js
+constraints.js
+results.js
+styles.css
+upload.js
+verify.js
+wizard.js
+
+thinking
+**Planning CSS focus**
+
+I'm deciding whether to improve the results page styling or general styles and next I'll inspect styles.css to guide the approach while preserving existing functionality.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap');
+
+:root {
+  --bg: #05060a;
+  --bg-card: rgba(9, 12, 18, 0.9);
+  --text: #f4f6fb;
+  --text-muted: #9aa3b2;
+  --accent: #45d4ff;
+  --accent-strong: #2c7bff;
+  --accent-glow: rgba(69, 212, 255, 0.35);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(69, 212, 255, 0.4);
+  --error: #f87171;
+  --success: #22c55e;
+  --warning: #fbbf24;
+  --shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
 }
 
-func mustJSON(v any) []byte {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return nil
-	}
-	return b
+*,
+*::before,
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 51ms:
+
+.input.is-invalid {
+  border-color: rgba(248, 113, 113, 0.65);
+  box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.2);
 }
 
-thinking
-**Assessing error handling for JSON marshalling**
+.textarea { min-height: 160px; resize: vertical; }
 
-MustJSON currently returns nil on error, which may lead to using nil as a key in gemini_eval; I need to check how this is handled and consider returning an error for correctness.
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.policy-reveal {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem 1.2rem;
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/gemini_eval.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '520,1040p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 51ms:
+  display: inline-flex;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border);
+  padding: 0.35rem;
+  border-radius: 999px;
+  gap: 0.35rem;
+  margin-bottom: 1.4rem;
+}
 
-import (
-	"context"
-	"log"
-	"mime/multipart"
-	"time"
+.segmented-btn {
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  padding: 0.4rem 0.9rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
 
-	"noema/internal/config"
-	"noema/internal/gemini"
-)
-
-const geminiEvalTimeout = 45 * time.Second
-
-func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
-	if form != nil && len(form.Value["eval_output"]) > 0 && form.Value["eval_output"][0] != "" {
-		raw := form.Value["eval_output"][0]
-		out, err := parseEvalOutput(raw)
-		if err != nil {
-			return EvalOutput{}, err
-
-
-thinking
-**Refactoring JSON serialization handling**
-
-Planning to replace mustJSON with a jsonBytes helper returning ([]byte, error) to handle marshal failures explicitly; will update handlers to return 500 on marshal errors and gemini_eval to log and fallback to stub output for reliability without silent nil returns.
-thinking
-**Confirming limited mustJSON usage**
-
-mustJSON is only used in two files—handler.go and gemini_eval.go—so replacing it with the new jsonBytes helper will be scoped and manageable.
+.segmented-btn.active {
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "mustJSON"' in /Users/yani/Noema/backend succeeded in 51ms:
-internal/evaluate/gemini_eval.go:43:	key := cacheKey(rawDataset, mustJSON(spec), model, sampleLimit)
-internal/evaluate/handler.go:99:		commitment := zk.CommitmentSHA256([]byte("spec"), mustJSON(spec), []byte("eval"), mustJSON(evalOut))
-internal/evaluate/handler.go:224:func mustJSON(v any) []byte {
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1040,1560p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 51ms:
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.2);
+  box-shadow: inset 3px 0 0 transparent;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.2s ease;
+}
+
+.verify-row:hover:not([data-verify="ok"]):not([data-verify="fail"]):not([data-verify="pending"]) {
+  border-color: rgba(69, 212, 255, 0.3);
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.verify-row[data-verify="ok"] {
+  border-color: rgba(34, 197, 94, 0.45);
+  background: rgba(34, 197, 94, 0.06);
+  box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.7);
 
 thinking
-**Applying patch**
+**Checking results template**
+
+I'm reviewing app_results.html to identify ways to improve form hints and results readability, considering adding table styles for clearer presentation.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' web/templates/app_results.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "app_results"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Results</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body data-run-id="{{.RunID}}">
+  {{template "header_app" .}}
+
+  <main class="main main-results">
+    {{template "orb" .}}
+    <div class="card results-card">
+      <div class="results-header">
+        <div>
+          <h1 class="card-title">Evaluation results</h1>
+          <p class="text-muted" id="results-run-id">Run ID: {{.RunID}}</p>
+        </div>
+
+thinking
+**Planning UI improvements**
+
+Considering adding skeleton loading and better run ID display on the results page, plus copy feedback in results.js, while preserving current functionality.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' web/static/results.js" in /Users/yani/Noema/backend succeeded in 52ms:
+(function() {
+  var runId = document.body.getAttribute('data-run-id') || document.getElementById('results-run-id').textContent.replace('Run ID: ', '').trim();
+  var key = 'noema_run_' + runId;
+  var data;
+  try {
+    var raw = localStorage.getItem(key);
+    data = raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    data = null;
+  }
+
+  function copyText(text, button) {
+    if (!text) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function() {
+        if (button) showCopied(button);
+      });
+    } else {
+      var temp = document.createElement('textarea');
+      temp.value = text;
+
+
+thinking
+**Planning to add copyable run ID UI**
+
+I'm aiming to improve UX by replacing the plain run ID text with a styled run ID pill plus a copy button, adjusting the template and results.js to support this while maintaining existing ID references. This offers meaningful usability enhancement without adding dependencies or cosmetic-only changes.
+thinking
+**Enhancing run ID copy and status display**
+
+I'm updating the template to wrap the run ID in a span for cleaner extraction by the copy button's JavaScript, which will copy just the run ID text and provide feedback. I'm also refining status logic to handle unknown and boolean states distinctly, adding a neutral CSS style for unknown status to improve UI clarity and correctness.
 file update
-M /Users/yani/Noema/backend/internal/evaluate/handler.go
-@@ -98,3 +98,13 @@
- 
--		commitment := zk.CommitmentSHA256([]byte("spec"), mustJSON(spec), []byte("eval"), mustJSON(evalOut))
-+		specJSON, err := jsonBytes(spec)
-+		if err != nil {
-+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode spec"})
-+			return
-+		}
-+		evalJSON, err := jsonBytes(evalOut)
-+		if err != nil {
-+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode evaluation output"})
-+			return
-+		}
-+		commitment := zk.CommitmentSHA256([]byte("spec"), specJSON, []byte("eval"), evalJSON)
- 		proof, err := zk.GenerateProof(zk.PublicInputs{
-@@ -223,8 +233,4 @@
- 
--func mustJSON(v any) []byte {
--	b, err := json.Marshal(v)
--	if err != nil {
--		return nil
--	}
--	return b
-+func jsonBytes(v any) ([]byte, error) {
-+	return json.Marshal(v)
- }
-apply_patch(auto_approved=true) exited 0 in 32ms:
+M /Users/yani/Noema/backend/web/templates/app_results.html
+@@ -18,3 +18,6 @@
+           <h1 class="card-title">Evaluation results</h1>
+-          <p class="text-muted" id="results-run-id">Run ID: {{.RunID}}</p>
++          <div class="results-runline">
++            <p class="text-muted" id="results-run-id">Run ID: <span class="results-run-id">{{.RunID}}</span></p>
++            <button type="button" class="btn btn-ghost btn-sm" id="copy-run-id">Copy Run ID</button>
++          </div>
+         </div>
+apply_patch(auto_approved=true) exited 0 in 33ms:
 Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/handler.go
+M /Users/yani/Noema/backend/web/templates/app_results.html
 file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 1c178896e2b3b9091f07bd1e4ae5397c87ce4f9b..2a1ce76ddca85f88fe5ec497a0c9245f35546956
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -96,7 +96,17 @@
- 			status = "PASS"
- 		}
- 
--		commitment := zk.CommitmentSHA256([]byte("spec"), mustJSON(spec), []byte("eval"), mustJSON(evalOut))
-+		specJSON, err := jsonBytes(spec)
-+		if err != nil {
-+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode spec"})
-+			return
-+		}
-+		evalJSON, err := jsonBytes(evalOut)
-+		if err != nil {
-+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode evaluation output"})
-+			return
-+		}
-+		commitment := zk.CommitmentSHA256([]byte("spec"), specJSON, []byte("eval"), evalJSON)
- 		proof, err := zk.GenerateProof(zk.PublicInputs{
- 			PolicyThreshold: policyThreshold,
- 			MaxSeverity:     maxSeverity,
-@@ -221,10 +231,6 @@
- 	return out
- }
- 
--func mustJSON(v any) []byte {
--	b, err := json.Marshal(v)
--	if err != nil {
--		return nil
--	}
--	return b
-+func jsonBytes(v any) ([]byte, error) {
-+	return json.Marshal(v)
- }
+diff --git a/backend/web/templates/app_results.html b/backend/web/templates/app_results.html
+index 3e1302324b7b9c39acc68c754c3714eebc8ddf69..599cf4c073c026caf3062098c6f8b19b770baa91
+--- a/backend/web/templates/app_results.html
++++ b/backend/web/templates/app_results.html
+@@ -16,7 +16,10 @@
+       <div class="results-header">
+         <div>
+           <h1 class="card-title">Evaluation results</h1>
+-          <p class="text-muted" id="results-run-id">Run ID: {{.RunID}}</p>
++          <div class="results-runline">
++            <p class="text-muted" id="results-run-id">Run ID: <span class="results-run-id">{{.RunID}}</span></p>
++            <button type="button" class="btn btn-ghost btn-sm" id="copy-run-id">Copy Run ID</button>
++          </div>
+         </div>
+         <div class="results-actions">
+           <a href="/verify/{{.RunID}}" class="btn btn-ghost">Verify proof</a>
 
 file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 1c178896e2b3b9091f07bd1e4ae5397c87ce4f9b..2a1ce76ddca85f88fe5ec497a0c9245f35546956
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -96,7 +96,17 @@
- 			status = "PASS"
- 		}
- 
--		commitment := zk.CommitmentSHA256([]byte("spec"), mustJSON(spec), []byte("eval"), mustJSON(evalOut))
-+		specJSON, err := jsonBytes(spec)
-+		if err != nil {
-+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode spec"})
-+			return
-+		}
-+		evalJSON, err := jsonBytes(evalOut)
-+		if err != nil {
-+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode evaluation output"})
-+			return
-+		}
-+		commitment := zk.CommitmentSHA256([]byte("spec"), specJSON, []byte("eval"), evalJSON)
- 		proof, err := zk.GenerateProof(zk.PublicInputs{
- 			PolicyThreshold: policyThreshold,
- 			MaxSeverity:     maxSeverity,
-@@ -221,10 +231,6 @@
- 	return out
- }
- 
--func mustJSON(v any) []byte {
--	b, err := json.Marshal(v)
--	if err != nil {
--		return nil
--	}
--	return b
-+func jsonBytes(v any) ([]byte, error) {
-+	return json.Marshal(v)
- }
+diff --git a/backend/web/templates/app_results.html b/backend/web/templates/app_results.html
+index 3e1302324b7b9c39acc68c754c3714eebc8ddf69..599cf4c073c026caf3062098c6f8b19b770baa91
+--- a/backend/web/templates/app_results.html
++++ b/backend/web/templates/app_results.html
+@@ -16,7 +16,10 @@
+       <div class="results-header">
+         <div>
+           <h1 class="card-title">Evaluation results</h1>
+-          <p class="text-muted" id="results-run-id">Run ID: {{.RunID}}</p>
++          <div class="results-runline">
++            <p class="text-muted" id="results-run-id">Run ID: <span class="results-run-id">{{.RunID}}</span></p>
++            <button type="button" class="btn btn-ghost btn-sm" id="copy-run-id">Copy Run ID</button>
++          </div>
+         </div>
+         <div class="results-actions">
+           <a href="/verify/{{.RunID}}" class="btn btn-ghost">Verify proof</a>
 
 
 thinking
-**Updating evaluation logic**
+**Adding CSS classes**
 file update
-M /Users/yani/Noema/backend/internal/evaluate/gemini_eval.go
-@@ -42,3 +42,8 @@
- 	model := gemini.ModelName()
--	key := cacheKey(rawDataset, mustJSON(spec), model, sampleLimit)
-+	specJSON, err := jsonBytes(spec)
-+	if err != nil {
-+		log.Printf("gemini marshal spec: %v", err)
-+		return stubEvalOutput(enabled)
-+	}
-+	key := cacheKey(rawDataset, specJSON, model, sampleLimit)
- 	if cached, err := loadCache(runsDir, key); err == nil {
-apply_patch(auto_approved=true) exited 0 in 43ms:
+M /Users/yani/Noema/backend/web/static/styles.css
+@@ -780,2 +780,19 @@
+ 
++.results-runline {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.75rem;
++  flex-wrap: wrap;
++}
++
++.results-run-id {
++  display: inline-flex;
++  padding: 0.2rem 0.6rem;
++  border-radius: 999px;
++  border: 1px solid rgba(255, 255, 255, 0.12);
++  background: rgba(0, 0, 0, 0.35);
++  font-size: 0.85rem;
++  letter-spacing: 0.02em;
++}
++
+ .results-status {
+@@ -801,2 +818,8 @@
+ 
++.results-status-unknown {
++  background: rgba(255, 255, 255, 0.08);
++  color: var(--text-muted);
++  border: 1px solid rgba(255, 255, 255, 0.16);
++}
++
+ .results-summary-meta {
+apply_patch(auto_approved=true) exited 0 in 37ms:
 Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/gemini_eval.go
+M /Users/yani/Noema/backend/web/static/styles.css
 file update:
-diff --git a/backend/internal/evaluate/gemini_eval.go b/backend/internal/evaluate/gemini_eval.go
-index 8d1d3e63fd48ebcaf31e0dae471124b0e85ca685..b440de2eef71bfd21bf7b291ae3a2924998ad61c
---- a/backend/internal/evaluate/gemini_eval.go
-+++ b/backend/internal/evaluate/gemini_eval.go
-@@ -40,7 +40,12 @@
- 
- 	sampleLimit := config.SampleItemsLimit()
- 	model := gemini.ModelName()
--	key := cacheKey(rawDataset, mustJSON(spec), model, sampleLimit)
-+	specJSON, err := jsonBytes(spec)
-+	if err != nil {
-+		log.Printf("gemini marshal spec: %v", err)
-+		return stubEvalOutput(enabled)
-+	}
-+	key := cacheKey(rawDataset, specJSON, model, sampleLimit)
- 	if cached, err := loadCache(runsDir, key); err == nil {
- 		if err := validateEvalOutput(cached.Output, enabled); err == nil {
- 			return cached.Output
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 1c178896e2b3b9091f07bd1e4ae5397c87ce4f9b..2a1ce76ddca85f88fe5ec497a0c9245f35546956
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -96,7 +96,17 @@
- 			status = "PASS"
- 		}
- 
--		commitment := zk.CommitmentSHA256([]byte("spec"), mustJSON(spec), []byte("eval"), mustJSON(evalOut))
-+		specJSON, err := jsonBytes(spec)
-+		if err != nil {
-+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode spec"})
-+			return
-+		}
-+		evalJSON, err := jsonBytes(evalOut)
-+		if err != nil {
-+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode evaluation output"})
-+			return
-+		}
-+		commitment := zk.CommitmentSHA256([]byte("spec"), specJSON, []byte("eval"), evalJSON)
- 		proof, err := zk.GenerateProof(zk.PublicInputs{
- 			PolicyThreshold: policyThreshold,
- 			MaxSeverity:     maxSeverity,
-@@ -221,10 +231,6 @@
- 	return out
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 43533f4226e7f58e614b89ca453678979770a780..3ddf30086be9d99f6e7aa2e2f22912b7f9f162f0
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -778,6 +778,23 @@
+   flex-wrap: wrap;
  }
  
--func mustJSON(v any) []byte {
--	b, err := json.Marshal(v)
--	if err != nil {
--		return nil
--	}
--	return b
-+func jsonBytes(v any) ([]byte, error) {
-+	return json.Marshal(v)
++.results-runline {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.75rem;
++  flex-wrap: wrap;
++}
++
++.results-run-id {
++  display: inline-flex;
++  padding: 0.2rem 0.6rem;
++  border-radius: 999px;
++  border: 1px solid rgba(255, 255, 255, 0.12);
++  background: rgba(0, 0, 0, 0.35);
++  font-size: 0.85rem;
++  letter-spacing: 0.02em;
++}
++
+ .results-status {
+   padding: 0.65rem 1.2rem;
+   border-radius: 999px;
+@@ -799,6 +816,12 @@
+   border: 1px solid rgba(248, 113, 113, 0.4);
  }
+ 
++.results-status-unknown {
++  background: rgba(255, 255, 255, 0.08);
++  color: var(--text-muted);
++  border: 1px solid rgba(255, 255, 255, 0.16);
++}
++
+ .results-summary-meta {
+   color: var(--text-muted);
+   font-size: 0.9rem;
+diff --git a/backend/web/templates/app_results.html b/backend/web/templates/app_results.html
+index 3e1302324b7b9c39acc68c754c3714eebc8ddf69..599cf4c073c026caf3062098c6f8b19b770baa91
+--- a/backend/web/templates/app_results.html
++++ b/backend/web/templates/app_results.html
+@@ -16,7 +16,10 @@
+       <div class="results-header">
+         <div>
+           <h1 class="card-title">Evaluation results</h1>
+-          <p class="text-muted" id="results-run-id">Run ID: {{.RunID}}</p>
++          <div class="results-runline">
++            <p class="text-muted" id="results-run-id">Run ID: <span class="results-run-id">{{.RunID}}</span></p>
++            <button type="button" class="btn btn-ghost btn-sm" id="copy-run-id">Copy Run ID</button>
++          </div>
+         </div>
+         <div class="results-actions">
+           <a href="/verify/{{.RunID}}" class="btn btn-ghost">Verify proof</a>
 
 file update:
-diff --git a/backend/internal/evaluate/gemini_eval.go b/backend/internal/evaluate/gemini_eval.go
-index 8d1d3e63fd48ebcaf31e0dae471124b0e85ca685..b440de2eef71bfd21bf7b291ae3a2924998ad61c
---- a/backend/internal/evaluate/gemini_eval.go
-+++ b/backend/internal/evaluate/gemini_eval.go
-@@ -40,7 +40,12 @@
- 
- 	sampleLimit := config.SampleItemsLimit()
- 	model := gemini.ModelName()
--	key := cacheKey(rawDataset, mustJSON(spec), model, sampleLimit)
-+	specJSON, err := jsonBytes(spec)
-+	if err != nil {
-+		log.Printf("gemini marshal spec: %v", err)
-+		return stubEvalOutput(enabled)
-+	}
-+	key := cacheKey(rawDataset, specJSON, model, sampleLimit)
- 	if cached, err := loadCache(runsDir, key); err == nil {
- 		if err := validateEvalOutput(cached.Output, enabled); err == nil {
- 			return cached.Output
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 1c178896e2b3b9091f07bd1e4ae5397c87ce4f9b..2a1ce76ddca85f88fe5ec497a0c9245f35546956
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -96,7 +96,17 @@
- 			status = "PASS"
- 		}
- 
--		commitment := zk.CommitmentSHA256([]byte("spec"), mustJSON(spec), []byte("eval"), mustJSON(evalOut))
-+		specJSON, err := jsonBytes(spec)
-+		if err != nil {
-+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode spec"})
-+			return
-+		}
-+		evalJSON, err := jsonBytes(evalOut)
-+		if err != nil {
-+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode evaluation output"})
-+			return
-+		}
-+		commitment := zk.CommitmentSHA256([]byte("spec"), specJSON, []byte("eval"), evalJSON)
- 		proof, err := zk.GenerateProof(zk.PublicInputs{
- 			PolicyThreshold: policyThreshold,
- 			MaxSeverity:     maxSeverity,
-@@ -221,10 +231,6 @@
- 	return out
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 43533f4226e7f58e614b89ca453678979770a780..3ddf30086be9d99f6e7aa2e2f22912b7f9f162f0
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -778,6 +778,23 @@
+   flex-wrap: wrap;
  }
  
--func mustJSON(v any) []byte {
--	b, err := json.Marshal(v)
--	if err != nil {
--		return nil
--	}
--	return b
-+func jsonBytes(v any) ([]byte, error) {
-+	return json.Marshal(v)
++.results-runline {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.75rem;
++  flex-wrap: wrap;
++}
++
++.results-run-id {
++  display: inline-flex;
++  padding: 0.2rem 0.6rem;
++  border-radius: 999px;
++  border: 1px solid rgba(255, 255, 255, 0.12);
++  background: rgba(0, 0, 0, 0.35);
++  font-size: 0.85rem;
++  letter-spacing: 0.02em;
++}
++
+ .results-status {
+   padding: 0.65rem 1.2rem;
+   border-radius: 999px;
+@@ -799,6 +816,12 @@
+   border: 1px solid rgba(248, 113, 113, 0.4);
  }
+ 
++.results-status-unknown {
++  background: rgba(255, 255, 255, 0.08);
++  color: var(--text-muted);
++  border: 1px solid rgba(255, 255, 255, 0.16);
++}
++
+ .results-summary-meta {
+   color: var(--text-muted);
+   font-size: 0.9rem;
+diff --git a/backend/web/templates/app_results.html b/backend/web/templates/app_results.html
+index 3e1302324b7b9c39acc68c754c3714eebc8ddf69..599cf4c073c026caf3062098c6f8b19b770baa91
+--- a/backend/web/templates/app_results.html
++++ b/backend/web/templates/app_results.html
+@@ -16,7 +16,10 @@
+       <div class="results-header">
+         <div>
+           <h1 class="card-title">Evaluation results</h1>
+-          <p class="text-muted" id="results-run-id">Run ID: {{.RunID}}</p>
++          <div class="results-runline">
++            <p class="text-muted" id="results-run-id">Run ID: <span class="results-run-id">{{.RunID}}</span></p>
++            <button type="button" class="btn btn-ghost btn-sm" id="copy-run-id">Copy Run ID</button>
++          </div>
+         </div>
+         <div class="results-actions">
+           <a href="/verify/{{.RunID}}" class="btn btn-ghost">Verify proof</a>
 
 
 thinking
-**Running tests again**
+**Updating results.js**
+file update
+M /Users/yani/Noema/backend/web/static/results.js
+@@ -82,4 +82,13 @@
+   var statusEl = document.getElementById('results-status');
+-  var status = data.status || (data.public_output && data.public_output.overall_pass ? 'PASS' : 'FAIL') || '—';
+-  statusEl.className = 'results-status results-status-' + (status === 'PASS' ? 'pass' : 'fail');
++  var status = data.status;
++  if (status === true) status = 'PASS';
++  if (status === false) status = 'FAIL';
++  if (!status && data.public_output) {
++    status = data.public_output.overall_pass ? 'PASS' : 'FAIL';
++  }
++  status = status || '—';
++  var statusClass = 'unknown';
++  if (status === 'PASS') statusClass = 'pass';
++  if (status === 'FAIL') statusClass = 'fail';
++  statusEl.className = 'results-status results-status-' + statusClass;
+   statusEl.textContent = status;
+@@ -129,2 +138,9 @@
+ 
++  var copyRunId = document.getElementById('copy-run-id');
++  if (copyRunId) {
++    copyRunId.addEventListener('click', function() {
++      copyText(runId, copyRunId);
++    });
++  }
++
+   var copyProof = document.getElementById('copy-proof');
+apply_patch(auto_approved=true) exited 0 in 48ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/web/static/results.js
+file update:
+diff --git a/backend/web/static/results.js b/backend/web/static/results.js
+index cf359b476fb3ce1ba662d103051a416376f3ab9c..587a089927ed973144323f29e5ead2bc9003a9f3
+--- a/backend/web/static/results.js
++++ b/backend/web/static/results.js
+@@ -80,8 +80,17 @@
+ 
+   document.getElementById('results-body').style.display = 'block';
+   var statusEl = document.getElementById('results-status');
+-  var status = data.status || (data.public_output && data.public_output.overall_pass ? 'PASS' : 'FAIL') || '—';
+-  statusEl.className = 'results-status results-status-' + (status === 'PASS' ? 'pass' : 'fail');
++  var status = data.status;
++  if (status === true) status = 'PASS';
++  if (status === false) status = 'FAIL';
++  if (!status && data.public_output) {
++    status = data.public_output.overall_pass ? 'PASS' : 'FAIL';
++  }
++  status = status || '—';
++  var statusClass = 'unknown';
++  if (status === 'PASS') statusClass = 'pass';
++  if (status === 'FAIL') statusClass = 'fail';
++  statusEl.className = 'results-status results-status-' + statusClass;
+   statusEl.textContent = status;
+ 
+   var metaEl = document.getElementById('results-summary-meta');
+@@ -127,6 +136,13 @@
+     });
+   }
+ 
++  var copyRunId = document.getElementById('copy-run-id');
++  if (copyRunId) {
++    copyRunId.addEventListener('click', function() {
++      copyText(runId, copyRunId);
++    });
++  }
++
+   var copyProof = document.getElementById('copy-proof');
+   if (copyProof) {
+     copyProof.addEventListener('click', function() {
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 43533f4226e7f58e614b89ca453678979770a780..3ddf30086be9d99f6e7aa2e2f22912b7f9f162f0
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -778,6 +778,23 @@
+   flex-wrap: wrap;
+ }
+ 
++.results-runline {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.75rem;
++  flex-wrap: wrap;
++}
++
++.results-run-id {
++  display: inline-flex;
++  padding: 0.2rem 0.6rem;
++  border-radius: 999px;
++  border: 1px solid rgba(255, 255, 255, 0.12);
++  background: rgba(0, 0, 0, 0.35);
++  font-size: 0.85rem;
++  letter-spacing: 0.02em;
++}
++
+ .results-status {
+   padding: 0.65rem 1.2rem;
+   border-radius: 999px;
+@@ -799,6 +816,12 @@
+   border: 1px solid rgba(248, 113, 113, 0.4);
+ }
+ 
++.results-status-unknown {
++  background: rgba(255, 255, 255, 0.08);
++  color: var(--text-muted);
++  border: 1px solid rgba(255, 255, 255, 0.16);
++}
++
+ .results-summary-meta {
+   color: var(--text-muted);
+   font-size: 0.9rem;
+diff --git a/backend/web/templates/app_results.html b/backend/web/templates/app_results.html
+index 3e1302324b7b9c39acc68c754c3714eebc8ddf69..599cf4c073c026caf3062098c6f8b19b770baa91
+--- a/backend/web/templates/app_results.html
++++ b/backend/web/templates/app_results.html
+@@ -16,7 +16,10 @@
+       <div class="results-header">
+         <div>
+           <h1 class="card-title">Evaluation results</h1>
+-          <p class="text-muted" id="results-run-id">Run ID: {{.RunID}}</p>
++          <div class="results-runline">
++            <p class="text-muted" id="results-run-id">Run ID: <span class="results-run-id">{{.RunID}}</span></p>
++            <button type="button" class="btn btn-ghost btn-sm" id="copy-run-id">Copy Run ID</button>
++          </div>
+         </div>
+         <div class="results-actions">
+           <a href="/verify/{{.RunID}}" class="btn btn-ghost">Verify proof</a>
+
+file update:
+diff --git a/backend/web/static/results.js b/backend/web/static/results.js
+index cf359b476fb3ce1ba662d103051a416376f3ab9c..587a089927ed973144323f29e5ead2bc9003a9f3
+--- a/backend/web/static/results.js
++++ b/backend/web/static/results.js
+@@ -80,8 +80,17 @@
+ 
+   document.getElementById('results-body').style.display = 'block';
+   var statusEl = document.getElementById('results-status');
+-  var status = data.status || (data.public_output && data.public_output.overall_pass ? 'PASS' : 'FAIL') || '—';
+-  statusEl.className = 'results-status results-status-' + (status === 'PASS' ? 'pass' : 'fail');
++  var status = data.status;
++  if (status === true) status = 'PASS';
++  if (status === false) status = 'FAIL';
++  if (!status && data.public_output) {
++    status = data.public_output.overall_pass ? 'PASS' : 'FAIL';
++  }
++  status = status || '—';
++  var statusClass = 'unknown';
++  if (status === 'PASS') statusClass = 'pass';
++  if (status === 'FAIL') statusClass = 'fail';
++  statusEl.className = 'results-status results-status-' + statusClass;
+   statusEl.textContent = status;
+ 
+   var metaEl = document.getElementById('results-summary-meta');
+@@ -127,6 +136,13 @@
+     });
+   }
+ 
++  var copyRunId = document.getElementById('copy-run-id');
++  if (copyRunId) {
++    copyRunId.addEventListener('click', function() {
++      copyText(runId, copyRunId);
++    });
++  }
++
+   var copyProof = document.getElementById('copy-proof');
+   if (copyProof) {
+     copyProof.addEventListener('click', function() {
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 43533f4226e7f58e614b89ca453678979770a780..3ddf30086be9d99f6e7aa2e2f22912b7f9f162f0
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -778,6 +778,23 @@
+   flex-wrap: wrap;
+ }
+ 
++.results-runline {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.75rem;
++  flex-wrap: wrap;
++}
++
++.results-run-id {
++  display: inline-flex;
++  padding: 0.2rem 0.6rem;
++  border-radius: 999px;
++  border: 1px solid rgba(255, 255, 255, 0.12);
++  background: rgba(0, 0, 0, 0.35);
++  font-size: 0.85rem;
++  letter-spacing: 0.02em;
++}
++
+ .results-status {
+   padding: 0.65rem 1.2rem;
+   border-radius: 999px;
+@@ -799,6 +816,12 @@
+   border: 1px solid rgba(248, 113, 113, 0.4);
+ }
+ 
++.results-status-unknown {
++  background: rgba(255, 255, 255, 0.08);
++  color: var(--text-muted);
++  border: 1px solid rgba(255, 255, 255, 0.16);
++}
++
+ .results-summary-meta {
+   color: var(--text-muted);
+   font-size: 0.9rem;
+diff --git a/backend/web/templates/app_results.html b/backend/web/templates/app_results.html
+index 3e1302324b7b9c39acc68c754c3714eebc8ddf69..599cf4c073c026caf3062098c6f8b19b770baa91
+--- a/backend/web/templates/app_results.html
++++ b/backend/web/templates/app_results.html
+@@ -16,7 +16,10 @@
+       <div class="results-header">
+         <div>
+           <h1 class="card-title">Evaluation results</h1>
+-          <p class="text-muted" id="results-run-id">Run ID: {{.RunID}}</p>
++          <div class="results-runline">
++            <p class="text-muted" id="results-run-id">Run ID: <span class="results-run-id">{{.RunID}}</span></p>
++            <button type="button" class="btn btn-ghost btn-sm" id="copy-run-id">Copy Run ID</button>
++          </div>
+         </div>
+         <div class="results-actions">
+           <a href="/verify/{{.RunID}}" class="btn btn-ghost">Verify proof</a>
+
+
+thinking
+**Verifying runId presence**
+
+Confirmed runId is derived safely from element textContent and remains present; proceeding to rerun Go tests for validation.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 919ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 326ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	0.029s
+ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
-?   	noema/internal/verify	[no test files]
+ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
 file update:
-diff --git a/backend/internal/evaluate/gemini_eval.go b/backend/internal/evaluate/gemini_eval.go
-index 8d1d3e63fd48ebcaf31e0dae471124b0e85ca685..b440de2eef71bfd21bf7b291ae3a2924998ad61c
---- a/backend/internal/evaluate/gemini_eval.go
-+++ b/backend/internal/evaluate/gemini_eval.go
-@@ -40,7 +40,12 @@
+diff --git a/backend/web/static/results.js b/backend/web/static/results.js
+index cf359b476fb3ce1ba662d103051a416376f3ab9c..587a089927ed973144323f29e5ead2bc9003a9f3
+--- a/backend/web/static/results.js
++++ b/backend/web/static/results.js
+@@ -80,8 +80,17 @@
  
- 	sampleLimit := config.SampleItemsLimit()
- 	model := gemini.ModelName()
--	key := cacheKey(rawDataset, mustJSON(spec), model, sampleLimit)
-+	specJSON, err := jsonBytes(spec)
-+	if err != nil {
-+		log.Printf("gemini marshal spec: %v", err)
-+		return stubEvalOutput(enabled)
-+	}
-+	key := cacheKey(rawDataset, specJSON, model, sampleLimit)
- 	if cached, err := loadCache(runsDir, key); err == nil {
- 		if err := validateEvalOutput(cached.Output, enabled); err == nil {
- 			return cached.Output
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 1c178896e2b3b9091f07bd1e4ae5397c87ce4f9b..2a1ce76ddca85f88fe5ec497a0c9245f35546956
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -96,7 +96,17 @@
- 			status = "PASS"
- 		}
+   document.getElementById('results-body').style.display = 'block';
+   var statusEl = document.getElementById('results-status');
+-  var status = data.status || (data.public_output && data.public_output.overall_pass ? 'PASS' : 'FAIL') || '—';
+-  statusEl.className = 'results-status results-status-' + (status === 'PASS' ? 'pass' : 'fail');
++  var status = data.status;
++  if (status === true) status = 'PASS';
++  if (status === false) status = 'FAIL';
++  if (!status && data.public_output) {
++    status = data.public_output.overall_pass ? 'PASS' : 'FAIL';
++  }
++  status = status || '—';
++  var statusClass = 'unknown';
++  if (status === 'PASS') statusClass = 'pass';
++  if (status === 'FAIL') statusClass = 'fail';
++  statusEl.className = 'results-status results-status-' + statusClass;
+   statusEl.textContent = status;
  
--		commitment := zk.CommitmentSHA256([]byte("spec"), mustJSON(spec), []byte("eval"), mustJSON(evalOut))
-+		specJSON, err := jsonBytes(spec)
-+		if err != nil {
-+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode spec"})
-+			return
-+		}
-+		evalJSON, err := jsonBytes(evalOut)
-+		if err != nil {
-+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode evaluation output"})
-+			return
-+		}
-+		commitment := zk.CommitmentSHA256([]byte("spec"), specJSON, []byte("eval"), evalJSON)
- 		proof, err := zk.GenerateProof(zk.PublicInputs{
- 			PolicyThreshold: policyThreshold,
- 			MaxSeverity:     maxSeverity,
-@@ -221,10 +231,6 @@
- 	return out
+   var metaEl = document.getElementById('results-summary-meta');
+@@ -127,6 +136,13 @@
+     });
+   }
+ 
++  var copyRunId = document.getElementById('copy-run-id');
++  if (copyRunId) {
++    copyRunId.addEventListener('click', function() {
++      copyText(runId, copyRunId);
++    });
++  }
++
+   var copyProof = document.getElementById('copy-proof');
+   if (copyProof) {
+     copyProof.addEventListener('click', function() {
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 43533f4226e7f58e614b89ca453678979770a780..3ddf30086be9d99f6e7aa2e2f22912b7f9f162f0
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -778,6 +778,23 @@
+   flex-wrap: wrap;
  }
  
--func mustJSON(v any) []byte {
--	b, err := json.Marshal(v)
--	if err != nil {
--		return nil
--	}
--	return b
-+func jsonBytes(v any) ([]byte, error) {
-+	return json.Marshal(v)
++.results-runline {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.75rem;
++  flex-wrap: wrap;
++}
++
++.results-run-id {
++  display: inline-flex;
++  padding: 0.2rem 0.6rem;
++  border-radius: 999px;
++  border: 1px solid rgba(255, 255, 255, 0.12);
++  background: rgba(0, 0, 0, 0.35);
++  font-size: 0.85rem;
++  letter-spacing: 0.02em;
++}
++
+ .results-status {
+   padding: 0.65rem 1.2rem;
+   border-radius: 999px;
+@@ -799,6 +816,12 @@
+   border: 1px solid rgba(248, 113, 113, 0.4);
  }
+ 
++.results-status-unknown {
++  background: rgba(255, 255, 255, 0.08);
++  color: var(--text-muted);
++  border: 1px solid rgba(255, 255, 255, 0.16);
++}
++
+ .results-summary-meta {
+   color: var(--text-muted);
+   font-size: 0.9rem;
+diff --git a/backend/web/templates/app_results.html b/backend/web/templates/app_results.html
+index 3e1302324b7b9c39acc68c754c3714eebc8ddf69..599cf4c073c026caf3062098c6f8b19b770baa91
+--- a/backend/web/templates/app_results.html
++++ b/backend/web/templates/app_results.html
+@@ -16,7 +16,10 @@
+       <div class="results-header">
+         <div>
+           <h1 class="card-title">Evaluation results</h1>
+-          <p class="text-muted" id="results-run-id">Run ID: {{.RunID}}</p>
++          <div class="results-runline">
++            <p class="text-muted" id="results-run-id">Run ID: <span class="results-run-id">{{.RunID}}</span></p>
++            <button type="button" class="btn btn-ghost btn-sm" id="copy-run-id">Copy Run ID</button>
++          </div>
+         </div>
+         <div class="results-actions">
+           <a href="/verify/{{.RunID}}" class="btn btn-ghost">Verify proof</a>
 
 codex
-What you changed (short)
-- Made JSON marshaling for spec/eval output explicit and error-handled to avoid silent nil commitments or cache keys, with safe fallback in Gemini eval.
+What I changed
+- Added a copyable Run ID control and improved the run ID display on the results page.
+- Made results status handling resilient to unknown states with a neutral styling.
+
+Files touched
+- `web/templates/app_results.html`
+- `web/static/styles.css`
+- `web/static/results.js`
 
 Tests run
 - `go test ./...`
+
+If you want another pass, I can target the verify page next.
 file update:
-diff --git a/backend/internal/evaluate/gemini_eval.go b/backend/internal/evaluate/gemini_eval.go
-index 8d1d3e63fd48ebcaf31e0dae471124b0e85ca685..b440de2eef71bfd21bf7b291ae3a2924998ad61c
---- a/backend/internal/evaluate/gemini_eval.go
-+++ b/backend/internal/evaluate/gemini_eval.go
-@@ -40,7 +40,12 @@
+diff --git a/backend/web/static/results.js b/backend/web/static/results.js
+index cf359b476fb3ce1ba662d103051a416376f3ab9c..587a089927ed973144323f29e5ead2bc9003a9f3
+--- a/backend/web/static/results.js
++++ b/backend/web/static/results.js
+@@ -80,8 +80,17 @@
  
- 	sampleLimit := config.SampleItemsLimit()
- 	model := gemini.ModelName()
--	key := cacheKey(rawDataset, mustJSON(spec), model, sampleLimit)
-+	specJSON, err := jsonBytes(spec)
-+	if err != nil {
-+		log.Printf("gemini marshal spec: %v", err)
-+		return stubEvalOutput(enabled)
-+	}
-+	key := cacheKey(rawDataset, specJSON, model, sampleLimit)
- 	if cached, err := loadCache(runsDir, key); err == nil {
- 		if err := validateEvalOutput(cached.Output, enabled); err == nil {
- 			return cached.Output
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 1c178896e2b3b9091f07bd1e4ae5397c87ce4f9b..2a1ce76ddca85f88fe5ec497a0c9245f35546956
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -96,7 +96,17 @@
- 			status = "PASS"
- 		}
+   document.getElementById('results-body').style.display = 'block';
+   var statusEl = document.getElementById('results-status');
+-  var status = data.status || (data.public_output && data.public_output.overall_pass ? 'PASS' : 'FAIL') || '—';
+-  statusEl.className = 'results-status results-status-' + (status === 'PASS' ? 'pass' : 'fail');
++  var status = data.status;
++  if (status === true) status = 'PASS';
++  if (status === false) status = 'FAIL';
++  if (!status && data.public_output) {
++    status = data.public_output.overall_pass ? 'PASS' : 'FAIL';
++  }
++  status = status || '—';
++  var statusClass = 'unknown';
++  if (status === 'PASS') statusClass = 'pass';
++  if (status === 'FAIL') statusClass = 'fail';
++  statusEl.className = 'results-status results-status-' + statusClass;
+   statusEl.textContent = status;
  
--		commitment := zk.CommitmentSHA256([]byte("spec"), mustJSON(spec), []byte("eval"), mustJSON(evalOut))
-+		specJSON, err := jsonBytes(spec)
-+		if err != nil {
-+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode spec"})
-+			return
-+		}
-+		evalJSON, err := jsonBytes(evalOut)
-+		if err != nil {
-+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode evaluation output"})
-+			return
-+		}
-+		commitment := zk.CommitmentSHA256([]byte("spec"), specJSON, []byte("eval"), evalJSON)
- 		proof, err := zk.GenerateProof(zk.PublicInputs{
- 			PolicyThreshold: policyThreshold,
- 			MaxSeverity:     maxSeverity,
-@@ -221,10 +231,6 @@
- 	return out
+   var metaEl = document.getElementById('results-summary-meta');
+@@ -127,6 +136,13 @@
+     });
+   }
+ 
++  var copyRunId = document.getElementById('copy-run-id');
++  if (copyRunId) {
++    copyRunId.addEventListener('click', function() {
++      copyText(runId, copyRunId);
++    });
++  }
++
+   var copyProof = document.getElementById('copy-proof');
+   if (copyProof) {
+     copyProof.addEventListener('click', function() {
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 43533f4226e7f58e614b89ca453678979770a780..3ddf30086be9d99f6e7aa2e2f22912b7f9f162f0
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -778,6 +778,23 @@
+   flex-wrap: wrap;
  }
  
--func mustJSON(v any) []byte {
--	b, err := json.Marshal(v)
--	if err != nil {
--		return nil
--	}
--	return b
-+func jsonBytes(v any) ([]byte, error) {
-+	return json.Marshal(v)
++.results-runline {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.75rem;
++  flex-wrap: wrap;
++}
++
++.results-run-id {
++  display: inline-flex;
++  padding: 0.2rem 0.6rem;
++  border-radius: 999px;
++  border: 1px solid rgba(255, 255, 255, 0.12);
++  background: rgba(0, 0, 0, 0.35);
++  font-size: 0.85rem;
++  letter-spacing: 0.02em;
++}
++
+ .results-status {
+   padding: 0.65rem 1.2rem;
+   border-radius: 999px;
+@@ -799,6 +816,12 @@
+   border: 1px solid rgba(248, 113, 113, 0.4);
  }
+ 
++.results-status-unknown {
++  background: rgba(255, 255, 255, 0.08);
++  color: var(--text-muted);
++  border: 1px solid rgba(255, 255, 255, 0.16);
++}
++
+ .results-summary-meta {
+   color: var(--text-muted);
+   font-size: 0.9rem;
+diff --git a/backend/web/templates/app_results.html b/backend/web/templates/app_results.html
+index 3e1302324b7b9c39acc68c754c3714eebc8ddf69..599cf4c073c026caf3062098c6f8b19b770baa91
+--- a/backend/web/templates/app_results.html
++++ b/backend/web/templates/app_results.html
+@@ -16,7 +16,10 @@
+       <div class="results-header">
+         <div>
+           <h1 class="card-title">Evaluation results</h1>
+-          <p class="text-muted" id="results-run-id">Run ID: {{.RunID}}</p>
++          <div class="results-runline">
++            <p class="text-muted" id="results-run-id">Run ID: <span class="results-run-id">{{.RunID}}</span></p>
++            <button type="button" class="btn btn-ghost btn-sm" id="copy-run-id">Copy Run ID</button>
++          </div>
+         </div>
+         <div class="results-actions">
+           <a href="/verify/{{.RunID}}" class="btn btn-ghost">Verify proof</a>
 
 tokens used
-14,288
-What you changed (short)
-- Made JSON marshaling for spec/eval output explicit and error-handled to avoid silent nil commitments or cache keys, with safe fallback in Gemini eval.
+23,099
+What I changed
+- Added a copyable Run ID control and improved the run ID display on the results page.
+- Made results status handling resilient to unknown states with a neutral styling.
+
+Files touched
+- `web/templates/app_results.html`
+- `web/static/styles.css`
+- `web/static/results.js`
 
 Tests run
 - `go test ./...`
+
+If you want another pass, I can target the verify page next.
