@@ -29,8 +29,14 @@ func UploadGet(c *gin.Context, tmpl string, data UploadData) {
 
 // UploadPost handles POST /upload (multipart form "file"). Saves to uploadsDir with a generated filename.
 func UploadPost(c *gin.Context, uploadTmpl string, uploadsDir string) {
+	const multipartOverhead = 1 << 20 // allow small overhead for multipart headers
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
 	form, err := c.MultipartForm()
 	if err != nil {
+		if isBodyTooLarge(err) {
+			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
+			return
+		}
 		UploadGet(c, uploadTmpl, UploadData{Error: "Invalid form."})
 		return
 	}
@@ -96,4 +102,11 @@ func formatSize(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
+func isBodyTooLarge(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "request body too large")
 }

@@ -1,0 +1,546 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3c90-7d18-7c00-ae77-e05d2a752d31
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Running tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 101ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Planning targeted improvement**
+
+Tests pass, so now I'll use ripgrep to find TODOs or similar markers to identify one concise, meaningful improvement touching at most three files.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"TODO|FIXME|panic\\(|Assert\\(\" internal" in /Users/yani/Noema/backend exited 1 in 52ms:
+
+
+thinking
+**Checking for error handling**
+
+No matches found; planning to inspect code files to identify if error handling needs adding or improving.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
+cmd
+data
+go.mod
+go.sum
+internal
+main
+server
+web
+
+thinking
+**Inspecting improvement opportunities in internal/web**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "error" internal/web' in /Users/yani/Noema/backend succeeded in 51ms:
+internal/web/auth.go:25:// On success: set cookie, redirect 303 to /app. On failure: re-render index with inline error.
+internal/web/upload.go:48:		UploadGet(c, uploadTmpl, UploadData{Error: "Server error saving file."})
+internal/web/upload.go:75:		UploadGet(c, uploadTmpl, UploadData{Error: "Server error saving file."})
+internal/web/upload.go:81:		UploadGet(c, uploadTmpl, UploadData{Error: "Server error saving file."})
+
+thinking
+**Planning validation by inspecting upload handler**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/web/upload.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package web
+
+import (
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+
+	"github.com/gin-gonic/gin"
+)
+
+// UploadData is passed to the upload template.
+type UploadData struct {
+	Error    string
+	Success  bool
+
+
+thinking
+**Planning request size limit enforcement**
+
+I'm considering wrapping the request body with a max size limiter before parsing multipart form data in the upload handler to prevent large uploads from exhausting memory and handle oversize errors gracefully.
+thinking
+**Refining max upload size enforcement**
+
+I'm preparing to wrap the request body with MaxBytesReader using a slight overhead above the max file size to accommodate multipart metadata, then check MultipartForm errors precisely for body-too-large cases and verify actual file size afterward to enforce the strict limit cleanly.
+file update
+M /Users/yani/Noema/backend/internal/web/upload.go
+@@ -3,2 +3,3 @@
+ import (
++	"errors"
+ 	"fmt"
+@@ -31,4 +32,10 @@
+ func UploadPost(c *gin.Context, uploadTmpl string, uploadsDir string) {
++	const multipartOverhead = 1 << 20 // allow small overhead for multipart headers
++	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
+ 	form, err := c.MultipartForm()
+ 	if err != nil {
++		if errors.Is(err, http.ErrBodyTooLarge) {
++			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
++			return
++		}
+ 		UploadGet(c, uploadTmpl, UploadData{Error: "Invalid form."})
+apply_patch(auto_approved=true) exited 0 in 31ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/web/upload.go
+file update:
+diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
+index b1a40a0c6e36dcb57fce145e1ee2e69343075f50..bbf609edf0ca89954f24a165768fe59099d49854
+--- a/backend/internal/web/upload.go
++++ b/backend/internal/web/upload.go
+@@ -1,6 +1,7 @@
+ package web
+ 
+ import (
++	"errors"
+ 	"fmt"
+ 	"io"
+ 	"net/http"
+@@ -29,8 +30,14 @@
+ 
+ // UploadPost handles POST /upload (multipart form "file"). Saves to uploadsDir with a generated filename.
+ func UploadPost(c *gin.Context, uploadTmpl string, uploadsDir string) {
++	const multipartOverhead = 1 << 20 // allow small overhead for multipart headers
++	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
+ 	form, err := c.MultipartForm()
+ 	if err != nil {
++		if errors.Is(err, http.ErrBodyTooLarge) {
++			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
++			return
++		}
+ 		UploadGet(c, uploadTmpl, UploadData{Error: "Invalid form."})
+ 		return
+ 	}
+
+file update:
+diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
+index b1a40a0c6e36dcb57fce145e1ee2e69343075f50..bbf609edf0ca89954f24a165768fe59099d49854
+--- a/backend/internal/web/upload.go
++++ b/backend/internal/web/upload.go
+@@ -1,6 +1,7 @@
+ package web
+ 
+ import (
++	"errors"
+ 	"fmt"
+ 	"io"
+ 	"net/http"
+@@ -29,8 +30,14 @@
+ 
+ // UploadPost handles POST /upload (multipart form "file"). Saves to uploadsDir with a generated filename.
+ func UploadPost(c *gin.Context, uploadTmpl string, uploadsDir string) {
++	const multipartOverhead = 1 << 20 // allow small overhead for multipart headers
++	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
+ 	form, err := c.MultipartForm()
+ 	if err != nil {
++		if errors.Is(err, http.ErrBodyTooLarge) {
++			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
++			return
++		}
+ 		UploadGet(c, uploadTmpl, UploadData{Error: "Invalid form."})
+ 		return
+ 	}
+
+
+thinking
+**Running tests again**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend exited 1 in 103ms:
+# noema/internal/web
+internal/web/upload.go:37:26: undefined: http.ErrBodyTooLarge
+FAIL	noema/cmd/server [build failed]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+FAIL	noema/internal/web [build failed]
+ok  	noema/internal/zk	(cached)
+FAIL
+file update:
+diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
+index b1a40a0c6e36dcb57fce145e1ee2e69343075f50..bbf609edf0ca89954f24a165768fe59099d49854
+--- a/backend/internal/web/upload.go
++++ b/backend/internal/web/upload.go
+@@ -1,6 +1,7 @@
+ package web
+ 
+ import (
++	"errors"
+ 	"fmt"
+ 	"io"
+ 	"net/http"
+@@ -29,8 +30,14 @@
+ 
+ // UploadPost handles POST /upload (multipart form "file"). Saves to uploadsDir with a generated filename.
+ func UploadPost(c *gin.Context, uploadTmpl string, uploadsDir string) {
++	const multipartOverhead = 1 << 20 // allow small overhead for multipart headers
++	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
+ 	form, err := c.MultipartForm()
+ 	if err != nil {
++		if errors.Is(err, http.ErrBodyTooLarge) {
++			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
++			return
++		}
+ 		UploadGet(c, uploadTmpl, UploadData{Error: "Invalid form."})
+ 		return
+ 	}
+
+
+thinking
+**Replacing unavailable error check with string match**
+
+The code will remove use of `http.ErrBodyTooLarge` for compatibility and instead check error messages with a helper function using a string contains check for "request body too large".
+file update
+M /Users/yani/Noema/backend/internal/web/upload.go
+@@ -36,3 +36,3 @@
+ 	if err != nil {
+-		if errors.Is(err, http.ErrBodyTooLarge) {
++		if isBodyTooLarge(err) {
+ 			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
+@@ -106 +106,11 @@
+ }
++
++func isBodyTooLarge(err error) bool {
++	if err == nil {
++		return false
++	}
++	if errors.Is(err, http.ErrContentLength) {
++		return false
++	}
++	return strings.Contains(err.Error(), "request body too large")
++}
+apply_patch(auto_approved=true) exited 0 in 39ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/web/upload.go
+file update:
+diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
+index b1a40a0c6e36dcb57fce145e1ee2e69343075f50..3adbc80b396a08dac3f597351efc719fb7df7387
+--- a/backend/internal/web/upload.go
++++ b/backend/internal/web/upload.go
+@@ -1,6 +1,7 @@
+ package web
+ 
+ import (
++	"errors"
+ 	"fmt"
+ 	"io"
+ 	"net/http"
+@@ -29,8 +30,14 @@
+ 
+ // UploadPost handles POST /upload (multipart form "file"). Saves to uploadsDir with a generated filename.
+ func UploadPost(c *gin.Context, uploadTmpl string, uploadsDir string) {
++	const multipartOverhead = 1 << 20 // allow small overhead for multipart headers
++	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
+ 	form, err := c.MultipartForm()
+ 	if err != nil {
++		if isBodyTooLarge(err) {
++			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
++			return
++		}
+ 		UploadGet(c, uploadTmpl, UploadData{Error: "Invalid form."})
+ 		return
+ 	}
+@@ -97,3 +104,13 @@
+ 	}
+ 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
+ }
++
++func isBodyTooLarge(err error) bool {
++	if err == nil {
++		return false
++	}
++	if errors.Is(err, http.ErrContentLength) {
++		return false
++	}
++	return strings.Contains(err.Error(), "request body too large")
++}
+
+file update:
+diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
+index b1a40a0c6e36dcb57fce145e1ee2e69343075f50..3adbc80b396a08dac3f597351efc719fb7df7387
+--- a/backend/internal/web/upload.go
++++ b/backend/internal/web/upload.go
+@@ -1,6 +1,7 @@
+ package web
+ 
+ import (
++	"errors"
+ 	"fmt"
+ 	"io"
+ 	"net/http"
+@@ -29,8 +30,14 @@
+ 
+ // UploadPost handles POST /upload (multipart form "file"). Saves to uploadsDir with a generated filename.
+ func UploadPost(c *gin.Context, uploadTmpl string, uploadsDir string) {
++	const multipartOverhead = 1 << 20 // allow small overhead for multipart headers
++	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
+ 	form, err := c.MultipartForm()
+ 	if err != nil {
++		if isBodyTooLarge(err) {
++			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
++			return
++		}
+ 		UploadGet(c, uploadTmpl, UploadData{Error: "Invalid form."})
+ 		return
+ 	}
+@@ -97,3 +104,13 @@
+ 	}
+ 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
+ }
++
++func isBodyTooLarge(err error) bool {
++	if err == nil {
++		return false
++	}
++	if errors.Is(err, http.ErrContentLength) {
++		return false
++	}
++	return strings.Contains(err.Error(), "request body too large")
++}
+
+
+thinking
+**Removing invalid error check and simplifying**
+
+Removed the nonexistent `http.ErrContentLength` check and replaced it with a simple string containment check for "request body too large." Also cleaned up imports by removing the unused errors package.
+file update
+M /Users/yani/Noema/backend/internal/web/upload.go
+@@ -3,3 +3,2 @@
+ import (
+-	"errors"
+ 	"fmt"
+@@ -109,5 +108,2 @@
+ 	if err == nil {
+-		return false
+-	}
+-	if errors.Is(err, http.ErrContentLength) {
+ 		return false
+apply_patch(auto_approved=true) exited 0 in 39ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/web/upload.go
+file update:
+diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
+index b1a40a0c6e36dcb57fce145e1ee2e69343075f50..370ad45c6877ac5f4a28aa180184bdadf32bafad
+--- a/backend/internal/web/upload.go
++++ b/backend/internal/web/upload.go
+@@ -29,8 +29,14 @@
+ 
+ // UploadPost handles POST /upload (multipart form "file"). Saves to uploadsDir with a generated filename.
+ func UploadPost(c *gin.Context, uploadTmpl string, uploadsDir string) {
++	const multipartOverhead = 1 << 20 // allow small overhead for multipart headers
++	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
+ 	form, err := c.MultipartForm()
+ 	if err != nil {
++		if isBodyTooLarge(err) {
++			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
++			return
++		}
+ 		UploadGet(c, uploadTmpl, UploadData{Error: "Invalid form."})
+ 		return
+ 	}
+@@ -97,3 +103,10 @@
+ 	}
+ 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
+ }
++
++func isBodyTooLarge(err error) bool {
++	if err == nil {
++		return false
++	}
++	return strings.Contains(err.Error(), "request body too large")
++}
+
+file update:
+diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
+index b1a40a0c6e36dcb57fce145e1ee2e69343075f50..370ad45c6877ac5f4a28aa180184bdadf32bafad
+--- a/backend/internal/web/upload.go
++++ b/backend/internal/web/upload.go
+@@ -29,8 +29,14 @@
+ 
+ // UploadPost handles POST /upload (multipart form "file"). Saves to uploadsDir with a generated filename.
+ func UploadPost(c *gin.Context, uploadTmpl string, uploadsDir string) {
++	const multipartOverhead = 1 << 20 // allow small overhead for multipart headers
++	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
+ 	form, err := c.MultipartForm()
+ 	if err != nil {
++		if isBodyTooLarge(err) {
++			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
++			return
++		}
+ 		UploadGet(c, uploadTmpl, UploadData{Error: "Invalid form."})
+ 		return
+ 	}
+@@ -97,3 +103,10 @@
+ 	}
+ 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
+ }
++
++func isBodyTooLarge(err error) bool {
++	if err == nil {
++		return false
++	}
++	return strings.Contains(err.Error(), "request body too large")
++}
+
+
+thinking
+**Starting test implementation**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 125ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
+index b1a40a0c6e36dcb57fce145e1ee2e69343075f50..370ad45c6877ac5f4a28aa180184bdadf32bafad
+--- a/backend/internal/web/upload.go
++++ b/backend/internal/web/upload.go
+@@ -29,8 +29,14 @@
+ 
+ // UploadPost handles POST /upload (multipart form "file"). Saves to uploadsDir with a generated filename.
+ func UploadPost(c *gin.Context, uploadTmpl string, uploadsDir string) {
++	const multipartOverhead = 1 << 20 // allow small overhead for multipart headers
++	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
+ 	form, err := c.MultipartForm()
+ 	if err != nil {
++		if isBodyTooLarge(err) {
++			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
++			return
++		}
+ 		UploadGet(c, uploadTmpl, UploadData{Error: "Invalid form."})
+ 		return
+ 	}
+@@ -97,3 +103,10 @@
+ 	}
+ 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
+ }
++
++func isBodyTooLarge(err error) bool {
++	if err == nil {
++		return false
++	}
++	return strings.Contains(err.Error(), "request body too large")
++}
+
+
+thinking
+**Summarizing changes and tests**
+
+I'm preparing a summary that highlights the implemented changes along with the added tests, ensuring the explanation is clear and free of nested bullet points.
+codex
+What I changed (short)
+- Added a MaxBytesReader guard for uploads and a dedicated “file too large” path before multipart parsing in `internal/web/upload.go`.
+
+Tests run
+- `go test ./...`
+
+If you want, I can add a small unit test for the “too large” path next.
+file update:
+diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
+index b1a40a0c6e36dcb57fce145e1ee2e69343075f50..370ad45c6877ac5f4a28aa180184bdadf32bafad
+--- a/backend/internal/web/upload.go
++++ b/backend/internal/web/upload.go
+@@ -29,8 +29,14 @@
+ 
+ // UploadPost handles POST /upload (multipart form "file"). Saves to uploadsDir with a generated filename.
+ func UploadPost(c *gin.Context, uploadTmpl string, uploadsDir string) {
++	const multipartOverhead = 1 << 20 // allow small overhead for multipart headers
++	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
+ 	form, err := c.MultipartForm()
+ 	if err != nil {
++		if isBodyTooLarge(err) {
++			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
++			return
++		}
+ 		UploadGet(c, uploadTmpl, UploadData{Error: "Invalid form."})
+ 		return
+ 	}
+@@ -97,3 +103,10 @@
+ 	}
+ 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
+ }
++
++func isBodyTooLarge(err error) bool {
++	if err == nil {
++		return false
++	}
++	return strings.Contains(err.Error(), "request body too large")
++}
+
+tokens used
+11,263
+What I changed (short)
+- Added a MaxBytesReader guard for uploads and a dedicated “file too large” path before multipart parsing in `internal/web/upload.go`.
+
+Tests run
+- `go test ./...`
+
+If you want, I can add a small unit test for the “too large” path next.
