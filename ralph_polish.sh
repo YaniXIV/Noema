@@ -4,6 +4,7 @@
 # - Codex never commits; bash commits
 # - Retries on Codex crashes / arg weirdness
 # - Enforces go test; auto-reverts on failure
+# - Streams Codex output live AND logs it (tee) + preserves Codex exit code
 set -u  # don't use -e; we want to survive errors
 
 ROOT="$(pwd)"
@@ -36,8 +37,9 @@ Hard rules:
 - Keep changes small: max 3 files per iteration.
 - No cosmetic-only edits.
 - No new dependencies unless absolutely necessary.
+- keep all the same ui functionality, the end user should be able to do the same stuff but the experiance and design should be better.
 
-Goal: continuously improve production quality.
+Goal: continuously improve production quality. continuously improve front end quality and polish.
 
 Iteration:
 1) Run: cd backend && go test ./...
@@ -47,7 +49,7 @@ Iteration:
 Pick the highest-value improvement:
 A) Reliability/correctness: validation, error handling, run persistence, verify robustness
 B) Tests: add/strengthen tests for the change you made
-C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+C) upgrading the user interface so that it looks better.
 D) Maintainability: reduce duplication with tiny refactors
 E) UX: wizard/results/verify clarity (small, safe changes)
 F) Docs: README/DEPLOYMENT polish
@@ -117,7 +119,7 @@ while true; do
 
   iter=$((iter + 1))
   logfile="$(printf "%s/iter_%04d.txt" "$LOGDIR" "$iter")"
-  log "iter $iter: starting"
+  log "iter $iter: starting (log: $logfile)"
 
   # Ensure we begin from a passing baseline; if not, revert to last commit.
   if ! run_tests >/dev/null 2>&1; then
@@ -131,13 +133,15 @@ while true; do
   success=0
   while (( attempt <= MAX_RETRIES )); do
     log "iter $iter: codex attempt $attempt"
+
+    # Stream output live AND capture it to logfile.
+    # IMPORTANT: with pipes, $? is tee's status; use PIPESTATUS[0] for codex.
     (
       cd "$BACKEND"
-      # Non-interactive, no questions. Designed for automation. :contentReference[oaicite:1]{index=1}
       codex exec --full-auto "$(cat "$PROMPT_FILE")"
-    ) >"$logfile" 2>&1
+    ) 2>&1 | tee "$logfile"
 
-    rc=$?
+    rc=${PIPESTATUS[0]}
     if (( rc == 0 )); then
       success=1
       break

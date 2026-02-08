@@ -19,6 +19,14 @@
           <input type="file" name="file" id="file-input" accept="*">
           <span id="zone-text">Drag and drop a file here, or click to choose</span>
         </label>
+        <div class="upload-details" id="upload-details" aria-live="polite" style="display:none;">
+          <div class="upload-file">
+            <span class="upload-file-name" id="upload-file-name"></span>
+            <span class="upload-file-size" id="upload-file-size"></span>
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm" id="clear-file">Clear</button>
+        </div>
+        <p class="form-hint upload-hint" id="upload-hint">CSV, JSON, or text files recommended.</p>
         <button type="submit" class="btn" id="submit-btn" style="margin-top: 1rem;" disabled>Upload</button>
       </form>
       {{if .Error}}

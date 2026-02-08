@@ -385,6 +385,41 @@ pre,
   color: var(--error);
 }
 
+.upload-details {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.85rem;
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.upload-file {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.upload-file-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-file-size {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.upload-hint {
+  margin-top: 0.65rem;
+}
+
 /* ===== Wizard ===== */
 .main-wizard {
   align-items: flex-start;

@@ -7,7 +7,7 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3c7a-79e1-7693-a238-2d745c25e1ef
+session id: 019c3ebf-d931-7461-8b23-a7f16cf5723b
 --------
 user
 You are an autonomous coding agent polishing the Noema repository.
@@ -18,8 +18,9 @@ Hard rules:
 - Keep changes small: max 3 files per iteration.
 - No cosmetic-only edits.
 - No new dependencies unless absolutely necessary.
+- keep all the same ui functionality, the end user should be able to do the same stuff but the experiance and design should be better.
 
-Goal: continuously improve production quality.
+Goal: continuously improve production quality. continuously improve front end quality and polish.
 
 Iteration:
 1) Run: cd backend && go test ./...
@@ -29,7 +30,7 @@ Iteration:
 Pick the highest-value improvement:
 A) Reliability/correctness: validation, error handling, run persistence, verify robustness
 B) Tests: add/strengthen tests for the change you made
-C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+C) upgrading the user interface so that it looks better.
 D) Maintainability: reduce duplication with tiny refactors
 E) UX: wizard/results/verify clarity (small, safe changes)
 F) Docs: README/DEPLOYMENT polish
@@ -41,376 +42,1107 @@ Finish with:
 mcp startup: no servers
 
 thinking
-**Running Go tests**
+**Running tests**
+
+I'm preparing to run `go test` to verify the current codebase.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 94ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 197ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
 ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
-?   	noema/internal/session	[no test files]
-?   	noema/internal/verify	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
 
 thinking
-**Searching TODOs for improvements**
+**Listing frontend files**
 
-I'm running searches for TODOs or potential bugs to identify meaningful improvement areas, focusing on input validation or error handling to boost reliability.
+I'm listing the frontend-related files to identify a concise, meaningful UI improvement limited to three files.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "TODO|FIXME|panic" internal -n' in /Users/yani/Noema/backend exited 1 in 52ms:
-
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
+cmd
+data
+go.mod
+go.sum
+internal
+main
+web
 
 thinking
-**Searching for session handling improvements**
+**Identifying frontend technology**
+
+The frontend is likely implemented as a web application, so next I'll list web-related files to confirm the stack.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "_ =|TODO|error" internal -n' in /Users/yani/Noema/backend succeeded in 52ms:
-internal/evaluate/prompt.go:160:func marshalSampledDataset(ds Dataset) ([]byte, error) {
-internal/evaluate/parse.go:11:func parseSpec(form *multipart.Form) (Spec, error) {
-internal/evaluate/parse.go:23:func validateSpec(spec Spec) error {
-internal/evaluate/parse.go:40:func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.FileHeader, error) {
-internal/evaluate/parse.go:65:func validateDatasetJSON(fh *multipart.FileHeader) error {
-internal/evaluate/output.go:22:func parseEvalOutput(raw string) (EvalOutput, error) {
-internal/evaluate/output.go:49:func validateEvalOutput(out EvalOutput, enabled map[string]ConstraintRule) error {
-internal/evaluate/handler_test.go:20:		t.Fatalf("enabledConstraints error: %v", err)
-internal/evaluate/handler_test.go:26:		t.Fatalf("parseEvalOutputOptional error: %v", err)
-internal/evaluate/handler_test.go:63:		t.Fatalf("enabledConstraints error: %v", err)
-internal/evaluate/handler_test.go:82:		t.Fatalf("parseEvalOutputOptional error: %v", err)
-internal/evaluate/handler_test.go:101:		t.Fatalf("enabledConstraints error: %v", err)
-internal/evaluate/handler_test.go:118:		t.Fatalf("expected validation error for unknown constraint")
-internal/evaluate/dataset.go:22:func readDatasetFile(fh *multipart.FileHeader) ([]byte, Dataset, error) {
-internal/evaluate/storage.go:20:func ensureRunDir(path string) error {
-internal/evaluate/storage.go:24:func saveRunFiles(runPath string, dataset *multipart.FileHeader, images []*multipart.FileHeader) error {
-internal/evaluate/storage.go:41:func saveUpload(fh *multipart.FileHeader, dst string) error {
-internal/evaluate/storage.go:56:func saveJSON(path string, v any) error {
-internal/evaluate/storage.go:75:func updateRunsIndex(runsDir string, limit int, entry RunIndexEntry) error {
-internal/evaluate/storage.go:82:		_ = json.Unmarshal(b, &entries)
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web' in /Users/yani/Noema/backend succeeded in 52ms:
+static
+templates
 
 thinking
-**Noticing silent error risk in storage update**
-
-I see that ignoring unmarshal errors in storage updateRunsIndex could cause silent failures, so I plan to check the file and add error handling to avoid this issue.
+**Inspecting template files**
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,140p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/templates' in /Users/yani/Noema/backend succeeded in 52ms:
+app.html
+app_new.html
+app_results.html
+index.html
+partial_header_app.html
+partial_header_public.html
+partial_header_upload.html
+partial_orb.html
+upload.html
+verify.html
+verify_results.html
 
-import (
-	"crypto/rand"
-	"encoding/json"
-	"fmt"
-	"io"
-	"math/big"
-	"mime/multipart"
-	"os"
-	"path/filepath"
-	"time"
-)
+thinking
+**Identifying UI improvement need**
 
-func genRunID() string {
-	n, _ := rand.Int(rand.Reader, big.NewInt(1e9))
-	return fmt.Sprintf("run_%d_%d", time.Now().UnixMilli(), n.Int64())
+Noticing the UI requires enhancement, likely involving updates to static CSS for the static list component.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/static' in /Users/yani/Noema/backend succeeded in 51ms:
+app.js
+constraints.js
+results.js
+styles.css
+upload.js
+verify.js
+wizard.js
+
+thinking
+**Goal-setting for UI improvements**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap');
+
+:root {
+  --bg: #05060a;
+  --bg-card: rgba(9, 12, 18, 0.9);
+  --text: #f4f6fb;
+  --text-muted: #9aa3b2;
+  --accent: #45d4ff;
+  --accent-strong: #2c7bff;
+  --accent-glow: rgba(69, 212, 255, 0.35);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(69, 212, 255, 0.4);
+  --error: #f87171;
+  --success: #22c55e;
+  --warning: #fbbf24;
+  --shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
 }
 
-func ensureRunDir(path string) error {
-
-thinking
-**Considering error handling improvements**
-
-I'm evaluating adding fallback for rand errors in run ID generation to prevent panics and handling unmarshal errors in run index to avoid silent overwrites by renaming corrupted files; balancing robustness without breaking request flow since errors might propagate in handlers.
+*,
+*::before,
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '240,520p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+}
 
-import (
-	"encoding/json"
-	"log"
-	"mime/multipart"
-	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
-	"time"
+.error {
+  margin: 1rem 0 0;
+  font-size: 0.9rem;
+  color: var(--error);
+}
 
-	"noema/internal/config"
-	"noema/internal/zk"
+/* ===== Buttons ===== */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.7rem 1.4rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '520,1040p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+}
 
-	"github.com/gin-gonic/gin"
-)
+.constraint-item:first-of-type { border-top: none; }
 
-// EvaluateResponse is the JSON response for POST /api/evaluate.
-type EvaluateResponse struct {
+.constraint-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.85rem;
+  align-items: center;
+}
+
+.constraint-title {
+  font-weight: 500;
+  font-size: 0.95rem;
+}
+
+.constraint-subtitle {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
 
 
 thinking
-**Planning corrupted index handling**
+**Considering meaningful UI improvements**
 
-I'm deciding to improve resilience by detecting unmarshal failures on reading the runs index, renaming the corrupted file with a timestamped backup, logging and returning an error, but continuing with an empty index to keep the service running.
+I'm weighing options between adding loading indicators, sticky headers, better focus states, or more functional enhancements like "copy" actions or scrollable results to improve UX beyond cosmetics. Next, I'll verify potential impact and feasibility by inspecting existing templates and JS, prioritizing meaningful functional gains over purely visual tweaks.
 thinking
-**Refining corrupted index recovery**
+**Focusing on functional UX improvements**
 
-The plan is to rename the corrupted index file on unmarshal failure, log related errors without aborting, rebuild and save a new empty index, and finally return any corruption or save errors—ensuring the index updates despite corruption.
+I'm considering making action bars sticky on scroll to enhance usability without changing core functionality, plus subtle improvements like stronger dragover effects. Next, I'll inspect templates for meaningful ways to improve structural or behavioral UX beyond visuals.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' web/templates/app.html" in /Users/yani/Noema/backend succeeded in 51ms:
+{{define "app"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Dashboard</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_app" .}}
+
+  <main class="main main-dashboard">
+    {{template "orb" .}}
+    <div class="dashboard-content">
+      <section class="card dashboard-hero">
+        <div class="card-kicker">Dashboard</div>
+        <h1 class="card-title">Evaluations</h1>
+        <p class="card-text">Run policy evaluations on your datasets and publish verifiable results.</p>
+        <div class="form-actions">
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' web/templates/app_results.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "app_results"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Results</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body data-run-id="{{.RunID}}">
+  {{template "header_app" .}}
+
+  <main class="main main-results">
+    {{template "orb" .}}
+    <div class="card results-card">
+      <div class="results-header">
+        <div>
+          <h1 class="card-title">Evaluation results</h1>
+          <p class="text-muted" id="results-run-id">Run ID: {{.RunID}}</p>
+        </div>
+
+thinking
+**Considering adding copy button feedback**
+
+I'm planning to check results.js to see how the "Copy" button is implemented and whether I can add JavaScript feedback for better user experience.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' web/static/results.js" in /Users/yani/Noema/backend succeeded in 51ms:
+(function() {
+  var runId = document.body.getAttribute('data-run-id') || document.getElementById('results-run-id').textContent.replace('Run ID: ', '').trim();
+  var key = 'noema_run_' + runId;
+  var data;
+  try {
+    var raw = localStorage.getItem(key);
+    data = raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    data = null;
+  }
+
+  function copyText(text, button) {
+    if (!text) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function() {
+        if (button) showCopied(button);
+      });
+    } else {
+      var temp = document.createElement('textarea');
+      temp.value = text;
+
+thinking
+**Considering UX improvements**
+
+I'm weighing adding copy-to-clipboard feedback, better handling for empty results, and more helpful messaging when runs aren't found. Next, I'll review upload.js to explore previewing file name and size during upload.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' web/static/upload.js" in /Users/yani/Noema/backend succeeded in 52ms:
+(function() {
+  var input = document.getElementById('file-input');
+  var zone = document.getElementById('drop-zone');
+  var zoneText = document.getElementById('zone-text');
+  var submitBtn = document.getElementById('submit-btn');
+
+  function updateZone() {
+    if (input.files && input.files.length) {
+      zoneText.textContent = input.files[0].name;
+      submitBtn.disabled = false;
+    } else {
+      zoneText.textContent = 'Drag and drop a file here, or click to choose';
+      submitBtn.disabled = true;
+    }
+  }
+
+  input.addEventListener('change', updateZone);
+
+  zone.addEventListener('dragover', function(e) {
+    e.preventDefault();
+
+thinking
+**Considering UI improvements**
+
+I'm thinking about adding file size display and a clear remove option for better UX, which would need HTML changes; also planning to check if the verify page has filters in its template for potential enhancements.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' web/templates/verify.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "verify"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Verify</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_public" .}}
+
+  <main class="main main-verify">
+    {{template "orb" .}}
+    <div class="card verify-card">
+      <div class="verify-header">
+        <div>
+          <div class="card-kicker">Public</div>
+          <h1 class="card-title">Public verification</h1>
+          <p class="card-text">Verify recent proofs without revealing datasets. Recent runs are loaded from this browser.</p>
+
+thinking
+**Considering UX improvements for upload**
+
+I'm weighing adding a CTA for "New evaluation" when empty and a "clear filter" button but leaning toward enhancing upload UX by showing file size and type with a remove option, so I'll examine the upload template next.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' web/templates/upload.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "upload"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Upload</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_upload" .}}
+
+  <main class="main">
+    {{template "orb" .}}
+    <div class="card">
+      <h1 class="card-title">Upload</h1>
+      <form id="upload-form" action="/upload" method="post" enctype="multipart/form-data">
+        <label class="upload-zone" for="file-input" id="drop-zone">
+          <input type="file" name="file" id="file-input" accept="*">
+          <span id="zone-text">Drag and drop a file here, or click to choose</span>
+
+
+thinking
+**Planning file upload preview**
+
+Planning to enhance upload UX by adding a pre-submit preview showing file name and size with a clear button to reset input and disable submit, modifying upload.html, CSS, and upload.js without changing server logic. I'll add a dedicated area for file details, use existing button styling for the clear action, and consider accessibility with `aria-live` or `role="status"`.
+thinking
+**Designing upload details UI and behavior**
+
+Drafted a new upload details area below the label with file name, size, and a clear button styled via CSS for a clean, accessible look using flex layout and subtle coloring. Planning JS logic to show these details on file selection, enable submit, update drop zone text, and clear input on clear button click with a helper to format file size, plus updates to three files.
 file update
-M /Users/yani/Noema/backend/internal/evaluate/storage.go
-@@ -11,2 +11,3 @@
- 	"path/filepath"
-+	"strconv"
- 	"time"
-@@ -80,4 +81,12 @@
- 	var entries []RunIndexEntry
-+	var corruptedErr error
- 	if b, err := os.ReadFile(indexPath); err == nil {
--		_ = json.Unmarshal(b, &entries)
-+		if err := json.Unmarshal(b, &entries); err != nil {
-+			backup := indexPath + ".corrupt-" + strconv.FormatInt(time.Now().UnixMilli(), 10)
-+			if renameErr := os.Rename(indexPath, backup); renameErr != nil {
-+				corruptedErr = fmt.Errorf("runs index corrupted; failed to archive: %w", renameErr)
-+			} else {
-+				corruptedErr = fmt.Errorf("runs index corrupted; archived as %s", backup)
-+			}
-+		}
- 	}
-@@ -87,3 +96,6 @@
- 	}
--	return saveJSON(indexPath, entries)
-+	if err := saveJSON(indexPath, entries); err != nil {
-+		return err
-+	}
-+	return corruptedErr
- }
-apply_patch(auto_approved=true) exited 0 in 30ms:
+M /Users/yani/Noema/backend/web/templates/upload.html
+@@ -21,2 +21,10 @@
+         </label>
++        <div class="upload-details" id="upload-details" aria-live="polite" style="display:none;">
++          <div class="upload-file">
++            <span class="upload-file-name" id="upload-file-name"></span>
++            <span class="upload-file-size" id="upload-file-size"></span>
++          </div>
++          <button type="button" class="btn btn-ghost btn-sm" id="clear-file">Clear</button>
++        </div>
++        <p class="form-hint upload-hint" id="upload-hint">CSV, JSON, or text files recommended.</p>
+         <button type="submit" class="btn" id="submit-btn" style="margin-top: 1rem;" disabled>Upload</button>
+apply_patch(auto_approved=true) exited 0 in 35ms:
 Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/storage.go
+M /Users/yani/Noema/backend/web/templates/upload.html
 file update:
-diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
-index 096ad91ac714526b95d087b61e4dbe6db253f741..feee4fa4267200936cb5a908180b9464719a6c55
---- a/backend/internal/evaluate/storage.go
-+++ b/backend/internal/evaluate/storage.go
-@@ -9,6 +9,7 @@
- 	"mime/multipart"
- 	"os"
- 	"path/filepath"
-+	"strconv"
- 	"time"
- )
- 
-@@ -78,12 +79,23 @@
- 	}
- 	indexPath := filepath.Join(runsDir, "index.json")
- 	var entries []RunIndexEntry
-+	var corruptedErr error
- 	if b, err := os.ReadFile(indexPath); err == nil {
--		_ = json.Unmarshal(b, &entries)
-+		if err := json.Unmarshal(b, &entries); err != nil {
-+			backup := indexPath + ".corrupt-" + strconv.FormatInt(time.Now().UnixMilli(), 10)
-+			if renameErr := os.Rename(indexPath, backup); renameErr != nil {
-+				corruptedErr = fmt.Errorf("runs index corrupted; failed to archive: %w", renameErr)
-+			} else {
-+				corruptedErr = fmt.Errorf("runs index corrupted; archived as %s", backup)
-+			}
-+		}
- 	}
- 	entries = append([]RunIndexEntry{entry}, entries...)
- 	if len(entries) > limit {
- 		entries = entries[:limit]
- 	}
--	return saveJSON(indexPath, entries)
-+	if err := saveJSON(indexPath, entries); err != nil {
-+		return err
-+	}
-+	return corruptedErr
- }
+diff --git a/backend/web/templates/upload.html b/backend/web/templates/upload.html
+index e2494e6f168e66b789b59544bf181bdebf306e8a..955ed9b55e98c62f4f91f02661981e5dee8aaff9
+--- a/backend/web/templates/upload.html
++++ b/backend/web/templates/upload.html
+@@ -19,6 +19,14 @@
+           <input type="file" name="file" id="file-input" accept="*">
+           <span id="zone-text">Drag and drop a file here, or click to choose</span>
+         </label>
++        <div class="upload-details" id="upload-details" aria-live="polite" style="display:none;">
++          <div class="upload-file">
++            <span class="upload-file-name" id="upload-file-name"></span>
++            <span class="upload-file-size" id="upload-file-size"></span>
++          </div>
++          <button type="button" class="btn btn-ghost btn-sm" id="clear-file">Clear</button>
++        </div>
++        <p class="form-hint upload-hint" id="upload-hint">CSV, JSON, or text files recommended.</p>
+         <button type="submit" class="btn" id="submit-btn" style="margin-top: 1rem;" disabled>Upload</button>
+       </form>
+       {{if .Error}}
 
 file update:
-diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
-index 096ad91ac714526b95d087b61e4dbe6db253f741..feee4fa4267200936cb5a908180b9464719a6c55
---- a/backend/internal/evaluate/storage.go
-+++ b/backend/internal/evaluate/storage.go
-@@ -9,6 +9,7 @@
- 	"mime/multipart"
- 	"os"
- 	"path/filepath"
-+	"strconv"
- 	"time"
- )
- 
-@@ -78,12 +79,23 @@
- 	}
- 	indexPath := filepath.Join(runsDir, "index.json")
- 	var entries []RunIndexEntry
-+	var corruptedErr error
- 	if b, err := os.ReadFile(indexPath); err == nil {
--		_ = json.Unmarshal(b, &entries)
-+		if err := json.Unmarshal(b, &entries); err != nil {
-+			backup := indexPath + ".corrupt-" + strconv.FormatInt(time.Now().UnixMilli(), 10)
-+			if renameErr := os.Rename(indexPath, backup); renameErr != nil {
-+				corruptedErr = fmt.Errorf("runs index corrupted; failed to archive: %w", renameErr)
-+			} else {
-+				corruptedErr = fmt.Errorf("runs index corrupted; archived as %s", backup)
-+			}
-+		}
- 	}
- 	entries = append([]RunIndexEntry{entry}, entries...)
- 	if len(entries) > limit {
- 		entries = entries[:limit]
- 	}
--	return saveJSON(indexPath, entries)
-+	if err := saveJSON(indexPath, entries); err != nil {
-+		return err
-+	}
-+	return corruptedErr
- }
+diff --git a/backend/web/templates/upload.html b/backend/web/templates/upload.html
+index e2494e6f168e66b789b59544bf181bdebf306e8a..955ed9b55e98c62f4f91f02661981e5dee8aaff9
+--- a/backend/web/templates/upload.html
++++ b/backend/web/templates/upload.html
+@@ -19,6 +19,14 @@
+           <input type="file" name="file" id="file-input" accept="*">
+           <span id="zone-text">Drag and drop a file here, or click to choose</span>
+         </label>
++        <div class="upload-details" id="upload-details" aria-live="polite" style="display:none;">
++          <div class="upload-file">
++            <span class="upload-file-name" id="upload-file-name"></span>
++            <span class="upload-file-size" id="upload-file-size"></span>
++          </div>
++          <button type="button" class="btn btn-ghost btn-sm" id="clear-file">Clear</button>
++        </div>
++        <p class="form-hint upload-hint" id="upload-hint">CSV, JSON, or text files recommended.</p>
+         <button type="submit" class="btn" id="submit-btn" style="margin-top: 1rem;" disabled>Upload</button>
+       </form>
+       {{if .Error}}
 
 
 thinking
-**Running tests**
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backendfile update:
-diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
-index 096ad91ac714526b95d087b61e4dbe6db253f741..feee4fa4267200936cb5a908180b9464719a6c55
---- a/backend/internal/evaluate/storage.go
-+++ b/backend/internal/evaluate/storage.go
-@@ -9,6 +9,7 @@
- 	"mime/multipart"
- 	"os"
- 	"path/filepath"
-+	"strconv"
- 	"time"
- )
+**Updating styles.css**
+file update
+M /Users/yani/Noema/backend/web/static/styles.css
+@@ -387,2 +387,37 @@
  
-@@ -78,12 +79,23 @@
- 	}
- 	indexPath := filepath.Join(runsDir, "index.json")
- 	var entries []RunIndexEntry
-+	var corruptedErr error
- 	if b, err := os.ReadFile(indexPath); err == nil {
--		_ = json.Unmarshal(b, &entries)
-+		if err := json.Unmarshal(b, &entries); err != nil {
-+			backup := indexPath + ".corrupt-" + strconv.FormatInt(time.Now().UnixMilli(), 10)
-+			if renameErr := os.Rename(indexPath, backup); renameErr != nil {
-+				corruptedErr = fmt.Errorf("runs index corrupted; failed to archive: %w", renameErr)
-+			} else {
-+				corruptedErr = fmt.Errorf("runs index corrupted; archived as %s", backup)
-+			}
-+		}
- 	}
- 	entries = append([]RunIndexEntry{entry}, entries...)
- 	if len(entries) > limit {
- 		entries = entries[:limit]
- 	}
--	return saveJSON(indexPath, entries)
-+	if err := saveJSON(indexPath, entries); err != nil {
-+		return err
-+	}
-+	return corruptedErr
++.upload-details {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 1rem;
++  margin-top: 0.85rem;
++  padding: 0.85rem 1rem;
++  border-radius: 12px;
++  border: 1px solid var(--border);
++  background: rgba(0, 0, 0, 0.3);
++}
++
++.upload-file {
++  display: flex;
++  flex-direction: column;
++  gap: 0.25rem;
++  min-width: 0;
++}
++
++.upload-file-name {
++  font-weight: 500;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.upload-file-size {
++  font-size: 0.82rem;
++  color: var(--text-muted);
++}
++
++.upload-hint {
++  margin-top: 0.65rem;
++}
++
+ /* ===== Wizard ===== */
+apply_patch(auto_approved=true) exited 0 in 39ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/web/static/styles.css
+file update:
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 86da225cdb8d0188fb67b7ddfbe865e3d0688221..5ab3d22eb59ab1453340db58cb9fc91039485faa
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -385,6 +385,41 @@
+   color: var(--error);
  }
+ 
++.upload-details {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 1rem;
++  margin-top: 0.85rem;
++  padding: 0.85rem 1rem;
++  border-radius: 12px;
++  border: 1px solid var(--border);
++  background: rgba(0, 0, 0, 0.3);
++}
++
++.upload-file {
++  display: flex;
++  flex-direction: column;
++  gap: 0.25rem;
++  min-width: 0;
++}
++
++.upload-file-name {
++  font-weight: 500;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.upload-file-size {
++  font-size: 0.82rem;
++  color: var(--text-muted);
++}
++
++.upload-hint {
++  margin-top: 0.65rem;
++}
++
+ /* ===== Wizard ===== */
+ .main-wizard {
+   align-items: flex-start;
+diff --git a/backend/web/templates/upload.html b/backend/web/templates/upload.html
+index e2494e6f168e66b789b59544bf181bdebf306e8a..955ed9b55e98c62f4f91f02661981e5dee8aaff9
+--- a/backend/web/templates/upload.html
++++ b/backend/web/templates/upload.html
+@@ -19,6 +19,14 @@
+           <input type="file" name="file" id="file-input" accept="*">
+           <span id="zone-text">Drag and drop a file here, or click to choose</span>
+         </label>
++        <div class="upload-details" id="upload-details" aria-live="polite" style="display:none;">
++          <div class="upload-file">
++            <span class="upload-file-name" id="upload-file-name"></span>
++            <span class="upload-file-size" id="upload-file-size"></span>
++          </div>
++          <button type="button" class="btn btn-ghost btn-sm" id="clear-file">Clear</button>
++        </div>
++        <p class="form-hint upload-hint" id="upload-hint">CSV, JSON, or text files recommended.</p>
+         <button type="submit" class="btn" id="submit-btn" style="margin-top: 1rem;" disabled>Upload</button>
+       </form>
+       {{if .Error}}
 
- succeeded in 1.48s:
+file update:
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 86da225cdb8d0188fb67b7ddfbe865e3d0688221..5ab3d22eb59ab1453340db58cb9fc91039485faa
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -385,6 +385,41 @@
+   color: var(--error);
+ }
+ 
++.upload-details {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 1rem;
++  margin-top: 0.85rem;
++  padding: 0.85rem 1rem;
++  border-radius: 12px;
++  border: 1px solid var(--border);
++  background: rgba(0, 0, 0, 0.3);
++}
++
++.upload-file {
++  display: flex;
++  flex-direction: column;
++  gap: 0.25rem;
++  min-width: 0;
++}
++
++.upload-file-name {
++  font-weight: 500;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.upload-file-size {
++  font-size: 0.82rem;
++  color: var(--text-muted);
++}
++
++.upload-hint {
++  margin-top: 0.65rem;
++}
++
+ /* ===== Wizard ===== */
+ .main-wizard {
+   align-items: flex-start;
+diff --git a/backend/web/templates/upload.html b/backend/web/templates/upload.html
+index e2494e6f168e66b789b59544bf181bdebf306e8a..955ed9b55e98c62f4f91f02661981e5dee8aaff9
+--- a/backend/web/templates/upload.html
++++ b/backend/web/templates/upload.html
+@@ -19,6 +19,14 @@
+           <input type="file" name="file" id="file-input" accept="*">
+           <span id="zone-text">Drag and drop a file here, or click to choose</span>
+         </label>
++        <div class="upload-details" id="upload-details" aria-live="polite" style="display:none;">
++          <div class="upload-file">
++            <span class="upload-file-name" id="upload-file-name"></span>
++            <span class="upload-file-size" id="upload-file-size"></span>
++          </div>
++          <button type="button" class="btn btn-ghost btn-sm" id="clear-file">Clear</button>
++        </div>
++        <p class="form-hint upload-hint" id="upload-hint">CSV, JSON, or text files recommended.</p>
+         <button type="submit" class="btn" id="submit-btn" style="margin-top: 1rem;" disabled>Upload</button>
+       </form>
+       {{if .Error}}
+
+
+thinking
+**Updating upload script**
+file update
+M /Users/yani/Noema/backend/web/static/upload.js
+@@ -5,2 +5,17 @@
+   var submitBtn = document.getElementById('submit-btn');
++  var details = document.getElementById('upload-details');
++  var fileName = document.getElementById('upload-file-name');
++  var fileSize = document.getElementById('upload-file-size');
++  var clearBtn = document.getElementById('clear-file');
++
++  function formatBytes(bytes) {
++    if (!bytes && bytes !== 0) return '';
++    if (bytes < 1024) return bytes + ' B';
++    var kb = bytes / 1024;
++    if (kb < 1024) return kb.toFixed(1) + ' KB';
++    var mb = kb / 1024;
++    if (mb < 1024) return mb.toFixed(1) + ' MB';
++    var gb = mb / 1024;
++    return gb.toFixed(1) + ' GB';
++  }
+ 
+@@ -8,3 +23,7 @@
+     if (input.files && input.files.length) {
+-      zoneText.textContent = input.files[0].name;
++      var file = input.files[0];
++      zoneText.textContent = 'Drop another file to replace';
++      if (fileName) fileName.textContent = file.name;
++      if (fileSize) fileSize.textContent = formatBytes(file.size);
++      if (details) details.style.display = 'flex';
+       submitBtn.disabled = false;
+@@ -12,2 +31,3 @@
+       zoneText.textContent = 'Drag and drop a file here, or click to choose';
++      if (details) details.style.display = 'none';
+       submitBtn.disabled = true;
+@@ -17,2 +37,9 @@
+   input.addEventListener('change', updateZone);
++  if (clearBtn) {
++    clearBtn.addEventListener('click', function() {
++      input.value = '';
++      zone.classList.remove('dragover');
++      updateZone();
++    });
++  }
+ 
+apply_patch(auto_approved=true) exited 0 in 49ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/web/static/upload.js
+file update:
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 86da225cdb8d0188fb67b7ddfbe865e3d0688221..5ab3d22eb59ab1453340db58cb9fc91039485faa
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -385,6 +385,41 @@
+   color: var(--error);
+ }
+ 
++.upload-details {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 1rem;
++  margin-top: 0.85rem;
++  padding: 0.85rem 1rem;
++  border-radius: 12px;
++  border: 1px solid var(--border);
++  background: rgba(0, 0, 0, 0.3);
++}
++
++.upload-file {
++  display: flex;
++  flex-direction: column;
++  gap: 0.25rem;
++  min-width: 0;
++}
++
++.upload-file-name {
++  font-weight: 500;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.upload-file-size {
++  font-size: 0.82rem;
++  color: var(--text-muted);
++}
++
++.upload-hint {
++  margin-top: 0.65rem;
++}
++
+ /* ===== Wizard ===== */
+ .main-wizard {
+   align-items: flex-start;
+diff --git a/backend/web/static/upload.js b/backend/web/static/upload.js
+index 1c9cac84b3150b21b99e54134ae72bddd8707606..0a3e470d2a62e2f3718bea1bda6b6d3476da9800
+--- a/backend/web/static/upload.js
++++ b/backend/web/static/upload.js
+@@ -3,18 +3,45 @@
+   var zone = document.getElementById('drop-zone');
+   var zoneText = document.getElementById('zone-text');
+   var submitBtn = document.getElementById('submit-btn');
++  var details = document.getElementById('upload-details');
++  var fileName = document.getElementById('upload-file-name');
++  var fileSize = document.getElementById('upload-file-size');
++  var clearBtn = document.getElementById('clear-file');
++
++  function formatBytes(bytes) {
++    if (!bytes && bytes !== 0) return '';
++    if (bytes < 1024) return bytes + ' B';
++    var kb = bytes / 1024;
++    if (kb < 1024) return kb.toFixed(1) + ' KB';
++    var mb = kb / 1024;
++    if (mb < 1024) return mb.toFixed(1) + ' MB';
++    var gb = mb / 1024;
++    return gb.toFixed(1) + ' GB';
++  }
+ 
+   function updateZone() {
+     if (input.files && input.files.length) {
+-      zoneText.textContent = input.files[0].name;
++      var file = input.files[0];
++      zoneText.textContent = 'Drop another file to replace';
++      if (fileName) fileName.textContent = file.name;
++      if (fileSize) fileSize.textContent = formatBytes(file.size);
++      if (details) details.style.display = 'flex';
+       submitBtn.disabled = false;
+     } else {
+       zoneText.textContent = 'Drag and drop a file here, or click to choose';
++      if (details) details.style.display = 'none';
+       submitBtn.disabled = true;
+     }
+   }
+ 
+   input.addEventListener('change', updateZone);
++  if (clearBtn) {
++    clearBtn.addEventListener('click', function() {
++      input.value = '';
++      zone.classList.remove('dragover');
++      updateZone();
++    });
++  }
+ 
+   zone.addEventListener('dragover', function(e) {
+     e.preventDefault();
+diff --git a/backend/web/templates/upload.html b/backend/web/templates/upload.html
+index e2494e6f168e66b789b59544bf181bdebf306e8a..955ed9b55e98c62f4f91f02661981e5dee8aaff9
+--- a/backend/web/templates/upload.html
++++ b/backend/web/templates/upload.html
+@@ -19,6 +19,14 @@
+           <input type="file" name="file" id="file-input" accept="*">
+           <span id="zone-text">Drag and drop a file here, or click to choose</span>
+         </label>
++        <div class="upload-details" id="upload-details" aria-live="polite" style="display:none;">
++          <div class="upload-file">
++            <span class="upload-file-name" id="upload-file-name"></span>
++            <span class="upload-file-size" id="upload-file-size"></span>
++          </div>
++          <button type="button" class="btn btn-ghost btn-sm" id="clear-file">Clear</button>
++        </div>
++        <p class="form-hint upload-hint" id="upload-hint">CSV, JSON, or text files recommended.</p>
+         <button type="submit" class="btn" id="submit-btn" style="margin-top: 1rem;" disabled>Upload</button>
+       </form>
+       {{if .Error}}
+
+file update:
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 86da225cdb8d0188fb67b7ddfbe865e3d0688221..5ab3d22eb59ab1453340db58cb9fc91039485faa
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -385,6 +385,41 @@
+   color: var(--error);
+ }
+ 
++.upload-details {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 1rem;
++  margin-top: 0.85rem;
++  padding: 0.85rem 1rem;
++  border-radius: 12px;
++  border: 1px solid var(--border);
++  background: rgba(0, 0, 0, 0.3);
++}
++
++.upload-file {
++  display: flex;
++  flex-direction: column;
++  gap: 0.25rem;
++  min-width: 0;
++}
++
++.upload-file-name {
++  font-weight: 500;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.upload-file-size {
++  font-size: 0.82rem;
++  color: var(--text-muted);
++}
++
++.upload-hint {
++  margin-top: 0.65rem;
++}
++
+ /* ===== Wizard ===== */
+ .main-wizard {
+   align-items: flex-start;
+diff --git a/backend/web/static/upload.js b/backend/web/static/upload.js
+index 1c9cac84b3150b21b99e54134ae72bddd8707606..0a3e470d2a62e2f3718bea1bda6b6d3476da9800
+--- a/backend/web/static/upload.js
++++ b/backend/web/static/upload.js
+@@ -3,18 +3,45 @@
+   var zone = document.getElementById('drop-zone');
+   var zoneText = document.getElementById('zone-text');
+   var submitBtn = document.getElementById('submit-btn');
++  var details = document.getElementById('upload-details');
++  var fileName = document.getElementById('upload-file-name');
++  var fileSize = document.getElementById('upload-file-size');
++  var clearBtn = document.getElementById('clear-file');
++
++  function formatBytes(bytes) {
++    if (!bytes && bytes !== 0) return '';
++    if (bytes < 1024) return bytes + ' B';
++    var kb = bytes / 1024;
++    if (kb < 1024) return kb.toFixed(1) + ' KB';
++    var mb = kb / 1024;
++    if (mb < 1024) return mb.toFixed(1) + ' MB';
++    var gb = mb / 1024;
++    return gb.toFixed(1) + ' GB';
++  }
+ 
+   function updateZone() {
+     if (input.files && input.files.length) {
+-      zoneText.textContent = input.files[0].name;
++      var file = input.files[0];
++      zoneText.textContent = 'Drop another file to replace';
++      if (fileName) fileName.textContent = file.name;
++      if (fileSize) fileSize.textContent = formatBytes(file.size);
++      if (details) details.style.display = 'flex';
+       submitBtn.disabled = false;
+     } else {
+       zoneText.textContent = 'Drag and drop a file here, or click to choose';
++      if (details) details.style.display = 'none';
+       submitBtn.disabled = true;
+     }
+   }
+ 
+   input.addEventListener('change', updateZone);
++  if (clearBtn) {
++    clearBtn.addEventListener('click', function() {
++      input.value = '';
++      zone.classList.remove('dragover');
++      updateZone();
++    });
++  }
+ 
+   zone.addEventListener('dragover', function(e) {
+     e.preventDefault();
+diff --git a/backend/web/templates/upload.html b/backend/web/templates/upload.html
+index e2494e6f168e66b789b59544bf181bdebf306e8a..955ed9b55e98c62f4f91f02661981e5dee8aaff9
+--- a/backend/web/templates/upload.html
++++ b/backend/web/templates/upload.html
+@@ -19,6 +19,14 @@
+           <input type="file" name="file" id="file-input" accept="*">
+           <span id="zone-text">Drag and drop a file here, or click to choose</span>
+         </label>
++        <div class="upload-details" id="upload-details" aria-live="polite" style="display:none;">
++          <div class="upload-file">
++            <span class="upload-file-name" id="upload-file-name"></span>
++            <span class="upload-file-size" id="upload-file-size"></span>
++          </div>
++          <button type="button" class="btn btn-ghost btn-sm" id="clear-file">Clear</button>
++        </div>
++        <p class="form-hint upload-hint" id="upload-hint">CSV, JSON, or text files recommended.</p>
+         <button type="submit" class="btn" id="submit-btn" style="margin-top: 1rem;" disabled>Upload</button>
+       </form>
+       {{if .Error}}
+
+
+thinking
+**Verifying details hidden by default**
+
+Confirming that details elements are initially hidden with inline styles since updateZone isn't called on load; running tests next.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 214ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	0.013s
+ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
-?   	noema/internal/session	[no test files]
-?   	noema/internal/verify	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
 file update:
-diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
-index 096ad91ac714526b95d087b61e4dbe6db253f741..feee4fa4267200936cb5a908180b9464719a6c55
---- a/backend/internal/evaluate/storage.go
-+++ b/backend/internal/evaluate/storage.go
-@@ -9,6 +9,7 @@
- 	"mime/multipart"
- 	"os"
- 	"path/filepath"
-+	"strconv"
- 	"time"
- )
- 
-@@ -78,12 +79,23 @@
- 	}
- 	indexPath := filepath.Join(runsDir, "index.json")
- 	var entries []RunIndexEntry
-+	var corruptedErr error
- 	if b, err := os.ReadFile(indexPath); err == nil {
--		_ = json.Unmarshal(b, &entries)
-+		if err := json.Unmarshal(b, &entries); err != nil {
-+			backup := indexPath + ".corrupt-" + strconv.FormatInt(time.Now().UnixMilli(), 10)
-+			if renameErr := os.Rename(indexPath, backup); renameErr != nil {
-+				corruptedErr = fmt.Errorf("runs index corrupted; failed to archive: %w", renameErr)
-+			} else {
-+				corruptedErr = fmt.Errorf("runs index corrupted; archived as %s", backup)
-+			}
-+		}
- 	}
- 	entries = append([]RunIndexEntry{entry}, entries...)
- 	if len(entries) > limit {
- 		entries = entries[:limit]
- 	}
--	return saveJSON(indexPath, entries)
-+	if err := saveJSON(indexPath, entries); err != nil {
-+		return err
-+	}
-+	return corruptedErr
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 86da225cdb8d0188fb67b7ddfbe865e3d0688221..5ab3d22eb59ab1453340db58cb9fc91039485faa
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -385,6 +385,41 @@
+   color: var(--error);
  }
+ 
++.upload-details {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 1rem;
++  margin-top: 0.85rem;
++  padding: 0.85rem 1rem;
++  border-radius: 12px;
++  border: 1px solid var(--border);
++  background: rgba(0, 0, 0, 0.3);
++}
++
++.upload-file {
++  display: flex;
++  flex-direction: column;
++  gap: 0.25rem;
++  min-width: 0;
++}
++
++.upload-file-name {
++  font-weight: 500;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.upload-file-size {
++  font-size: 0.82rem;
++  color: var(--text-muted);
++}
++
++.upload-hint {
++  margin-top: 0.65rem;
++}
++
+ /* ===== Wizard ===== */
+ .main-wizard {
+   align-items: flex-start;
+diff --git a/backend/web/static/upload.js b/backend/web/static/upload.js
+index 1c9cac84b3150b21b99e54134ae72bddd8707606..0a3e470d2a62e2f3718bea1bda6b6d3476da9800
+--- a/backend/web/static/upload.js
++++ b/backend/web/static/upload.js
+@@ -3,18 +3,45 @@
+   var zone = document.getElementById('drop-zone');
+   var zoneText = document.getElementById('zone-text');
+   var submitBtn = document.getElementById('submit-btn');
++  var details = document.getElementById('upload-details');
++  var fileName = document.getElementById('upload-file-name');
++  var fileSize = document.getElementById('upload-file-size');
++  var clearBtn = document.getElementById('clear-file');
++
++  function formatBytes(bytes) {
++    if (!bytes && bytes !== 0) return '';
++    if (bytes < 1024) return bytes + ' B';
++    var kb = bytes / 1024;
++    if (kb < 1024) return kb.toFixed(1) + ' KB';
++    var mb = kb / 1024;
++    if (mb < 1024) return mb.toFixed(1) + ' MB';
++    var gb = mb / 1024;
++    return gb.toFixed(1) + ' GB';
++  }
+ 
+   function updateZone() {
+     if (input.files && input.files.length) {
+-      zoneText.textContent = input.files[0].name;
++      var file = input.files[0];
++      zoneText.textContent = 'Drop another file to replace';
++      if (fileName) fileName.textContent = file.name;
++      if (fileSize) fileSize.textContent = formatBytes(file.size);
++      if (details) details.style.display = 'flex';
+       submitBtn.disabled = false;
+     } else {
+       zoneText.textContent = 'Drag and drop a file here, or click to choose';
++      if (details) details.style.display = 'none';
+       submitBtn.disabled = true;
+     }
+   }
+ 
+   input.addEventListener('change', updateZone);
++  if (clearBtn) {
++    clearBtn.addEventListener('click', function() {
++      input.value = '';
++      zone.classList.remove('dragover');
++      updateZone();
++    });
++  }
+ 
+   zone.addEventListener('dragover', function(e) {
+     e.preventDefault();
+diff --git a/backend/web/templates/upload.html b/backend/web/templates/upload.html
+index e2494e6f168e66b789b59544bf181bdebf306e8a..955ed9b55e98c62f4f91f02661981e5dee8aaff9
+--- a/backend/web/templates/upload.html
++++ b/backend/web/templates/upload.html
+@@ -19,6 +19,14 @@
+           <input type="file" name="file" id="file-input" accept="*">
+           <span id="zone-text">Drag and drop a file here, or click to choose</span>
+         </label>
++        <div class="upload-details" id="upload-details" aria-live="polite" style="display:none;">
++          <div class="upload-file">
++            <span class="upload-file-name" id="upload-file-name"></span>
++            <span class="upload-file-size" id="upload-file-size"></span>
++          </div>
++          <button type="button" class="btn btn-ghost btn-sm" id="clear-file">Clear</button>
++        </div>
++        <p class="form-hint upload-hint" id="upload-hint">CSV, JSON, or text files recommended.</p>
+         <button type="submit" class="btn" id="submit-btn" style="margin-top: 1rem;" disabled>Upload</button>
+       </form>
+       {{if .Error}}
 
 codex
-What you changed (short)
-- Made runs index handling resilient to corrupted `index.json` by archiving corrupt files and still writing a fresh index, while surfacing a logged error.
+What I changed
+- Added an upload file preview with size plus a Clear action, and styled the new metadata panel for better upload UX (`web/templates/upload.html`, `web/static/upload.js`, `web/static/styles.css`).
 
-Tests run (must include go test ./...)
+Tests run
 - `go test ./...`
 
-If you want another iteration, say the word.
+If you want, I can next improve another UX hotspot (e.g., results page copy feedback or verify list empty state).
 file update:
-diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
-index 096ad91ac714526b95d087b61e4dbe6db253f741..feee4fa4267200936cb5a908180b9464719a6c55
---- a/backend/internal/evaluate/storage.go
-+++ b/backend/internal/evaluate/storage.go
-@@ -9,6 +9,7 @@
- 	"mime/multipart"
- 	"os"
- 	"path/filepath"
-+	"strconv"
- 	"time"
- )
- 
-@@ -78,12 +79,23 @@
- 	}
- 	indexPath := filepath.Join(runsDir, "index.json")
- 	var entries []RunIndexEntry
-+	var corruptedErr error
- 	if b, err := os.ReadFile(indexPath); err == nil {
--		_ = json.Unmarshal(b, &entries)
-+		if err := json.Unmarshal(b, &entries); err != nil {
-+			backup := indexPath + ".corrupt-" + strconv.FormatInt(time.Now().UnixMilli(), 10)
-+			if renameErr := os.Rename(indexPath, backup); renameErr != nil {
-+				corruptedErr = fmt.Errorf("runs index corrupted; failed to archive: %w", renameErr)
-+			} else {
-+				corruptedErr = fmt.Errorf("runs index corrupted; archived as %s", backup)
-+			}
-+		}
- 	}
- 	entries = append([]RunIndexEntry{entry}, entries...)
- 	if len(entries) > limit {
- 		entries = entries[:limit]
- 	}
--	return saveJSON(indexPath, entries)
-+	if err := saveJSON(indexPath, entries); err != nil {
-+		return err
-+	}
-+	return corruptedErr
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 86da225cdb8d0188fb67b7ddfbe865e3d0688221..5ab3d22eb59ab1453340db58cb9fc91039485faa
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -385,6 +385,41 @@
+   color: var(--error);
  }
+ 
++.upload-details {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 1rem;
++  margin-top: 0.85rem;
++  padding: 0.85rem 1rem;
++  border-radius: 12px;
++  border: 1px solid var(--border);
++  background: rgba(0, 0, 0, 0.3);
++}
++
++.upload-file {
++  display: flex;
++  flex-direction: column;
++  gap: 0.25rem;
++  min-width: 0;
++}
++
++.upload-file-name {
++  font-weight: 500;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.upload-file-size {
++  font-size: 0.82rem;
++  color: var(--text-muted);
++}
++
++.upload-hint {
++  margin-top: 0.65rem;
++}
++
+ /* ===== Wizard ===== */
+ .main-wizard {
+   align-items: flex-start;
+diff --git a/backend/web/static/upload.js b/backend/web/static/upload.js
+index 1c9cac84b3150b21b99e54134ae72bddd8707606..0a3e470d2a62e2f3718bea1bda6b6d3476da9800
+--- a/backend/web/static/upload.js
++++ b/backend/web/static/upload.js
+@@ -3,18 +3,45 @@
+   var zone = document.getElementById('drop-zone');
+   var zoneText = document.getElementById('zone-text');
+   var submitBtn = document.getElementById('submit-btn');
++  var details = document.getElementById('upload-details');
++  var fileName = document.getElementById('upload-file-name');
++  var fileSize = document.getElementById('upload-file-size');
++  var clearBtn = document.getElementById('clear-file');
++
++  function formatBytes(bytes) {
++    if (!bytes && bytes !== 0) return '';
++    if (bytes < 1024) return bytes + ' B';
++    var kb = bytes / 1024;
++    if (kb < 1024) return kb.toFixed(1) + ' KB';
++    var mb = kb / 1024;
++    if (mb < 1024) return mb.toFixed(1) + ' MB';
++    var gb = mb / 1024;
++    return gb.toFixed(1) + ' GB';
++  }
+ 
+   function updateZone() {
+     if (input.files && input.files.length) {
+-      zoneText.textContent = input.files[0].name;
++      var file = input.files[0];
++      zoneText.textContent = 'Drop another file to replace';
++      if (fileName) fileName.textContent = file.name;
++      if (fileSize) fileSize.textContent = formatBytes(file.size);
++      if (details) details.style.display = 'flex';
+       submitBtn.disabled = false;
+     } else {
+       zoneText.textContent = 'Drag and drop a file here, or click to choose';
++      if (details) details.style.display = 'none';
+       submitBtn.disabled = true;
+     }
+   }
+ 
+   input.addEventListener('change', updateZone);
++  if (clearBtn) {
++    clearBtn.addEventListener('click', function() {
++      input.value = '';
++      zone.classList.remove('dragover');
++      updateZone();
++    });
++  }
+ 
+   zone.addEventListener('dragover', function(e) {
+     e.preventDefault();
+diff --git a/backend/web/templates/upload.html b/backend/web/templates/upload.html
+index e2494e6f168e66b789b59544bf181bdebf306e8a..955ed9b55e98c62f4f91f02661981e5dee8aaff9
+--- a/backend/web/templates/upload.html
++++ b/backend/web/templates/upload.html
+@@ -19,6 +19,14 @@
+           <input type="file" name="file" id="file-input" accept="*">
+           <span id="zone-text">Drag and drop a file here, or click to choose</span>
+         </label>
++        <div class="upload-details" id="upload-details" aria-live="polite" style="display:none;">
++          <div class="upload-file">
++            <span class="upload-file-name" id="upload-file-name"></span>
++            <span class="upload-file-size" id="upload-file-size"></span>
++          </div>
++          <button type="button" class="btn btn-ghost btn-sm" id="clear-file">Clear</button>
++        </div>
++        <p class="form-hint upload-hint" id="upload-hint">CSV, JSON, or text files recommended.</p>
+         <button type="submit" class="btn" id="submit-btn" style="margin-top: 1rem;" disabled>Upload</button>
+       </form>
+       {{if .Error}}
 
 tokens used
-9,307
-What you changed (short)
-- Made runs index handling resilient to corrupted `index.json` by archiving corrupt files and still writing a fresh index, while surfacing a logged error.
+25,021
+What I changed
+- Added an upload file preview with size plus a Clear action, and styled the new metadata panel for better upload UX (`web/templates/upload.html`, `web/static/upload.js`, `web/static/styles.css`).
 
-Tests run (must include go test ./...)
+Tests run
 - `go test ./...`
 
-If you want another iteration, say the word.
+If you want, I can next improve another UX hotspot (e.g., results page copy feedback or verify list empty state).
