@@ -47,6 +47,7 @@ func readDatasetFile(fh *multipart.FileHeader) ([]byte, Dataset, error) {
 	if len(ds.Items) == 0 {
 		return nil, Dataset{}, fmt.Errorf("dataset.items must be a non-empty array")
 	}
+	seenIDs := make(map[string]struct{}, len(ds.Items))
 	for i, item := range ds.Items {
 		if item.ID == "" {
 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
@@ -54,6 +55,10 @@ func readDatasetFile(fh *multipart.FileHeader) ([]byte, Dataset, error) {
 		if item.Text == "" {
 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
 		}
+		if _, exists := seenIDs[item.ID]; exists {
+			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
+		}
+		seenIDs[item.ID] = struct{}{}
 	}
 	return raw, ds, nil
 }

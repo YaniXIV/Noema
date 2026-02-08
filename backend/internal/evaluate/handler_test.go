@@ -215,6 +215,17 @@ func TestValidateDatasetJSON_ImageRefMatchesUpload(t *testing.T) {
 	}
 }
 
+func TestValidateDatasetJSON_RejectsDuplicateIDs(t *testing.T) {
+	dataset := `{"items":[{"id":"1","text":"hello"},{"id":"1","text":"world"}]}`
+	form := buildMultipartForm(t, []formFile{
+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
+	})
+	datasetFile := form.File["dataset"][0]
+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
+		t.Fatalf("expected error for duplicate dataset ids")
+	}
+}
+
 func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
 	spec := Spec{
 		SchemaVersion: 1,

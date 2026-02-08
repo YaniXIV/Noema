@@ -1,0 +1,537 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3c84-a142-7830-9a6e-5f01a3548dd5
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Running Go tests**
+
+I'm preparing to run the Go tests using the standard `go test` command since no other skills or tools triggered for test execution.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 235ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Planning targeted code inspection**
+
+Tests are passing, but one file needs improvement—likely around validation or reliability. I'll inspect the repo using TODO comments or similar markers to identify the relevant area.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME|panic|Must" internal' in /Users/yani/Noema/backend exited 1 in 52ms:
+
+
+thinking
+**Checking error handling paths**
+
+No matches found with the initial search, so I'll inspect related files like verify and evaluate to understand potential error handling mechanisms. Listing files next for targeted exploration.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "err != nil|error" internal/session internal/verify internal/evaluate' in /Users/yani/Noema/backend succeeded in 51ms:
+internal/verify/handler_test.go:14:type errorResponse struct {
+internal/verify/handler_test.go:15:	Error string `json:"error"`
+internal/verify/handler_test.go:31:	if err != nil {
+internal/verify/handler_test.go:42:	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+internal/verify/handler_test.go:59:	if err != nil {
+internal/verify/handler_test.go:69:	var resp errorResponse
+internal/verify/handler_test.go:70:	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+internal/verify/handler_test.go:84:	if err != nil {
+internal/verify/handler_test.go:94:	var resp errorResponse
+internal/verify/handler_test.go:95:	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+internal/session/session.go:32:	if err != nil || len(sig) != sha256.Size {
+internal/session/session.go:36:	if err != nil {
+internal/evaluate/prompt.go:160:func marshalSampledDataset(ds Dataset) ([]byte, error) {
+internal/verify/handler.go:32:		if err := c.ShouldBindJSON(&req); err != nil {
+internal/verify/handler.go:33:			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+internal/verify/handler.go:37:			c.JSON(http.StatusBadRequest, gin.H{"error": "missing proof or public inputs"})
+internal/verify/handler.go:42:		if err != nil {
+internal/verify/handler.go:43:			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+internal/verify/handler.go:56:		if err != nil {
+internal/verify/handler.go:57:			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+
+thinking
+**Considering adding validation in parsing uploads**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"mime/multipart"
+	"strings"
+
+	"noema/internal/config"
+)
+
+func parseSpec(form *multipart.Form) (Spec, error) {
+	specStrs := form.Value["spec"]
+	if len(specStrs) == 0 || specStrs[0] == "" {
+		return Spec{}, fmt.Errorf("missing field: spec")
+	}
+	var spec Spec
+	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
+		return Spec{}, fmt.Errorf("invalid spec JSON")
+	}
+
+thinking
+**Considering duplicate data validation**
+
+Evaluating whether to enforce uniqueness for image filenames or dataset item IDs by inspecting the dataset structure and validation needs.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+)
+
+type Dataset struct {
+	Items []DatasetItem `json:"items"`
+}
+
+type DatasetItem struct {
+	ID       string         `json:"id"`
+	Text     string         `json:"text"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+	ImageRef string         `json:"image_ref,omitempty"`
+}
+
+thinking
+**Planning duplicate ID check**
+
+I'm adding a duplicate ID check in the dataset file reader for reliability and testing it, likely in the evaluation handler tests focused on dataset validation.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '180,260p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 51ms:
+		MaxSeverity: 2,
+	}
+	overall, maxSeverity, threshold := computePolicyResult(out, enabled)
+	if threshold != 1 {
+		t.Fatalf("expected threshold 1, got %d", threshold)
+	}
+	if maxSeverity != 2 {
+		t.Fatalf("expected max severity 2, got %d", maxSeverity)
+	}
+	if overall {
+		t.Fatalf("expected overall pass false due to pii threshold")
+	}
+}
+
+func TestValidateDatasetJSON_ImageRefRequiresImages(t *testing.T) {
+	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"img1.png"}]}`
+	form := buildMultipartForm(t, []formFile{
+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
+	})
+	datasetFile := form.File["dataset"][0]
+
+thinking
+**Adding duplicate dataset ID validation**
+
+I'm implementing duplicate ID checks in the dataset file reading function by tracking seen IDs in a map and returning an error if duplicates occur, then adding a test that builds a dataset JSON with duplicate IDs to verify the error is triggered.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/dataset.go
+@@ -49,2 +49,3 @@
+ 	}
++	seenIDs := make(map[string]struct{}, len(ds.Items))
+ 	for i, item := range ds.Items {
+@@ -56,2 +57,6 @@
+ 		}
++		if _, exists := seenIDs[item.ID]; exists {
++			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
++		}
++		seenIDs[item.ID] = struct{}{}
+ 	}
+apply_patch(auto_approved=true) exited 0 in 35ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/dataset.go
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 004f38e213b54bac8b0ff27a20e1d3a9c090b37f..97fa69fff87ebf6b84ec903b2e8fa3cb8ae657a0
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -47,6 +47,7 @@
+ 	if len(ds.Items) == 0 {
+ 		return nil, Dataset{}, fmt.Errorf("dataset.items must be a non-empty array")
+ 	}
++	seenIDs := make(map[string]struct{}, len(ds.Items))
+ 	for i, item := range ds.Items {
+ 		if item.ID == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
+@@ -54,6 +55,10 @@
+ 		if item.Text == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
+ 		}
++		if _, exists := seenIDs[item.ID]; exists {
++			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
++		}
++		seenIDs[item.ID] = struct{}{}
+ 	}
+ 	return raw, ds, nil
+ }
+
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 004f38e213b54bac8b0ff27a20e1d3a9c090b37f..97fa69fff87ebf6b84ec903b2e8fa3cb8ae657a0
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -47,6 +47,7 @@
+ 	if len(ds.Items) == 0 {
+ 		return nil, Dataset{}, fmt.Errorf("dataset.items must be a non-empty array")
+ 	}
++	seenIDs := make(map[string]struct{}, len(ds.Items))
+ 	for i, item := range ds.Items {
+ 		if item.ID == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
+@@ -54,6 +55,10 @@
+ 		if item.Text == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
+ 		}
++		if _, exists := seenIDs[item.ID]; exists {
++			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
++		}
++		seenIDs[item.ID] = struct{}{}
+ 	}
+ 	return raw, ds, nil
+ }
+
+
+thinking
+**Adding a test**
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
+@@ -217,2 +217,13 @@
+ 
++func TestValidateDatasetJSON_RejectsDuplicateIDs(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello"},{"id":"1","text":"world"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++	})
++	datasetFile := form.File["dataset"][0]
++	if err := validateDatasetJSON(datasetFile, nil); err == nil {
++		t.Fatalf("expected error for duplicate dataset ids")
++	}
++}
++
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+apply_patch(auto_approved=true) exited 0 in 41ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 004f38e213b54bac8b0ff27a20e1d3a9c090b37f..97fa69fff87ebf6b84ec903b2e8fa3cb8ae657a0
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -47,6 +47,7 @@
+ 	if len(ds.Items) == 0 {
+ 		return nil, Dataset{}, fmt.Errorf("dataset.items must be a non-empty array")
+ 	}
++	seenIDs := make(map[string]struct{}, len(ds.Items))
+ 	for i, item := range ds.Items {
+ 		if item.ID == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
+@@ -54,6 +55,10 @@
+ 		if item.Text == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
+ 		}
++		if _, exists := seenIDs[item.ID]; exists {
++			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
++		}
++		seenIDs[item.ID] = struct{}{}
+ 	}
+ 	return raw, ds, nil
+ }
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8228bf435f0da3463cf3b975e968e91a3909086e..04ae8fb90312924973356edf9c52a91c2cc93bc5
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -215,6 +215,17 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsDuplicateIDs(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello"},{"id":"1","text":"world"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++	})
++	datasetFile := form.File["dataset"][0]
++	if err := validateDatasetJSON(datasetFile, nil); err == nil {
++		t.Fatalf("expected error for duplicate dataset ids")
++	}
++}
++
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+ 		SchemaVersion: 1,
+
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 004f38e213b54bac8b0ff27a20e1d3a9c090b37f..97fa69fff87ebf6b84ec903b2e8fa3cb8ae657a0
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -47,6 +47,7 @@
+ 	if len(ds.Items) == 0 {
+ 		return nil, Dataset{}, fmt.Errorf("dataset.items must be a non-empty array")
+ 	}
++	seenIDs := make(map[string]struct{}, len(ds.Items))
+ 	for i, item := range ds.Items {
+ 		if item.ID == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
+@@ -54,6 +55,10 @@
+ 		if item.Text == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
+ 		}
++		if _, exists := seenIDs[item.ID]; exists {
++			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
++		}
++		seenIDs[item.ID] = struct{}{}
+ 	}
+ 	return raw, ds, nil
+ }
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8228bf435f0da3463cf3b975e968e91a3909086e..04ae8fb90312924973356edf9c52a91c2cc93bc5
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -215,6 +215,17 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsDuplicateIDs(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello"},{"id":"1","text":"world"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++	})
++	datasetFile := form.File["dataset"][0]
++	if err := validateDatasetJSON(datasetFile, nil); err == nil {
++		t.Fatalf("expected error for duplicate dataset ids")
++	}
++}
++
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+ 		SchemaVersion: 1,
+
+
+thinking
+**Running tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backendfile update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 004f38e213b54bac8b0ff27a20e1d3a9c090b37f..97fa69fff87ebf6b84ec903b2e8fa3cb8ae657a0
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -47,6 +47,7 @@
+ 	if len(ds.Items) == 0 {
+ 		return nil, Dataset{}, fmt.Errorf("dataset.items must be a non-empty array")
+ 	}
++	seenIDs := make(map[string]struct{}, len(ds.Items))
+ 	for i, item := range ds.Items {
+ 		if item.ID == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
+@@ -54,6 +55,10 @@
+ 		if item.Text == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
+ 		}
++		if _, exists := seenIDs[item.ID]; exists {
++			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
++		}
++		seenIDs[item.ID] = struct{}{}
+ 	}
+ 	return raw, ds, nil
+ }
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8228bf435f0da3463cf3b975e968e91a3909086e..04ae8fb90312924973356edf9c52a91c2cc93bc5
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -215,6 +215,17 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsDuplicateIDs(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello"},{"id":"1","text":"world"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++	})
++	datasetFile := form.File["dataset"][0]
++	if err := validateDatasetJSON(datasetFile, nil); err == nil {
++		t.Fatalf("expected error for duplicate dataset ids")
++	}
++}
++
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+ 		SchemaVersion: 1,
+
+ succeeded in 1.11s:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.032s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Verifying command completion and input status**
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 004f38e213b54bac8b0ff27a20e1d3a9c090b37f..97fa69fff87ebf6b84ec903b2e8fa3cb8ae657a0
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -47,6 +47,7 @@
+ 	if len(ds.Items) == 0 {
+ 		return nil, Dataset{}, fmt.Errorf("dataset.items must be a non-empty array")
+ 	}
++	seenIDs := make(map[string]struct{}, len(ds.Items))
+ 	for i, item := range ds.Items {
+ 		if item.ID == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
+@@ -54,6 +55,10 @@
+ 		if item.Text == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
+ 		}
++		if _, exists := seenIDs[item.ID]; exists {
++			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
++		}
++		seenIDs[item.ID] = struct{}{}
+ 	}
+ 	return raw, ds, nil
+ }
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8228bf435f0da3463cf3b975e968e91a3909086e..04ae8fb90312924973356edf9c52a91c2cc93bc5
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -215,6 +215,17 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsDuplicateIDs(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello"},{"id":"1","text":"world"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++	})
++	datasetFile := form.File["dataset"][0]
++	if err := validateDatasetJSON(datasetFile, nil); err == nil {
++		t.Fatalf("expected error for duplicate dataset ids")
++	}
++}
++
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+ 		SchemaVersion: 1,
+
+codex
+What you changed (short)
+- Added dataset item ID uniqueness validation in `internal/evaluate/dataset.go`.
+- Added a test covering duplicate dataset IDs in `internal/evaluate/handler_test.go`.
+
+Tests run (must include go test ./...)
+- `go test ./...`
+
+If you want another iteration, tell me to continue.
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 004f38e213b54bac8b0ff27a20e1d3a9c090b37f..97fa69fff87ebf6b84ec903b2e8fa3cb8ae657a0
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -47,6 +47,7 @@
+ 	if len(ds.Items) == 0 {
+ 		return nil, Dataset{}, fmt.Errorf("dataset.items must be a non-empty array")
+ 	}
++	seenIDs := make(map[string]struct{}, len(ds.Items))
+ 	for i, item := range ds.Items {
+ 		if item.ID == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
+@@ -54,6 +55,10 @@
+ 		if item.Text == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
+ 		}
++		if _, exists := seenIDs[item.ID]; exists {
++			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
++		}
++		seenIDs[item.ID] = struct{}{}
+ 	}
+ 	return raw, ds, nil
+ }
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 8228bf435f0da3463cf3b975e968e91a3909086e..04ae8fb90312924973356edf9c52a91c2cc93bc5
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -215,6 +215,17 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsDuplicateIDs(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello"},{"id":"1","text":"world"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++	})
++	datasetFile := form.File["dataset"][0]
++	if err := validateDatasetJSON(datasetFile, nil); err == nil {
++		t.Fatalf("expected error for duplicate dataset ids")
++	}
++}
++
+ func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+ 	spec := Spec{
+ 		SchemaVersion: 1,
+
+tokens used
+19,010
+What you changed (short)
+- Added dataset item ID uniqueness validation in `internal/evaluate/dataset.go`.
+- Added a test covering duplicate dataset IDs in `internal/evaluate/handler_test.go`.
+
+Tests run (must include go test ./...)
+- `go test ./...`
+
+If you want another iteration, tell me to continue.
