@@ -52,39 +52,12 @@ func saveUpload(fh *multipart.FileHeader, dst string) error {
 		return fmt.Errorf("open upload: %w", err)
 	}
 	defer src.Close()
-	dir := filepath.Dir(dst)
-	base := filepath.Base(dst)
-	tmp, err := os.CreateTemp(dir, base+".tmp-*")
-	if err != nil {
-		return fmt.Errorf("create temp for %s: %w", dst, err)
-	}
-	tmpName := tmp.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tmpName)
+	return writeAtomic(dst, 0644, func(tmp *os.File) error {
+		if _, err := io.Copy(tmp, src); err != nil {
+			return fmt.Errorf("copy to %s: %w", dst, err)
 		}
-	}()
-	if err := tmp.Chmod(0644); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("chmod temp for %s: %w", dst, err)
-	}
-	if _, err := io.Copy(tmp, src); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("copy to %s: %w", dst, err)
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("sync %s: %w", dst, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close %s: %w", dst, err)
-	}
-	if err := os.Rename(tmpName, dst); err != nil {
-		return fmt.Errorf("rename %s: %w", dst, err)
-	}
-	cleanup = false
-	return nil
+		return nil
+	})
 }
 
 func saveJSON(path string, v any) error {
@@ -92,11 +65,20 @@ func saveJSON(path string, v any) error {
 	if err != nil {
 		return err
 	}
+	return writeAtomic(path, 0644, func(tmp *os.File) error {
+		if _, err := tmp.Write(b); err != nil {
+			return fmt.Errorf("write %s: %w", path, err)
+		}
+		return nil
+	})
+}
+
+func writeAtomic(path string, mode os.FileMode, write func(*os.File) error) error {
 	dir := filepath.Dir(path)
 	base := filepath.Base(path)
 	tmp, err := os.CreateTemp(dir, base+".tmp-*")
 	if err != nil {
-		return err
+		return fmt.Errorf("create temp for %s: %w", path, err)
 	}
 	tmpName := tmp.Name()
 	cleanup := true
@@ -105,23 +87,23 @@ func saveJSON(path string, v any) error {
 			_ = os.Remove(tmpName)
 		}
 	}()
-	if err := tmp.Chmod(0644); err != nil {
+	if err := tmp.Chmod(mode); err != nil {
 		_ = tmp.Close()
-		return err
+		return fmt.Errorf("chmod temp for %s: %w", path, err)
 	}
-	if _, err := tmp.Write(b); err != nil {
+	if err := write(tmp); err != nil {
 		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Sync(); err != nil {
 		_ = tmp.Close()
-		return err
+		return fmt.Errorf("sync %s: %w", path, err)
 	}
 	if err := tmp.Close(); err != nil {
-		return err
+		return fmt.Errorf("close %s: %w", path, err)
 	}
 	if err := os.Rename(tmpName, path); err != nil {
-		return err
+		return fmt.Errorf("rename %s: %w", path, err)
 	}
 	cleanup = false
 	if dirFile, err := os.Open(dir); err == nil {

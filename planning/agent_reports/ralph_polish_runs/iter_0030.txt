@@ -1,0 +1,974 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3c98-82af-7051-82a9-11620a9d6e51
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Running tests using exec_command**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 98ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Scanning for improvement opportunities**
+
+I'm scanning the repo, focusing on TODOs or areas suggesting maintainability or reliability improvements within a small set of files.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME|BUG|panic" internal' in /Users/yani/Noema/backend exited 1 in 52ms:
+
+
+thinking
+**Planning error handling inspection**
+
+No matches found for errors with rg; now I'll look for error handling around ignored errors in internal/gemini, focusing on patterns like checks for nil or "Must" calls to identify verification points.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "_ =|Ignore|ignored" internal' in /Users/yani/Noema/backend succeeded in 51ms:
+internal/evaluate/handler_test.go:229:func TestParseEvalOutputOptional_IgnoresWhitespace(t *testing.T) {
+internal/evaluate/handler_test.go:409:func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
+internal/evaluate/storage.go:65:			_ = os.Remove(tmpName)
+internal/evaluate/storage.go:69:		_ = tmp.Close()
+internal/evaluate/storage.go:73:		_ = tmp.Close()
+internal/evaluate/storage.go:77:		_ = tmp.Close()
+internal/evaluate/storage.go:105:			_ = os.Remove(tmpName)
+internal/evaluate/storage.go:109:		_ = tmp.Close()
+internal/evaluate/storage.go:113:		_ = tmp.Close()
+internal/evaluate/storage.go:117:		_ = tmp.Close()
+internal/evaluate/storage.go:128:		_ = dirFile.Sync()
+internal/evaluate/storage.go:129:		_ = dirFile.Close()
+internal/evaluate/handler.go:88:				_ = os.RemoveAll(runPath)
+internal/zk/zk.go:177:		_, _ = h.Write(p)
+
+thinking
+**Considering error handling for file close**
+
+I'm evaluating whether to add error handling or logging for temp file closures, possibly introducing a helper for safer closing in storage.go. Next, I'll inspect current file closing to decide if changes are warranted.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math/big"
+	"mime/multipart"
+	"os"
+	"path/filepath"
+	"strconv"
+	"sync/atomic"
+	"time"
+)
+
+var runIDCounter uint64
+
+func genRunID() string {
+	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
+
+
+thinking
+**Evaluating error handling improvements**
+
+Considering enhancing sync directory error handling after renames by surfacing fsync errors for durability, but current ignoring avoids failures on unsupported filesystems; leaning toward keeping best-effort approach to maintain compatibility while noting potential for optional stricter mode later.
+thinking
+**Identifying refactor opportunity**
+
+Noticed duplicate logic in saveUpload and saveJSON that could be consolidated into a small helper for atomic file writing to improve maintainability without adding dependencies or large changes.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/verify/verify.go" in /Users/yani/Noema/backend exited 1 in 52ms:
+sed: internal/verify/verify.go: No such file or directory
+
+thinking
+**Checking internal verification list**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/verify' in /Users/yani/Noema/backend succeeded in 51ms:
+handler.go
+handler_test.go
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/verify/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package verify
+
+import (
+	"encoding/base64"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+// VerifyRequest is the JSON body for POST /api/verify.
+type VerifyRequest struct {
+	RunID           string `json:"run_id"`
+	ProofB64        string `json:"proof_b64"`
+	PublicInputsB64 string `json:"public_inputs_b64"`
+}
+
+
+thinking
+**Considering stricter base64 decoding errors**
+
+I'm noting that base64 decoding currently happens in the legacy stub and possibly in VerifyProof, and considering adding stricter error handling or returning 400 for empty proofs, with a plan to check internal/zk/zk.go for relevant logic.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package zk
+
+import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+const (
+	ProofSystem = "groth16"
+	ProofCurve  = "bn254"
+
+	publicInputsPrefix = "noema_public_inputs_v1|"
+	proofPrefix        = "noema_stub_proof_v1|"
+)
+
+// PublicInputs define the public inputs for policy aggregation.
+
+thinking
+**Considering optimization of proof verification**
+
+I'm evaluating whether to update proof verification to use constant-time comparison or handle CommitmentSHA256 errors differently, while inspecting relevant code in evaluate/handler.go for potential improvements.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+
+thinking
+**Reviewing timestamp usage and error handling**
+
+Noted that updateRunsIndex uses time.Now().Unix() while pruning relies on modTime, which is appropriate. Considering allowing Handler's resolveEvalOutput to return an error instead of always bad request and verifying datasetFile nil checks during parseUploads.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/uploads.go" in /Users/yani/Noema/backend exited 1 in 51ms:
+sed: internal/evaluate/uploads.go: No such file or directory
+
+thinking
+**Listing and evaluating internals**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
+cache.go
+commitment.go
+dataset.go
+gemini_eval.go
+handler.go
+handler_integration_test.go
+handler_test.go
+images.go
+output.go
+parse.go
+policy.go
+prompt.go
+schema.go
+spec.go
+storage.go
+
+thinking
+**Inspecting parseUploads function**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+)
+
+type Dataset struct {
+	Items []DatasetItem `json:"items"`
+}
+
+type DatasetItem struct {
+	ID       string         `json:"id"`
+	Text     string         `json:"text"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+	ImageRef string         `json:"image_ref,omitempty"`
+}
+
+thinking
+**Considering dataset schema validation**
+
+I'm thinking about adding a check in images.go to validate that image references conform to the expected schema, improving dataset integrity.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/images.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"fmt"
+	"io"
+	"mime"
+	"mime/multipart"
+	"path/filepath"
+	"strings"
+)
+
+type ImageInfo struct {
+	Filename string
+	MIMEType string
+	Data     []byte
+}
+
+func readImages(files []*multipart.FileHeader) ([]ImageInfo, error) {
+	out := make([]ImageInfo, 0, len(files))
+	for _, fh := range files {
+
+thinking
+**Checking image reference validation**
+
+I'm investigating whether image references in the dataset are validated against provided images, focusing on adding this check during parsing or policy evaluation. Next, I'll search for usages of "image_ref" to confirm current handling.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "image_ref" internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/prompt.go:103:		buf.WriteString("Images attached (matched by items[].image_ref to filename):\n")
+internal/evaluate/parse.go:96:				return fmt.Errorf("dataset.items[%d].image_ref provided but no images uploaded", i)
+internal/evaluate/parse.go:110:			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
+internal/evaluate/handler_test.go:281:	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"img1.png"}]}`
+internal/evaluate/handler_test.go:287:		t.Fatalf("expected error for image_ref without images")
+internal/evaluate/handler_test.go:292:	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"img1.png"}]}`
+internal/evaluate/handler_test.go:348:	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"img.png"}]}`
+internal/evaluate/dataset.go:19:	ImageRef string         `json:"image_ref,omitempty"`
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"strings"
+
+	"noema/internal/config"
+)
+
+func parseSpec(form *multipart.Form) (Spec, error) {
+	specStrs := form.Value["spec"]
+	if len(specStrs) == 0 || specStrs[0] == "" {
+		return Spec{}, fmt.Errorf("missing field: spec")
+	}
+	if len(specStrs) > 1 {
+		return Spec{}, fmt.Errorf("only one spec value allowed")
+	}
+
+thinking
+**Noting potential cleanup improvement**
+
+Considering enhancing evaluate/handler.go to ensure proper cleanup if saveRunFiles fails, since it defers cleanupRun but saveRunFiles involves dataset file access already opened during validation. Also planning to review evaluate/prompt for possible improvements.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/prompt.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
+)
+
+const promptVersion = "noema-eval-v1"
+
+type PromptConstraint struct {
+	ID                 string
+	Description        string
+	SeverityLevels     map[string]string
+	AllowedMaxSeverity int
+}
+
+var presetConstraints = map[string]PromptConstraint{
+
+thinking
+**Reviewing potential reliability and validation improvements**
+
+I'm assessing error handling and size validation in dataset reading and upload parsing, considering clearer error messages and size enforcement, but most checks seem adequate; next, I'll inspect internal/config for configuration-related improvements.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/config/config.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package config
+
+import (
+	"os"
+	"strconv"
+
+	"github.com/joho/godotenv"
+)
+
+const devCookieSecret = "dev-secret-change-in-production"
+
+// Load reads .env from the current directory and sets env vars.
+// Safe to call multiple times; existing env vars are not overwritten.
+func Load() error {
+	return godotenv.Load()
+}
+
+// JudgeKey returns the judge key used to gate protected routes.
+func JudgeKey() string {
+	return os.Getenv("JUDGE_KEY")
+
+thinking
+**Considering session reliability improvements**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/session/session.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package session
+
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"strings"
+)
+
+const CookieName = "noema_judge"
+
+// Sign produces a signed cookie value for the given payload (e.g. judge key).
+// Format: base64(payload) + "." + hex(HMAC-SHA256(secret, payload)).
+func Sign(secret, payload string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(payload))
+	sig := hex.EncodeToString(mac.Sum(nil))
+	encoded := base64.StdEncoding.EncodeToString([]byte(payload))
+
+thinking
+**Considering auth handler improvements**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/auth/handler.go" in /Users/yani/Noema/backend exited 1 in 52ms:
+sed: internal/auth/handler.go: No such file or directory
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/auth' in /Users/yani/Noema/backend succeeded in 52ms:
+middleware.go
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/auth/middleware.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package auth
+
+import (
+	"crypto/subtle"
+	"net/http"
+	"net/url"
+	"strings"
+
+	"noema/internal/config"
+	"noema/internal/session"
+
+	"github.com/gin-gonic/gin"
+)
+
+// JudgeKey checks the request for a valid judge key (header or query).
+// Use for API routes only. Expects X-Judge-Key header or judge_key query param to match JUDGE_KEY in .env.
+func JudgeKey() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		expect := config.JudgeKey()
+		if expect == "" {
+
+
+thinking
+**Refactoring file write duplication**
+
+Planning to add a small helper to unify temp file writing logic in storage.go for saveUpload and saveJSON, improving maintainability without changing functionality.
+thinking
+**Designing atomic write helper with dir sync**
+
+Deciding to implement a unified helper that writes files atomically with temp file creation, sync, rename, and best-effort directory sync after rename to improve reliability. The helper will be used in both saveUpload and saveJSON, preserving existing error handling while adding clearer context and consistent cleanup on errors.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/storage.go
+@@ -54,35 +54,8 @@
+ 	defer src.Close()
+-	dir := filepath.Dir(dst)
+-	base := filepath.Base(dst)
+-	tmp, err := os.CreateTemp(dir, base+".tmp-*")
+-	if err != nil {
+-		return fmt.Errorf("create temp for %s: %w", dst, err)
+-	}
+-	tmpName := tmp.Name()
+-	cleanup := true
+-	defer func() {
+-		if cleanup {
+-			_ = os.Remove(tmpName)
++	return writeAtomic(dst, 0644, func(tmp *os.File) error {
++		if _, err := io.Copy(tmp, src); err != nil {
++			return fmt.Errorf("copy to %s: %w", dst, err)
+ 		}
+-	}()
+-	if err := tmp.Chmod(0644); err != nil {
+-		_ = tmp.Close()
+-		return fmt.Errorf("chmod temp for %s: %w", dst, err)
+-	}
+-	if _, err := io.Copy(tmp, src); err != nil {
+-		_ = tmp.Close()
+-		return fmt.Errorf("copy to %s: %w", dst, err)
+-	}
+-	if err := tmp.Sync(); err != nil {
+-		_ = tmp.Close()
+-		return fmt.Errorf("sync %s: %w", dst, err)
+-	}
+-	if err := tmp.Close(); err != nil {
+-		return fmt.Errorf("close %s: %w", dst, err)
+-	}
+-	if err := os.Rename(tmpName, dst); err != nil {
+-		return fmt.Errorf("rename %s: %w", dst, err)
+-	}
+-	cleanup = false
+-	return nil
++		return nil
++	})
+ }
+@@ -94,2 +67,11 @@
+ 	}
++	return writeAtomic(path, 0644, func(tmp *os.File) error {
++		if _, err := tmp.Write(b); err != nil {
++			return fmt.Errorf("write %s: %w", path, err)
++		}
++		return nil
++	})
++}
++
++func writeAtomic(path string, mode os.FileMode, write func(*os.File) error) error {
+ 	dir := filepath.Dir(path)
+@@ -98,3 +80,3 @@
+ 	if err != nil {
+-		return err
++		return fmt.Errorf("create temp for %s: %w", path, err)
+ 	}
+@@ -107,7 +89,7 @@
+ 	}()
+-	if err := tmp.Chmod(0644); err != nil {
++	if err := tmp.Chmod(mode); err != nil {
+ 		_ = tmp.Close()
+-		return err
++		return fmt.Errorf("chmod temp for %s: %w", path, err)
+ 	}
+-	if _, err := tmp.Write(b); err != nil {
++	if err := write(tmp); err != nil {
+ 		_ = tmp.Close()
+@@ -117,9 +99,9 @@
+ 		_ = tmp.Close()
+-		return err
++		return fmt.Errorf("sync %s: %w", path, err)
+ 	}
+ 	if err := tmp.Close(); err != nil {
+-		return err
++		return fmt.Errorf("close %s: %w", path, err)
+ 	}
+ 	if err := os.Rename(tmpName, path); err != nil {
+-		return err
++		return fmt.Errorf("rename %s: %w", path, err)
+ 	}
+apply_patch(auto_approved=true) exited 0 in 31ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/storage.go
+file update:
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 43f8aa6f4e40c9e62a68b4b0796cc83e9f0ecd5e..6335cc50f563461022b0797c177d28c3c0ee19b6
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -52,39 +52,12 @@
+ 		return fmt.Errorf("open upload: %w", err)
+ 	}
+ 	defer src.Close()
+-	dir := filepath.Dir(dst)
+-	base := filepath.Base(dst)
+-	tmp, err := os.CreateTemp(dir, base+".tmp-*")
+-	if err != nil {
+-		return fmt.Errorf("create temp for %s: %w", dst, err)
+-	}
+-	tmpName := tmp.Name()
+-	cleanup := true
+-	defer func() {
+-		if cleanup {
+-			_ = os.Remove(tmpName)
++	return writeAtomic(dst, 0644, func(tmp *os.File) error {
++		if _, err := io.Copy(tmp, src); err != nil {
++			return fmt.Errorf("copy to %s: %w", dst, err)
+ 		}
+-	}()
+-	if err := tmp.Chmod(0644); err != nil {
+-		_ = tmp.Close()
+-		return fmt.Errorf("chmod temp for %s: %w", dst, err)
+-	}
+-	if _, err := io.Copy(tmp, src); err != nil {
+-		_ = tmp.Close()
+-		return fmt.Errorf("copy to %s: %w", dst, err)
+-	}
+-	if err := tmp.Sync(); err != nil {
+-		_ = tmp.Close()
+-		return fmt.Errorf("sync %s: %w", dst, err)
+-	}
+-	if err := tmp.Close(); err != nil {
+-		return fmt.Errorf("close %s: %w", dst, err)
+-	}
+-	if err := os.Rename(tmpName, dst); err != nil {
+-		return fmt.Errorf("rename %s: %w", dst, err)
+-	}
+-	cleanup = false
+-	return nil
++		return nil
++	})
+ }
+ 
+ func saveJSON(path string, v any) error {
+@@ -92,11 +65,20 @@
+ 	if err != nil {
+ 		return err
+ 	}
++	return writeAtomic(path, 0644, func(tmp *os.File) error {
++		if _, err := tmp.Write(b); err != nil {
++			return fmt.Errorf("write %s: %w", path, err)
++		}
++		return nil
++	})
++}
++
++func writeAtomic(path string, mode os.FileMode, write func(*os.File) error) error {
+ 	dir := filepath.Dir(path)
+ 	base := filepath.Base(path)
+ 	tmp, err := os.CreateTemp(dir, base+".tmp-*")
+ 	if err != nil {
+-		return err
++		return fmt.Errorf("create temp for %s: %w", path, err)
+ 	}
+ 	tmpName := tmp.Name()
+ 	cleanup := true
+@@ -105,23 +87,23 @@
+ 			_ = os.Remove(tmpName)
+ 		}
+ 	}()
+-	if err := tmp.Chmod(0644); err != nil {
++	if err := tmp.Chmod(mode); err != nil {
+ 		_ = tmp.Close()
+-		return err
++		return fmt.Errorf("chmod temp for %s: %w", path, err)
+ 	}
+-	if _, err := tmp.Write(b); err != nil {
++	if err := write(tmp); err != nil {
+ 		_ = tmp.Close()
+ 		return err
+ 	}
+ 	if err := tmp.Sync(); err != nil {
+ 		_ = tmp.Close()
+-		return err
++		return fmt.Errorf("sync %s: %w", path, err)
+ 	}
+ 	if err := tmp.Close(); err != nil {
+-		return err
++		return fmt.Errorf("close %s: %w", path, err)
+ 	}
+ 	if err := os.Rename(tmpName, path); err != nil {
+-		return err
++		return fmt.Errorf("rename %s: %w", path, err)
+ 	}
+ 	cleanup = false
+ 	if dirFile, err := os.Open(dir); err == nil {
+
+file update:
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 43f8aa6f4e40c9e62a68b4b0796cc83e9f0ecd5e..6335cc50f563461022b0797c177d28c3c0ee19b6
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -52,39 +52,12 @@
+ 		return fmt.Errorf("open upload: %w", err)
+ 	}
+ 	defer src.Close()
+-	dir := filepath.Dir(dst)
+-	base := filepath.Base(dst)
+-	tmp, err := os.CreateTemp(dir, base+".tmp-*")
+-	if err != nil {
+-		return fmt.Errorf("create temp for %s: %w", dst, err)
+-	}
+-	tmpName := tmp.Name()
+-	cleanup := true
+-	defer func() {
+-		if cleanup {
+-			_ = os.Remove(tmpName)
++	return writeAtomic(dst, 0644, func(tmp *os.File) error {
++		if _, err := io.Copy(tmp, src); err != nil {
++			return fmt.Errorf("copy to %s: %w", dst, err)
+ 		}
+-	}()
+-	if err := tmp.Chmod(0644); err != nil {
+-		_ = tmp.Close()
+-		return fmt.Errorf("chmod temp for %s: %w", dst, err)
+-	}
+-	if _, err := io.Copy(tmp, src); err != nil {
+-		_ = tmp.Close()
+-		return fmt.Errorf("copy to %s: %w", dst, err)
+-	}
+-	if err := tmp.Sync(); err != nil {
+-		_ = tmp.Close()
+-		return fmt.Errorf("sync %s: %w", dst, err)
+-	}
+-	if err := tmp.Close(); err != nil {
+-		return fmt.Errorf("close %s: %w", dst, err)
+-	}
+-	if err := os.Rename(tmpName, dst); err != nil {
+-		return fmt.Errorf("rename %s: %w", dst, err)
+-	}
+-	cleanup = false
+-	return nil
++		return nil
++	})
+ }
+ 
+ func saveJSON(path string, v any) error {
+@@ -92,11 +65,20 @@
+ 	if err != nil {
+ 		return err
+ 	}
++	return writeAtomic(path, 0644, func(tmp *os.File) error {
++		if _, err := tmp.Write(b); err != nil {
++			return fmt.Errorf("write %s: %w", path, err)
++		}
++		return nil
++	})
++}
++
++func writeAtomic(path string, mode os.FileMode, write func(*os.File) error) error {
+ 	dir := filepath.Dir(path)
+ 	base := filepath.Base(path)
+ 	tmp, err := os.CreateTemp(dir, base+".tmp-*")
+ 	if err != nil {
+-		return err
++		return fmt.Errorf("create temp for %s: %w", path, err)
+ 	}
+ 	tmpName := tmp.Name()
+ 	cleanup := true
+@@ -105,23 +87,23 @@
+ 			_ = os.Remove(tmpName)
+ 		}
+ 	}()
+-	if err := tmp.Chmod(0644); err != nil {
++	if err := tmp.Chmod(mode); err != nil {
+ 		_ = tmp.Close()
+-		return err
++		return fmt.Errorf("chmod temp for %s: %w", path, err)
+ 	}
+-	if _, err := tmp.Write(b); err != nil {
++	if err := write(tmp); err != nil {
+ 		_ = tmp.Close()
+ 		return err
+ 	}
+ 	if err := tmp.Sync(); err != nil {
+ 		_ = tmp.Close()
+-		return err
++		return fmt.Errorf("sync %s: %w", path, err)
+ 	}
+ 	if err := tmp.Close(); err != nil {
+-		return err
++		return fmt.Errorf("close %s: %w", path, err)
+ 	}
+ 	if err := os.Rename(tmpName, path); err != nil {
+-		return err
++		return fmt.Errorf("rename %s: %w", path, err)
+ 	}
+ 	cleanup = false
+ 	if dirFile, err := os.Open(dir); err == nil {
+
+
+thinking
+**Verifying code formatting and tests**
+
+I'm checking if gofmt is needed after adding the helper and directory sync, then I'll run go test to ensure correctness.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 556ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.106s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 43f8aa6f4e40c9e62a68b4b0796cc83e9f0ecd5e..6335cc50f563461022b0797c177d28c3c0ee19b6
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -52,39 +52,12 @@
+ 		return fmt.Errorf("open upload: %w", err)
+ 	}
+ 	defer src.Close()
+-	dir := filepath.Dir(dst)
+-	base := filepath.Base(dst)
+-	tmp, err := os.CreateTemp(dir, base+".tmp-*")
+-	if err != nil {
+-		return fmt.Errorf("create temp for %s: %w", dst, err)
+-	}
+-	tmpName := tmp.Name()
+-	cleanup := true
+-	defer func() {
+-		if cleanup {
+-			_ = os.Remove(tmpName)
++	return writeAtomic(dst, 0644, func(tmp *os.File) error {
++		if _, err := io.Copy(tmp, src); err != nil {
++			return fmt.Errorf("copy to %s: %w", dst, err)
+ 		}
+-	}()
+-	if err := tmp.Chmod(0644); err != nil {
+-		_ = tmp.Close()
+-		return fmt.Errorf("chmod temp for %s: %w", dst, err)
+-	}
+-	if _, err := io.Copy(tmp, src); err != nil {
+-		_ = tmp.Close()
+-		return fmt.Errorf("copy to %s: %w", dst, err)
+-	}
+-	if err := tmp.Sync(); err != nil {
+-		_ = tmp.Close()
+-		return fmt.Errorf("sync %s: %w", dst, err)
+-	}
+-	if err := tmp.Close(); err != nil {
+-		return fmt.Errorf("close %s: %w", dst, err)
+-	}
+-	if err := os.Rename(tmpName, dst); err != nil {
+-		return fmt.Errorf("rename %s: %w", dst, err)
+-	}
+-	cleanup = false
+-	return nil
++		return nil
++	})
+ }
+ 
+ func saveJSON(path string, v any) error {
+@@ -92,11 +65,20 @@
+ 	if err != nil {
+ 		return err
+ 	}
++	return writeAtomic(path, 0644, func(tmp *os.File) error {
++		if _, err := tmp.Write(b); err != nil {
++			return fmt.Errorf("write %s: %w", path, err)
++		}
++		return nil
++	})
++}
++
++func writeAtomic(path string, mode os.FileMode, write func(*os.File) error) error {
+ 	dir := filepath.Dir(path)
+ 	base := filepath.Base(path)
+ 	tmp, err := os.CreateTemp(dir, base+".tmp-*")
+ 	if err != nil {
+-		return err
++		return fmt.Errorf("create temp for %s: %w", path, err)
+ 	}
+ 	tmpName := tmp.Name()
+ 	cleanup := true
+@@ -105,23 +87,23 @@
+ 			_ = os.Remove(tmpName)
+ 		}
+ 	}()
+-	if err := tmp.Chmod(0644); err != nil {
++	if err := tmp.Chmod(mode); err != nil {
+ 		_ = tmp.Close()
+-		return err
++		return fmt.Errorf("chmod temp for %s: %w", path, err)
+ 	}
+-	if _, err := tmp.Write(b); err != nil {
++	if err := write(tmp); err != nil {
+ 		_ = tmp.Close()
+ 		return err
+ 	}
+ 	if err := tmp.Sync(); err != nil {
+ 		_ = tmp.Close()
+-		return err
++		return fmt.Errorf("sync %s: %w", path, err)
+ 	}
+ 	if err := tmp.Close(); err != nil {
+-		return err
++		return fmt.Errorf("close %s: %w", path, err)
+ 	}
+ 	if err := os.Rename(tmpName, path); err != nil {
+-		return err
++		return fmt.Errorf("rename %s: %w", path, err)
+ 	}
+ 	cleanup = false
+ 	if dirFile, err := os.Open(dir); err == nil {
+
+codex
+What I changed (short)
+- Refactored atomic file writes in `internal/evaluate/storage.go` into a shared `writeAtomic` helper and added best-effort directory sync for uploads to improve durability while reducing duplication.
+
+Tests run
+- `go test ./...`
+file update:
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 43f8aa6f4e40c9e62a68b4b0796cc83e9f0ecd5e..6335cc50f563461022b0797c177d28c3c0ee19b6
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -52,39 +52,12 @@
+ 		return fmt.Errorf("open upload: %w", err)
+ 	}
+ 	defer src.Close()
+-	dir := filepath.Dir(dst)
+-	base := filepath.Base(dst)
+-	tmp, err := os.CreateTemp(dir, base+".tmp-*")
+-	if err != nil {
+-		return fmt.Errorf("create temp for %s: %w", dst, err)
+-	}
+-	tmpName := tmp.Name()
+-	cleanup := true
+-	defer func() {
+-		if cleanup {
+-			_ = os.Remove(tmpName)
++	return writeAtomic(dst, 0644, func(tmp *os.File) error {
++		if _, err := io.Copy(tmp, src); err != nil {
++			return fmt.Errorf("copy to %s: %w", dst, err)
+ 		}
+-	}()
+-	if err := tmp.Chmod(0644); err != nil {
+-		_ = tmp.Close()
+-		return fmt.Errorf("chmod temp for %s: %w", dst, err)
+-	}
+-	if _, err := io.Copy(tmp, src); err != nil {
+-		_ = tmp.Close()
+-		return fmt.Errorf("copy to %s: %w", dst, err)
+-	}
+-	if err := tmp.Sync(); err != nil {
+-		_ = tmp.Close()
+-		return fmt.Errorf("sync %s: %w", dst, err)
+-	}
+-	if err := tmp.Close(); err != nil {
+-		return fmt.Errorf("close %s: %w", dst, err)
+-	}
+-	if err := os.Rename(tmpName, dst); err != nil {
+-		return fmt.Errorf("rename %s: %w", dst, err)
+-	}
+-	cleanup = false
+-	return nil
++		return nil
++	})
+ }
+ 
+ func saveJSON(path string, v any) error {
+@@ -92,11 +65,20 @@
+ 	if err != nil {
+ 		return err
+ 	}
++	return writeAtomic(path, 0644, func(tmp *os.File) error {
++		if _, err := tmp.Write(b); err != nil {
++			return fmt.Errorf("write %s: %w", path, err)
++		}
++		return nil
++	})
++}
++
++func writeAtomic(path string, mode os.FileMode, write func(*os.File) error) error {
+ 	dir := filepath.Dir(path)
+ 	base := filepath.Base(path)
+ 	tmp, err := os.CreateTemp(dir, base+".tmp-*")
+ 	if err != nil {
+-		return err
++		return fmt.Errorf("create temp for %s: %w", path, err)
+ 	}
+ 	tmpName := tmp.Name()
+ 	cleanup := true
+@@ -105,23 +87,23 @@
+ 			_ = os.Remove(tmpName)
+ 		}
+ 	}()
+-	if err := tmp.Chmod(0644); err != nil {
++	if err := tmp.Chmod(mode); err != nil {
+ 		_ = tmp.Close()
+-		return err
++		return fmt.Errorf("chmod temp for %s: %w", path, err)
+ 	}
+-	if _, err := tmp.Write(b); err != nil {
++	if err := write(tmp); err != nil {
+ 		_ = tmp.Close()
+ 		return err
+ 	}
+ 	if err := tmp.Sync(); err != nil {
+ 		_ = tmp.Close()
+-		return err
++		return fmt.Errorf("sync %s: %w", path, err)
+ 	}
+ 	if err := tmp.Close(); err != nil {
+-		return err
++		return fmt.Errorf("close %s: %w", path, err)
+ 	}
+ 	if err := os.Rename(tmpName, path); err != nil {
+-		return err
++		return fmt.Errorf("rename %s: %w", path, err)
+ 	}
+ 	cleanup = false
+ 	if dirFile, err := os.Open(dir); err == nil {
+
+tokens used
+31,268
+What I changed (short)
+- Refactored atomic file writes in `internal/evaluate/storage.go` into a shared `writeAtomic` helper and added best-effort directory sync for uploads to improve durability while reducing duplication.
+
+Tests run
+- `go test ./...`
