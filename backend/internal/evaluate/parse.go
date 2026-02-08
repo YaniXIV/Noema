@@ -46,10 +46,6 @@ func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.Fil
 	if datasetFile.Size > config.MaxDatasetBytes {
 		return nil, nil, fmt.Errorf("dataset exceeds 50MB limit")
 	}
-	if err := validateDatasetJSON(datasetFile); err != nil {
-		return nil, nil, err
-	}
-
 	imageFiles := form.File["images"]
 	if len(imageFiles) > config.MaxImages {
 		return nil, nil, fmt.Errorf("maximum 10 images allowed")
@@ -59,10 +55,36 @@ func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.Fil
 			return nil, nil, fmt.Errorf("each image must be at most 5MB")
 		}
 	}
+	if err := validateDatasetJSON(datasetFile, imageFiles); err != nil {
+		return nil, nil, err
+	}
 	return datasetFile, imageFiles, nil
 }
 
-func validateDatasetJSON(fh *multipart.FileHeader) error {
-	_, _, err := readDatasetFile(fh)
-	return err
+func validateDatasetJSON(fh *multipart.FileHeader, imageFiles []*multipart.FileHeader) error {
+	_, ds, err := readDatasetFile(fh)
+	if err != nil {
+		return err
+	}
+	if len(imageFiles) == 0 {
+		for i, item := range ds.Items {
+			if item.ImageRef != "" {
+				return fmt.Errorf("dataset.items[%d].image_ref provided but no images uploaded", i)
+			}
+		}
+		return nil
+	}
+	imageNames := make(map[string]struct{}, len(imageFiles))
+	for _, img := range imageFiles {
+		imageNames[img.Filename] = struct{}{}
+	}
+	for i, item := range ds.Items {
+		if item.ImageRef == "" {
+			continue
+		}
+		if _, ok := imageNames[item.ImageRef]; !ok {
+			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
+		}
+	}
+	return nil
 }

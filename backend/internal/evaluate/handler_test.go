@@ -1,11 +1,55 @@
 package evaluate
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
+	"net/textproto"
 	"sort"
 	"testing"
 )
+
+type formFile struct {
+	field       string
+	filename    string
+	contentType string
+	content     []byte
+}
+
+func buildMultipartForm(t *testing.T, files []formFile) *multipart.Form {
+	t.Helper()
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	for _, f := range files {
+		header := make(textproto.MIMEHeader)
+		header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, f.field, f.filename))
+		if f.contentType != "" {
+			header.Set("Content-Type", f.contentType)
+		}
+		part, err := writer.CreatePart(header)
+		if err != nil {
+			t.Fatalf("create part: %v", err)
+		}
+		if _, err := part.Write(f.content); err != nil {
+			t.Fatalf("write part: %v", err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+
+	reader := multipart.NewReader(&buf, writer.Boundary())
+	form, err := reader.ReadForm(10 << 20)
+	if err != nil {
+		t.Fatalf("read form: %v", err)
+	}
+	t.Cleanup(func() {
+		form.RemoveAll()
+	})
+	return form
+}
 
 func TestParseEvalOutputOptional_DefaultsToStub(t *testing.T) {
 	spec := Spec{
@@ -141,5 +185,29 @@ func TestComputePolicyResult(t *testing.T) {
 	}
 	if overall {
 		t.Fatalf("expected overall pass false due to pii threshold")
+	}
+}
+
+func TestValidateDatasetJSON_ImageRefRequiresImages(t *testing.T) {
+	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"img1.png"}]}`
+	form := buildMultipartForm(t, []formFile{
+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
+	})
+	datasetFile := form.File["dataset"][0]
+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
+		t.Fatalf("expected error for image_ref without images")
+	}
+}
+
+func TestValidateDatasetJSON_ImageRefMatchesUpload(t *testing.T) {
+	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"img1.png"}]}`
+	form := buildMultipartForm(t, []formFile{
+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
+		{field: "images", filename: "img1.png", contentType: "image/png", content: []byte("png")},
+	})
+	datasetFile := form.File["dataset"][0]
+	imageFiles := form.File["images"]
+	if err := validateDatasetJSON(datasetFile, imageFiles); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
