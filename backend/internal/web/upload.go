@@ -1,7 +1,6 @@
 package web
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"noema/internal/config"
+	"noema/internal/httputil"
 
 	"github.com/gin-gonic/gin"
 )
@@ -34,7 +34,7 @@ func UploadPost(c *gin.Context, uploadTmpl string, uploadsDir string) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
 	form, err := c.MultipartForm()
 	if err != nil {
-		if isBodyTooLarge(err) {
+		if httputil.IsBodyTooLarge(err) {
 			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
 			return
 		}
@@ -104,15 +104,4 @@ func formatSize(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
-}
-
-func isBodyTooLarge(err error) bool {
-	if err == nil {
-		return false
-	}
-	var maxBytesErr *http.MaxBytesError
-	if errors.As(err, &maxBytesErr) {
-		return true
-	}
-	return strings.Contains(err.Error(), "request body too large")
 }

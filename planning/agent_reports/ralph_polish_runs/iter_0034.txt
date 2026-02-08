@@ -1,0 +1,922 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3c9c-0dc6-78e0-a7c3-ef7de9d9e60d
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Running Go tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 91ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Planning maintainability improvement**
+
+I'm focusing on a small, meaningful improvement across up to three files with no new dependencies, targeting maintainability or reliability by inspecting the repo and considering minor error handling additions.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && rg \"TODO|FIXME|panic\\(\" -n" in /Users/yani/Noema/backend exited 1 in 52ms:
+
+
+thinking
+**No matches found; planning error handling check**
+
+No results were found in the search, so I'll review error handling and list relevant files to improve the search or diagnosis.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "error" internal | head -100' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/prompt.go:160:func marshalSampledDataset(ds Dataset) ([]byte, error) {
+internal/evaluate/parse.go:13:func parseSpec(form *multipart.Form) (Spec, error) {
+internal/evaluate/parse.go:33:func validateSpec(spec Spec) error {
+internal/evaluate/parse.go:56:func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.FileHeader, error) {
+internal/evaluate/parse.go:88:func validateDatasetJSON(fh *multipart.FileHeader, imageFiles []*multipart.FileHeader) error {
+internal/evaluate/output.go:23:func parseEvalOutput(raw string) (EvalOutput, error) {
+internal/evaluate/output.go:50:func validateEvalOutput(out EvalOutput, enabled map[string]ConstraintRule) error {
+internal/evaluate/handler_test.go:67:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:73:		t.Fatalf("parseEvalOutputOptional error: %v", err)
+internal/evaluate/handler_test.go:110:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:129:		t.Fatalf("parseEvalOutputOptional error: %v", err)
+internal/evaluate/handler_test.go:148:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:165:		t.Fatalf("expected validation error for unknown constraint")
+internal/evaluate/handler_test.go:178:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:195:		t.Fatalf("expected error for trailing garbage")
+internal/evaluate/handler_test.go:208:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:225:		t.Fatalf("expected error for multiple eval_output values")
+internal/evaluate/handler_test.go:239:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:245:		t.Fatalf("parseEvalOutputOptional error: %v", err)
+internal/evaluate/handler_test.go:287:		t.Fatalf("expected error for image_ref without images")
+
+thinking
+**Considering isBodyTooLarge refactor**
+
+Planning to unify duplicated isBodyTooLarge logic across internal/web and internal/evaluate by extracting to a shared utility, which would require adding a new internal file but improve maintainability without new dependencies.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math/big"
+	"mime/multipart"
+	"os"
+	"path/filepath"
+	"strconv"
+	"sync/atomic"
+	"time"
+)
+
+var runIDCounter uint64
+
+func genRunID() string {
+	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
+
+thinking
+**Reviewing evaluation handler improvements**
+
+I'm considering adding fsync on directories in writeAtomic, switching saveUpload to use src io.Copy without limits, and checking parseEvalOutputProvided in handler.go for handling multiple form values via Form.Value. Next, I'll inspect evaluate/handler.go accordingly.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '260,560p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+		return EvalOutput{}, false, nil
+	}
+	if len(form.Value["eval_output"]) > 1 {
+		return EvalOutput{}, true, fmt.Errorf("only one eval_output value allowed")
+	}
+	raw := strings.TrimSpace(form.Value["eval_output"][0])
+	if raw == "" {
+		return EvalOutput{}, false, nil
+	}
+	out, err := parseEvalOutput(raw)
+	if err != nil {
+		return EvalOutput{}, true, err
+	}
+	if err := validateEvalOutput(out, enabled); err != nil {
+		return EvalOutput{}, true, err
+	}
+	return out, true, nil
+}
+
+func isBodyTooLarge(err error) bool {
+
+thinking
+**Reviewing output handling and upload error cases**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/web/upload.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package web
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+
+	"github.com/gin-gonic/gin"
+)
+
+// UploadData is passed to the upload template.
+type UploadData struct {
+	Error    string
+
+thinking
+**Refactoring body size check into shared util**
+
+I’m creating a new internal package for HTTP utilities to house the isBodyTooLarge function, reducing duplication across evaluate and web packages by updating three files without adding dependencies.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && cat <<'EOF' > internal/httputil/body.go
+package httputil
+
+import (
+	\"errors\"
+	\"net/http\"
+	\"strings\"
+)
+
+// IsBodyTooLarge reports whether the error indicates the request body exceeded MaxBytesReader.
+func IsBodyTooLarge(err error) bool {
+	if err == nil {
+		return false
+	}
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		return true
+	}
+	return strings.Contains(err.Error(), \"request body too large\")
+}
+EOF" in /Users/yani/Noema/backend exited 1 in 51ms:
+zsh:1: no such file or directory: internal/httputil/body.go
+
+thinking
+**Noting requirement for directory creation**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && mkdir -p internal/httputil' in /Users/yani/Noema/backend succeeded in 52ms:
+
+
+thinking
+**Creating new file**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && cat <<'EOF' > internal/httputil/body.go
+package httputil
+
+import (
+	\"errors\"
+	\"net/http\"
+	\"strings\"
+)
+
+// IsBodyTooLarge reports whether the error indicates the request body exceeded MaxBytesReader.
+func IsBodyTooLarge(err error) bool {
+	if err == nil {
+		return false
+	}
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		return true
+	}
+	return strings.Contains(err.Error(), \"request body too large\")
+}
+EOF" in /Users/yani/Noema/backend succeeded in 51ms:
+
+
+thinking
+**Refactoring handler and upload modules**
+
+I'm replacing the local isBodyTooLarge function with the centralized version from httputil, removing its imports and definition from handler.go, and cleaning up the errors import accordingly.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler.go
+@@ -4,3 +4,2 @@
+ 	"encoding/json"
+-	"errors"
+ 	"fmt"
+@@ -16,2 +15,3 @@
+ 	"noema/internal/config"
++	"noema/internal/httputil"
+ 	"noema/internal/zk"
+@@ -54,3 +54,3 @@
+ 		if err != nil {
+-			if isBodyTooLarge(err) {
++			if httputil.IsBodyTooLarge(err) {
+ 				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+@@ -276,13 +276,2 @@
+ 	return out, true, nil
+-}
+-
+-func isBodyTooLarge(err error) bool {
+-	if err == nil {
+-		return false
+-	}
+-	var maxBytesErr *http.MaxBytesError
+-	if errors.As(err, &maxBytesErr) {
+-		return true
+-	}
+-	return strings.Contains(err.Error(), "request body too large")
+ }
+apply_patch(auto_approved=true) exited 0 in 29ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/handler.go
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 00cd222427accd20ac004481cc10b9e66b698105..6d4b14cc79eac50f8cfe6d93ae30aa660e4b86e8
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -2,7 +2,6 @@
+ 
+ import (
+ 	"encoding/json"
+-	"errors"
+ 	"fmt"
+ 	"log"
+ 	"mime/multipart"
+@@ -14,6 +13,7 @@
+ 	"time"
+ 
+ 	"noema/internal/config"
++	"noema/internal/httputil"
+ 	"noema/internal/zk"
+ 
+ 	"github.com/gin-gonic/gin"
+@@ -52,7 +52,7 @@
+ 		// Parse multipart: spec (string), dataset (file, required), images (files, optional)
+ 		form, err := c.MultipartForm()
+ 		if err != nil {
+-			if isBodyTooLarge(err) {
++			if httputil.IsBodyTooLarge(err) {
+ 				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+ 				return
+ 			}
+@@ -274,15 +274,4 @@
+ 		return EvalOutput{}, true, err
+ 	}
+ 	return out, true, nil
+-}
+-
+-func isBodyTooLarge(err error) bool {
+-	if err == nil {
+-		return false
+-	}
+-	var maxBytesErr *http.MaxBytesError
+-	if errors.As(err, &maxBytesErr) {
+-		return true
+-	}
+-	return strings.Contains(err.Error(), "request body too large")
+ }
+
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 00cd222427accd20ac004481cc10b9e66b698105..6d4b14cc79eac50f8cfe6d93ae30aa660e4b86e8
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -2,7 +2,6 @@
+ 
+ import (
+ 	"encoding/json"
+-	"errors"
+ 	"fmt"
+ 	"log"
+ 	"mime/multipart"
+@@ -14,6 +13,7 @@
+ 	"time"
+ 
+ 	"noema/internal/config"
++	"noema/internal/httputil"
+ 	"noema/internal/zk"
+ 
+ 	"github.com/gin-gonic/gin"
+@@ -52,7 +52,7 @@
+ 		// Parse multipart: spec (string), dataset (file, required), images (files, optional)
+ 		form, err := c.MultipartForm()
+ 		if err != nil {
+-			if isBodyTooLarge(err) {
++			if httputil.IsBodyTooLarge(err) {
+ 				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+ 				return
+ 			}
+@@ -274,15 +274,4 @@
+ 		return EvalOutput{}, true, err
+ 	}
+ 	return out, true, nil
+-}
+-
+-func isBodyTooLarge(err error) bool {
+-	if err == nil {
+-		return false
+-	}
+-	var maxBytesErr *http.MaxBytesError
+-	if errors.As(err, &maxBytesErr) {
+-		return true
+-	}
+-	return strings.Contains(err.Error(), "request body too large")
+ }
+
+
+thinking
+**Refactoring upload handler**
+
+I'm removing the errors import and the custom function for checking body size from upload.go, replacing it with httputil usage to streamline the body size validation.
+file update
+M /Users/yani/Noema/backend/internal/web/upload.go
+@@ -3,3 +3,2 @@
+ import (
+-	"errors"
+ 	"fmt"
+@@ -13,2 +12,3 @@
+ 	"noema/internal/config"
++	"noema/internal/httputil"
+ 
+@@ -36,3 +36,3 @@
+ 	if err != nil {
+-		if isBodyTooLarge(err) {
++		if httputil.IsBodyTooLarge(err) {
+ 			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
+@@ -106,13 +106,2 @@
+ 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
+-}
+-
+-func isBodyTooLarge(err error) bool {
+-	if err == nil {
+-		return false
+-	}
+-	var maxBytesErr *http.MaxBytesError
+-	if errors.As(err, &maxBytesErr) {
+-		return true
+-	}
+-	return strings.Contains(err.Error(), "request body too large")
+ }
+apply_patch(auto_approved=true) exited 0 in 34ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/web/upload.go
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 00cd222427accd20ac004481cc10b9e66b698105..6d4b14cc79eac50f8cfe6d93ae30aa660e4b86e8
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -2,7 +2,6 @@
+ 
+ import (
+ 	"encoding/json"
+-	"errors"
+ 	"fmt"
+ 	"log"
+ 	"mime/multipart"
+@@ -14,6 +13,7 @@
+ 	"time"
+ 
+ 	"noema/internal/config"
++	"noema/internal/httputil"
+ 	"noema/internal/zk"
+ 
+ 	"github.com/gin-gonic/gin"
+@@ -52,7 +52,7 @@
+ 		// Parse multipart: spec (string), dataset (file, required), images (files, optional)
+ 		form, err := c.MultipartForm()
+ 		if err != nil {
+-			if isBodyTooLarge(err) {
++			if httputil.IsBodyTooLarge(err) {
+ 				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+ 				return
+ 			}
+@@ -274,15 +274,4 @@
+ 		return EvalOutput{}, true, err
+ 	}
+ 	return out, true, nil
+-}
+-
+-func isBodyTooLarge(err error) bool {
+-	if err == nil {
+-		return false
+-	}
+-	var maxBytesErr *http.MaxBytesError
+-	if errors.As(err, &maxBytesErr) {
+-		return true
+-	}
+-	return strings.Contains(err.Error(), "request body too large")
+ }
+diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
+index 6fea38639125017c2da272f4f339620eaa9e0e78..0bf795b28309d11c6b6f14ace9b44df3657be5d1
+--- a/backend/internal/web/upload.go
++++ b/backend/internal/web/upload.go
+@@ -1,7 +1,6 @@
+ package web
+ 
+ import (
+-	"errors"
+ 	"fmt"
+ 	"io"
+ 	"net/http"
+@@ -11,6 +10,7 @@
+ 	"time"
+ 
+ 	"noema/internal/config"
++	"noema/internal/httputil"
+ 
+ 	"github.com/gin-gonic/gin"
+ )
+@@ -34,7 +34,7 @@
+ 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
+ 	form, err := c.MultipartForm()
+ 	if err != nil {
+-		if isBodyTooLarge(err) {
++		if httputil.IsBodyTooLarge(err) {
+ 			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
+ 			return
+ 		}
+@@ -104,15 +104,4 @@
+ 		exp++
+ 	}
+ 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
+-}
+-
+-func isBodyTooLarge(err error) bool {
+-	if err == nil {
+-		return false
+-	}
+-	var maxBytesErr *http.MaxBytesError
+-	if errors.As(err, &maxBytesErr) {
+-		return true
+-	}
+-	return strings.Contains(err.Error(), "request body too large")
+ }
+
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 00cd222427accd20ac004481cc10b9e66b698105..6d4b14cc79eac50f8cfe6d93ae30aa660e4b86e8
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -2,7 +2,6 @@
+ 
+ import (
+ 	"encoding/json"
+-	"errors"
+ 	"fmt"
+ 	"log"
+ 	"mime/multipart"
+@@ -14,6 +13,7 @@
+ 	"time"
+ 
+ 	"noema/internal/config"
++	"noema/internal/httputil"
+ 	"noema/internal/zk"
+ 
+ 	"github.com/gin-gonic/gin"
+@@ -52,7 +52,7 @@
+ 		// Parse multipart: spec (string), dataset (file, required), images (files, optional)
+ 		form, err := c.MultipartForm()
+ 		if err != nil {
+-			if isBodyTooLarge(err) {
++			if httputil.IsBodyTooLarge(err) {
+ 				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+ 				return
+ 			}
+@@ -274,15 +274,4 @@
+ 		return EvalOutput{}, true, err
+ 	}
+ 	return out, true, nil
+-}
+-
+-func isBodyTooLarge(err error) bool {
+-	if err == nil {
+-		return false
+-	}
+-	var maxBytesErr *http.MaxBytesError
+-	if errors.As(err, &maxBytesErr) {
+-		return true
+-	}
+-	return strings.Contains(err.Error(), "request body too large")
+ }
+diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
+index 6fea38639125017c2da272f4f339620eaa9e0e78..0bf795b28309d11c6b6f14ace9b44df3657be5d1
+--- a/backend/internal/web/upload.go
++++ b/backend/internal/web/upload.go
+@@ -1,7 +1,6 @@
+ package web
+ 
+ import (
+-	"errors"
+ 	"fmt"
+ 	"io"
+ 	"net/http"
+@@ -11,6 +10,7 @@
+ 	"time"
+ 
+ 	"noema/internal/config"
++	"noema/internal/httputil"
+ 
+ 	"github.com/gin-gonic/gin"
+ )
+@@ -34,7 +34,7 @@
+ 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
+ 	form, err := c.MultipartForm()
+ 	if err != nil {
+-		if isBodyTooLarge(err) {
++		if httputil.IsBodyTooLarge(err) {
+ 			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
+ 			return
+ 		}
+@@ -104,15 +104,4 @@
+ 		exp++
+ 	}
+ 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
+-}
+-
+-func isBodyTooLarge(err error) bool {
+-	if err == nil {
+-		return false
+-	}
+-	var maxBytesErr *http.MaxBytesError
+-	if errors.As(err, &maxBytesErr) {
+-		return true
+-	}
+-	return strings.Contains(err.Error(), "request body too large")
+ }
+
+
+thinking
+**Formatting Go files**
+
+I'm applying gofmt with the write flag to three files, including a new one, to ensure consistent code formatting.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && gofmt -w internal/httputil/body.go internal/evaluate/handler.go internal/web/upload.go' in /Users/yani/Noema/backend succeeded in 52ms:
+
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 00cd222427accd20ac004481cc10b9e66b698105..6d4b14cc79eac50f8cfe6d93ae30aa660e4b86e8
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -2,7 +2,6 @@
+ 
+ import (
+ 	"encoding/json"
+-	"errors"
+ 	"fmt"
+ 	"log"
+ 	"mime/multipart"
+@@ -14,6 +13,7 @@
+ 	"time"
+ 
+ 	"noema/internal/config"
++	"noema/internal/httputil"
+ 	"noema/internal/zk"
+ 
+ 	"github.com/gin-gonic/gin"
+@@ -52,7 +52,7 @@
+ 		// Parse multipart: spec (string), dataset (file, required), images (files, optional)
+ 		form, err := c.MultipartForm()
+ 		if err != nil {
+-			if isBodyTooLarge(err) {
++			if httputil.IsBodyTooLarge(err) {
+ 				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+ 				return
+ 			}
+@@ -274,15 +274,4 @@
+ 		return EvalOutput{}, true, err
+ 	}
+ 	return out, true, nil
+-}
+-
+-func isBodyTooLarge(err error) bool {
+-	if err == nil {
+-		return false
+-	}
+-	var maxBytesErr *http.MaxBytesError
+-	if errors.As(err, &maxBytesErr) {
+-		return true
+-	}
+-	return strings.Contains(err.Error(), "request body too large")
+ }
+diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
+index 6fea38639125017c2da272f4f339620eaa9e0e78..0bf795b28309d11c6b6f14ace9b44df3657be5d1
+--- a/backend/internal/web/upload.go
++++ b/backend/internal/web/upload.go
+@@ -1,7 +1,6 @@
+ package web
+ 
+ import (
+-	"errors"
+ 	"fmt"
+ 	"io"
+ 	"net/http"
+@@ -11,6 +10,7 @@
+ 	"time"
+ 
+ 	"noema/internal/config"
++	"noema/internal/httputil"
+ 
+ 	"github.com/gin-gonic/gin"
+ )
+@@ -34,7 +34,7 @@
+ 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
+ 	form, err := c.MultipartForm()
+ 	if err != nil {
+-		if isBodyTooLarge(err) {
++		if httputil.IsBodyTooLarge(err) {
+ 			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
+ 			return
+ 		}
+@@ -104,15 +104,4 @@
+ 		exp++
+ 	}
+ 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
+-}
+-
+-func isBodyTooLarge(err error) bool {
+-	if err == nil {
+-		return false
+-	}
+-	var maxBytesErr *http.MaxBytesError
+-	if errors.As(err, &maxBytesErr) {
+-		return true
+-	}
+-	return strings.Contains(err.Error(), "request body too large")
+ }
+
+
+thinking
+**Running tests with go test**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 572ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.099s
+?   	noema/internal/gemini	[no test files]
+?   	noema/internal/httputil	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 00cd222427accd20ac004481cc10b9e66b698105..6d4b14cc79eac50f8cfe6d93ae30aa660e4b86e8
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -2,7 +2,6 @@
+ 
+ import (
+ 	"encoding/json"
+-	"errors"
+ 	"fmt"
+ 	"log"
+ 	"mime/multipart"
+@@ -14,6 +13,7 @@
+ 	"time"
+ 
+ 	"noema/internal/config"
++	"noema/internal/httputil"
+ 	"noema/internal/zk"
+ 
+ 	"github.com/gin-gonic/gin"
+@@ -52,7 +52,7 @@
+ 		// Parse multipart: spec (string), dataset (file, required), images (files, optional)
+ 		form, err := c.MultipartForm()
+ 		if err != nil {
+-			if isBodyTooLarge(err) {
++			if httputil.IsBodyTooLarge(err) {
+ 				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+ 				return
+ 			}
+@@ -274,15 +274,4 @@
+ 		return EvalOutput{}, true, err
+ 	}
+ 	return out, true, nil
+-}
+-
+-func isBodyTooLarge(err error) bool {
+-	if err == nil {
+-		return false
+-	}
+-	var maxBytesErr *http.MaxBytesError
+-	if errors.As(err, &maxBytesErr) {
+-		return true
+-	}
+-	return strings.Contains(err.Error(), "request body too large")
+ }
+diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
+index 6fea38639125017c2da272f4f339620eaa9e0e78..0bf795b28309d11c6b6f14ace9b44df3657be5d1
+--- a/backend/internal/web/upload.go
++++ b/backend/internal/web/upload.go
+@@ -1,7 +1,6 @@
+ package web
+ 
+ import (
+-	"errors"
+ 	"fmt"
+ 	"io"
+ 	"net/http"
+@@ -11,6 +10,7 @@
+ 	"time"
+ 
+ 	"noema/internal/config"
++	"noema/internal/httputil"
+ 
+ 	"github.com/gin-gonic/gin"
+ )
+@@ -34,7 +34,7 @@
+ 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
+ 	form, err := c.MultipartForm()
+ 	if err != nil {
+-		if isBodyTooLarge(err) {
++		if httputil.IsBodyTooLarge(err) {
+ 			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
+ 			return
+ 		}
+@@ -104,15 +104,4 @@
+ 		exp++
+ 	}
+ 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
+-}
+-
+-func isBodyTooLarge(err error) bool {
+-	if err == nil {
+-		return false
+-	}
+-	var maxBytesErr *http.MaxBytesError
+-	if errors.As(err, &maxBytesErr) {
+-		return true
+-	}
+-	return strings.Contains(err.Error(), "request body too large")
+ }
+
+
+thinking
+**Reporting test results across files**
+
+Tests ran covering three files, confirming expected behavior across those modules.
+codex
+What I changed (short)
+- Deduplicated `MaxBytesReader` error detection into `internal/httputil` and reused it in evaluate and web upload handlers.
+
+Tests run
+- `go test ./...`
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 00cd222427accd20ac004481cc10b9e66b698105..6d4b14cc79eac50f8cfe6d93ae30aa660e4b86e8
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -2,7 +2,6 @@
+ 
+ import (
+ 	"encoding/json"
+-	"errors"
+ 	"fmt"
+ 	"log"
+ 	"mime/multipart"
+@@ -14,6 +13,7 @@
+ 	"time"
+ 
+ 	"noema/internal/config"
++	"noema/internal/httputil"
+ 	"noema/internal/zk"
+ 
+ 	"github.com/gin-gonic/gin"
+@@ -52,7 +52,7 @@
+ 		// Parse multipart: spec (string), dataset (file, required), images (files, optional)
+ 		form, err := c.MultipartForm()
+ 		if err != nil {
+-			if isBodyTooLarge(err) {
++			if httputil.IsBodyTooLarge(err) {
+ 				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+ 				return
+ 			}
+@@ -274,15 +274,4 @@
+ 		return EvalOutput{}, true, err
+ 	}
+ 	return out, true, nil
+-}
+-
+-func isBodyTooLarge(err error) bool {
+-	if err == nil {
+-		return false
+-	}
+-	var maxBytesErr *http.MaxBytesError
+-	if errors.As(err, &maxBytesErr) {
+-		return true
+-	}
+-	return strings.Contains(err.Error(), "request body too large")
+ }
+diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
+index 6fea38639125017c2da272f4f339620eaa9e0e78..0bf795b28309d11c6b6f14ace9b44df3657be5d1
+--- a/backend/internal/web/upload.go
++++ b/backend/internal/web/upload.go
+@@ -1,7 +1,6 @@
+ package web
+ 
+ import (
+-	"errors"
+ 	"fmt"
+ 	"io"
+ 	"net/http"
+@@ -11,6 +10,7 @@
+ 	"time"
+ 
+ 	"noema/internal/config"
++	"noema/internal/httputil"
+ 
+ 	"github.com/gin-gonic/gin"
+ )
+@@ -34,7 +34,7 @@
+ 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
+ 	form, err := c.MultipartForm()
+ 	if err != nil {
+-		if isBodyTooLarge(err) {
++		if httputil.IsBodyTooLarge(err) {
+ 			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
+ 			return
+ 		}
+@@ -104,15 +104,4 @@
+ 		exp++
+ 	}
+ 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
+-}
+-
+-func isBodyTooLarge(err error) bool {
+-	if err == nil {
+-		return false
+-	}
+-	var maxBytesErr *http.MaxBytesError
+-	if errors.As(err, &maxBytesErr) {
+-		return true
+-	}
+-	return strings.Contains(err.Error(), "request body too large")
+ }
+
+tokens used
+25,741
+What I changed (short)
+- Deduplicated `MaxBytesReader` error detection into `internal/httputil` and reused it in evaluate and web upload handlers.
+
+Tests run
+- `go test ./...`

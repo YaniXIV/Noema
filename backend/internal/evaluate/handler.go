@@ -2,7 +2,6 @@ package evaluate
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"mime/multipart"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"noema/internal/config"
+	"noema/internal/httputil"
 	"noema/internal/zk"
 
 	"github.com/gin-gonic/gin"
@@ -52,7 +52,7 @@ func Handler(runsDir string, maxRuns int) gin.HandlerFunc {
 		// Parse multipart: spec (string), dataset (file, required), images (files, optional)
 		form, err := c.MultipartForm()
 		if err != nil {
-			if isBodyTooLarge(err) {
+			if httputil.IsBodyTooLarge(err) {
 				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
 				return
 			}
@@ -274,15 +274,4 @@ func parseEvalOutputProvided(form *multipart.Form, enabled map[string]Constraint
 		return EvalOutput{}, true, err
 	}
 	return out, true, nil
-}
-
-func isBodyTooLarge(err error) bool {
-	if err == nil {
-		return false
-	}
-	var maxBytesErr *http.MaxBytesError
-	if errors.As(err, &maxBytesErr) {
-		return true
-	}
-	return strings.Contains(err.Error(), "request body too large")
 }
