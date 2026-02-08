@@ -7,7 +7,7 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3c7e-8ac2-71e0-bf02-7fbc54dc85b3
+session id: 019c3ec4-59e8-7112-82c6-5cfd357b60c4
 --------
 user
 You are an autonomous coding agent polishing the Noema repository.
@@ -18,8 +18,9 @@ Hard rules:
 - Keep changes small: max 3 files per iteration.
 - No cosmetic-only edits.
 - No new dependencies unless absolutely necessary.
+- keep all the same ui functionality, the end user should be able to do the same stuff but the experiance and design should be better.
 
-Goal: continuously improve production quality.
+Goal: continuously improve production quality. continuously improve front end quality and polish.
 
 Iteration:
 1) Run: cd backend && go test ./...
@@ -29,7 +30,7 @@ Iteration:
 Pick the highest-value improvement:
 A) Reliability/correctness: validation, error handling, run persistence, verify robustness
 B) Tests: add/strengthen tests for the change you made
-C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+C) upgrading the user interface so that it looks better.
 D) Maintainability: reduce duplication with tiny refactors
 E) UX: wizard/results/verify clarity (small, safe changes)
 F) Docs: README/DEPLOYMENT polish
@@ -41,24 +42,25 @@ Finish with:
 mcp startup: no servers
 
 thinking
-**Executing tests via exec_command**
+**Running Go tests via exec**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 105ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 191ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
 ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
-?   	noema/internal/verify	[no test files]
+ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
 
 thinking
-**Checking repo for improvement opportunities**
+**Identifying frontend files**
 
-I'm preparing to inspect the repository with searches to identify impactful changes affecting few files for a meaningful improvement.
+I'm planning to find and list frontend files in the repo using a file search to target meaningful improvements focused on frontend quality or reliability.
 exec
 /bin/zsh -lc 'cd /Users/yani/Noema/backend && rg --files' in /Users/yani/Noema/backend succeeded in 52ms:
 go.sum
@@ -71,6 +73,7 @@ internal/evaluate/handler_test.go
 internal/evaluate/schema.go
 internal/evaluate/dataset.go
 internal/evaluate/storage.go
+internal/evaluate/storage_test.go
 internal/evaluate/images.go
 internal/evaluate/handler_integration_test.go
 internal/evaluate/cache.go
@@ -80,808 +83,1205 @@ internal/evaluate/spec.go
 internal/evaluate/gemini_eval.go
 internal/evaluate/handler.go
 internal/web/auth.go
-internal/web/upload.go
 
 thinking
-**Inspecting evaluation parsing for bugs**
+**Assessing frontend templates and styles**
 
-Planning to review internal evaluate and parse code for potential session reliability or validation issues that might cause bugs.
+I'm reviewing templates and CSS with a focus on improving user experience through better usability, such as adding field validation or improving wizard flows, rather than purely cosmetic changes. Next, I'll identify up to three key files to enhance accordingly.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/templates/app.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "app"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Dashboard</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_app" .}}
 
-import (
-	"encoding/json"
-	"fmt"
-	"mime/multipart"
-
-	"noema/internal/config"
-)
-
-func parseSpec(form *multipart.Form) (Spec, error) {
-	specStrs := form.Value["spec"]
-	if len(specStrs) == 0 || specStrs[0] == "" {
-		return Spec{}, fmt.Errorf("missing field: spec")
-	}
-	var spec Spec
-	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
-		return Spec{}, fmt.Errorf("invalid spec JSON")
-	}
-	return spec, nil
+  <main class="main main-dashboard">
+    {{template "orb" .}}
+    <div class="dashboard-content">
+      <section class="card dashboard-hero">
+        <div class="card-kicker">Dashboard</div>
+        <h1 class="card-title">Evaluations</h1>
+        <p class="card-text">Run policy evaluations on your datasets and publish verifiable results.</p>
+        <div class="form-actions">
 
 thinking
-**Evaluating error handling scope**
+**Considering accessibility and empty state improvements**
 
-Considering that parseSpec error doesn't wrap the original error but might be acceptable; next, I'll check internal/web/upload for potential reliability improvements.
+I'm exploring adding a small "Learn how" link to the recent runs list empty state and enhancing accessibility by adding aria-live to the recent runs or demo buttons. Next, I'll inspect relevant CSS styles.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/web/upload.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package web
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap');
 
-import (
-	"fmt"
-	"io"
-	"net/http"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
-
-	"noema/internal/config"
-
-	"github.com/gin-gonic/gin"
-)
-
-// UploadData is passed to the upload template.
-type UploadData struct {
-	Error    string
-	Success  bool
-
-thinking
-**Considering file extension and parse validation**
-
-I'm checking that extension extraction handles dotfiles safely and thinking about improving parseSpec error messages with JSON validation using DisallowUnknownFields for robustness without bloating changes. Next, I'll inspect the Spec structure for better decisions.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/spec.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-// Spec is the parsed evaluation spec (schema_version 1).
-type Spec struct {
-	SchemaVersion     int                `json:"schema_version"`
-	EvaluationName    string             `json:"evaluation_name"`
-	Policy            Policy             `json:"policy"`
-	Constraints       []Constraint       `json:"constraints"`
-	CustomConstraints []CustomConstraint `json:"custom_constraints"`
+:root {
+  --bg: #05060a;
+  --bg-card: rgba(9, 12, 18, 0.9);
+  --text: #f4f6fb;
+  --text-muted: #9aa3b2;
+  --accent: #45d4ff;
+  --accent-strong: #2c7bff;
+  --accent-glow: rgba(69, 212, 255, 0.35);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(69, 212, 255, 0.4);
+  --error: #f87171;
+  --success: #22c55e;
+  --warning: #fbbf24;
+  --shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
 }
 
-type Policy struct {
-	Reveal RevealPolicy `json:"reveal"`
+*,
+*::before,
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '240,520p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
 }
 
-type RevealPolicy struct {
-	MaxSeverity bool `json:"max_severity"`
-	Commitment  bool `json:"commitment"`
+.error {
+  margin: 1rem 0 0;
+  font-size: 0.9rem;
+  color: var(--error);
 }
 
-
-thinking
-**Considering validation for constraint uniqueness**
-
-I'm planning to add checks to ensure constraint IDs are unique and to handle empty or duplicate constraints to avoid collisions, next I'll review the evaluation and schema code for relevant logic.
+/* ===== Buttons ===== */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.7rem 1.4rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 12px;
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/schema.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-func evalResponseSchema() map[string]any {
-	return map[string]any{
-		"type": "object",
-		"required": []any{
-			"schema_version",
-			"constraints",
-			"max_severity",
-		},
-		"properties": map[string]any{
-			"schema_version": map[string]any{
-				"type": "integer",
-				"enum": []any{1},
-			},
-			"constraints": map[string]any{
-				"type":     "array",
-				"minItems": 1,
-				"items": map[string]any{
-					"type": "object",
-
-thinking
-**Considering input validation improvements**
-
-I'm weighing adding DisallowUnknownFields to parsing for stricter input correctness and validating dataset and image file sizes during upload, while noting these changes are small and possibly do not require tests.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"crypto/rand"
-	"encoding/json"
-	"fmt"
-	"io"
-	"math/big"
-	"mime/multipart"
-	"os"
-	"path/filepath"
-	"strconv"
-	"sync/atomic"
-	"time"
-)
-
-var runIDCounter uint64
-
-func genRunID() string {
-	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
-
-thinking
-**Evaluating error handling and constraint mapping**
-
-saveRunFiles returns generic errors with minimal impact, but parseSpec could include more detailed JSON errors for better UX. Preventing duplicate constraint IDs in specs is a key reliability improvement, so next I'll inspect constraint ID usage by searching for their mapping.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "Constraint" -n internal/evaluate' in /Users/yani/Noema/backend succeeded in 51ms:
-internal/evaluate/parse.go:27:	for _, cn := range spec.Constraints {
-internal/evaluate/parse.go:32:	for _, cn := range spec.CustomConstraints {
-internal/evaluate/output.go:9:type EvalConstraintResult struct {
-internal/evaluate/output.go:17:	Constraints   []EvalConstraintResult `json:"constraints"`
-internal/evaluate/output.go:35:	if len(out.Constraints) == 0 {
-internal/evaluate/output.go:49:func validateEvalOutput(out EvalOutput, enabled map[string]ConstraintRule) error {
-internal/evaluate/output.go:52:	for _, c := range out.Constraints {
-internal/evaluate/prompt.go:13:type PromptConstraint struct {
-internal/evaluate/prompt.go:20:var presetConstraints = map[string]PromptConstraint{
-internal/evaluate/prompt.go:87:	constraints := resolvePromptConstraints(spec)
-internal/evaluate/prompt.go:90:	buf.WriteString("Constraints:\n")
-internal/evaluate/prompt.go:113:func resolvePromptConstraints(spec Spec) []PromptConstraint {
-internal/evaluate/prompt.go:114:	var out []PromptConstraint
-internal/evaluate/prompt.go:115:	for _, c := range spec.Constraints {
-internal/evaluate/prompt.go:119:		if preset, ok := presetConstraints[c.ID]; ok {
-internal/evaluate/prompt.go:124:		out = append(out, PromptConstraint{
-internal/evaluate/prompt.go:130:	for _, c := range spec.CustomConstraints {
-internal/evaluate/prompt.go:141:		out = append(out, PromptConstraint{
-internal/evaluate/spec.go:8:	Constraints       []Constraint       `json:"constraints"`
-internal/evaluate/spec.go:9:	CustomConstraints []CustomConstraint `json:"custom_constraints"`
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,120p' internal/evaluate/policy.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package evaluate
-
-import "fmt"
-
-type ConstraintRule struct {
-	ID                 string
-	AllowedMaxSeverity int
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '520,1040p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 51ms:
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
 }
 
-func enabledConstraints(spec Spec) (map[string]ConstraintRule, error) {
-	out := make(map[string]ConstraintRule)
-	for _, c := range spec.Constraints {
-		if !c.Enabled {
-			continue
-		}
-		if _, exists := out[c.ID]; exists {
-			return nil, fmt.Errorf("duplicate constraint id: %s", c.ID)
-		}
-		out[c.ID] = ConstraintRule{ID: c.ID, AllowedMaxSeverity: c.AllowedMaxSeverity}
-	}
-
-thinking
-**Analyzing constraint ID validation and uniqueness**
-
-Noted that duplicate IDs are currently enforced only among enabled constraints, and empty IDs aren't validated. Considering enforcing non-empty IDs for enabled constraints to prevent key collisions and ensure correctness, especially since empty IDs could cause subtle issues during prompt resolution. Next, planning to check evaluate/handler.go for how constraint IDs flow there.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,140p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"encoding/json"
-	"log"
-	"mime/multipart"
-	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
-	"time"
-
-	"noema/internal/config"
-	"noema/internal/zk"
-
-	"github.com/gin-gonic/gin"
-)
-
-// EvaluateResponse is the JSON response for POST /api/evaluate.
-type EvaluateResponse struct {
-
-thinking
-**Assessing constraint ID validation gaps**
-
-I noticed that duplicates among enabled constraints are caught, but empty or duplicate IDs in disabled constraints might slip through; empty IDs for enabled could also cause issues in output validation, so I'll check output.go next to confirm.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,160p' internal/evaluate/output.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-)
-
-type EvalConstraintResult struct {
-	ID        string `json:"id"`
-	Severity  int    `json:"severity"`
-	Rationale string `json:"rationale"`
+.constraints-count {
+  font-size: 0.85rem;
+  color: var(--text-muted);
 }
 
-type EvalOutput struct {
-	SchemaVersion int                    `json:"schema_version"`
-	Constraints   []EvalConstraintResult `json:"constraints"`
-	MaxSeverity   int                    `json:"max_severity"`
-	Confidence    *float64               `json:"confidence,omitempty"`
+.constraints-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
 }
 
-thinking
-**Planning spec ID validation**
-
-I'm deciding to enforce non-empty IDs for all constraints, including enabled and custom, in spec validation to ensure correctness and prevent output reference errors. I'll add related tests, likely in the existing handler_test file, to keep the change small and meaningful.
+.constraint-group {
+  padding: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.05);
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package evaluate
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1040,1560p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+  text-decoration: none;
+  font-weight: 500;
+}
+.verify-run-id:hover { color: var(--accent); }
 
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"mime/multipart"
-	"net/textproto"
-	"sort"
-	"testing"
-)
-
-type formFile struct {
-	field       string
-	filename    string
-	contentType string
-	content     []byte
+.verify-run-name {
+  color: var(--text-muted);
+  font-size: 0.85rem;
 }
 
-func buildMultipartForm(t *testing.T, files []formFile) *multipart.Form {
-
+.verify-status {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.verify-status-pass {
+  color: #86efac;
 
 thinking
-**Planning validation for empty constraint IDs**
-
-I'm adding a check in the validation to reject empty IDs in constraints, focusing on enabled constraints only to avoid impacting disabled ones. This keeps behavior safe and minimal while improving error clarity. Next is implementing and testing this in the handler test file.
-thinking
-**Inspecting default specs for empty IDs**
-
-I'm checking the web static constraints file to see if default specs might contain empty IDs, which can inform whether validation should handle those cases from the UI.
+**Inspecting frontend for loading states**
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/static/constraints.js" in /Users/yani/Noema/backend succeeded in 52ms:
-/* Preset constraints for evaluation policy (schema_version 1) */
-window.NOEMA_PRESET_CONSTRAINTS = [
-  {
-    "id": "pii_exposure_risk",
-    "category": "privacy",
-    "classification_type": "severity",
-    "description": "Assess whether the dataset contains personally identifiable information that could identify individuals directly or indirectly, including contextual linkage of names, addresses, contact details, or identifiable imagery.",
-    "severity_levels": {
-      "0": "No identifiable personal data detected",
-      "1": "Limited or partially redacted personal identifiers present",
-      "2": "Clear personally identifiable information or identity-linkable data present"
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' web/static/app.js" in /Users/yani/Noema/backend succeeded in 52ms:
+(function() {
+  var STORAGE_KEY = 'noema_recent_runs';
+  var listEl = document.getElementById('recent-runs-list');
+  var emptyEl = document.getElementById('recent-runs-empty');
+
+  function loadRecentRuns() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      var runs = raw ? JSON.parse(raw) : [];
+      if (runs.length === 0) {
+        listEl.innerHTML = '';
+        listEl.appendChild(emptyEl);
+        emptyEl.style.display = 'block';
+        return;
+      }
+      emptyEl.style.display = 'none';
+      listEl.innerHTML = '';
+      runs.slice(0, 10).forEach(function(r) {
+        var a = document.createElement('a');
+        a.href = '/app/results/' + r.run_id;
+
+
+thinking
+**Planning recent runs UI enhancement**
+
+I'm outlining a UX improvement for the recent runs list to add accessible status badges and relative time info with minimal template, JS, and CSS changes while preserving functionality. I'll create structured markup with anchors containing title and meta divs including status pills.
+thinking
+**Designing CSS for recent runs layout**
+
+I'm planning a flex and grid-based layout with spacing for the recent runs list, adding a status pill class mapped to run statuses like pass, fail, or running. Next, I'll confirm existing status values by checking how recent runs data is stored and used.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "noema_recent_runs|recent_runs" -S' in /Users/yani/Noema/backend succeeded in 52ms:
+web/static/app.js:2:  var STORAGE_KEY = 'noema_recent_runs';
+web/static/wizard.js:438:          var recent = JSON.parse(localStorage.getItem('noema_recent_runs') || '[]');
+web/static/wizard.js:445:          localStorage.setItem('noema_recent_runs', JSON.stringify(recent.slice(0, 50)));
+web/static/verify.js:2:  var STORAGE_KEY = 'noema_recent_runs';
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '400,520p' web/static/wizard.js" in /Users/yani/Noema/backend succeeded in 51ms:
+
+    document.getElementById('submit-error').style.display = 'none';
+    document.getElementById('running-state').style.display = 'block';
+    var runBtn = document.getElementById('run-eval-btn');
+    if (runBtn) runBtn.disabled = true;
+    document.getElementById('wizard-next').disabled = true;
+
+    var spec = buildSpec();
+    var formData = new FormData();
+    formData.append('spec', JSON.stringify(spec));
+    formData.append('dataset', datasetFile);
+
+    var imagesInput = document.getElementById('images-file');
+    if (imagesInput && imagesInput.files && imagesInput.files.length > 0) {
+      for (var i = 0; i < imagesInput.files.length; i++) {
+        formData.append('images', imagesInput.files[i]);
+      }
     }
-  },
-  {
-    "id": "regulated_sensitive_data_presence",
-    "category": "regulated_data",
-    "classification_type": "severity",
-    "description": "Determine whether the dataset contains regulated sensitive information such as medical records, financial account information, biometric identifiers, or government-issued identifiers.",
-    "severity_levels": {
-      "0": "No regulated sensitive data detected",
+
+    fetch('/api/evaluate', {
+
+thinking
+**Checking status usage**
+
+I'm looking into where possible statuses appear, focusing on the results template and result-related code to see how status is handled or displayed. Next, I'll explore app_results to clarify status usage in evaluation results.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/templates/app_results.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "app_results"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Results</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body data-run-id="{{.RunID}}">
+  {{template "header_app" .}}
+
+  <main class="main main-results">
+    {{template "orb" .}}
+    <div class="card results-card">
+      <div class="results-header">
+        <div>
+          <h1 class="card-title">Evaluation results</h1>
+          <p class="text-muted" id="results-run-id">Run ID: {{.RunID}}</p>
+        </div>
+
+thinking
+**Checking status values**
+
+I'm examining the status values in the server's data.status from evaluate to understand recent run states and inform handling or display logic.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "status" internal -S' in /Users/yani/Noema/backend succeeded in 51ms:
+internal/evaluate/storage.go:143:	Status         string `json:"status"`
+internal/evaluate/handler_integration_test.go:44:	if rec.Code != http.StatusOK {
+internal/evaluate/handler_integration_test.go:45:		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+internal/evaluate/handler_integration_test.go:52:	if resp.Status != "FAIL" {
+internal/evaluate/handler_integration_test.go:53:		t.Fatalf("expected status FAIL, got %s", resp.Status)
+internal/evaluate/handler_integration_test.go:88:	if rec.Code != http.StatusOK {
+internal/evaluate/handler_integration_test.go:89:		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+internal/evaluate/handler_integration_test.go:96:	if resp.Status != "PASS" {
+internal/evaluate/handler_integration_test.go:97:		t.Fatalf("expected status PASS, got %s", resp.Status)
+internal/evaluate/handler_integration_test.go:127:	if rec.Code != http.StatusBadRequest {
+internal/evaluate/handler_integration_test.go:128:		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+internal/evaluate/handler_integration_test.go:159:	if rec.Code != http.StatusBadRequest {
+internal/evaluate/handler_integration_test.go:160:		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+internal/evaluate/handler_integration_test.go:191:	if rec.Code != http.StatusBadRequest {
+internal/evaluate/handler_integration_test.go:192:		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+internal/evaluate/handler_integration_test.go:226:	if rec.Code != http.StatusOK {
+internal/evaluate/handler_integration_test.go:227:		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+internal/evaluate/handler.go:25:	Status       string       `json:"status"` // PASS or FAIL
+internal/evaluate/handler.go:56:				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+internal/evaluate/handler.go:59:			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid multipart form"})
 
 
 thinking
-**Adding enabled constraint ID validation**
+**Designing UI improvements for evaluation status**
 
-I'm updating validateSpec to reject constraints that are enabled but have empty IDs, ensuring runtime reliability without breaking existing specs by ignoring disabled constraints.
+Planning to map PASS/FAIL statuses to colored pills, show trimmed run IDs, and display timestamps as relative times for clarity. Intend to handle missing statuses gracefully and enhance the empty state with secondary text and a "New Evaluation" button, mostly via app.js and styles.css without expanding to a third file.
 thinking
-**Adding tests for constraint ID validation**
+**Implementing status pill and timestamp formatting**
 
-I'm preparing to add table-driven tests in handler_test.go to verify that validateSpec rejects empty IDs in enabled constraints and custom constraints, checking for error presence and consistent messages.
+Planning a formatTimestamp function that returns relative time and locale string for tooltips, plus a statusClass helper to map statuses to CSS classes. Preparing CSS updates for status pills, run metadata styling, and hover effects while ensuring safe text handling and layout stability.
 file update
-M /Users/yani/Noema/backend/internal/evaluate/parse.go
-@@ -6,2 +6,3 @@
- 	"mime/multipart"
-+	"strings"
- 
-@@ -27,2 +28,5 @@
- 	for _, cn := range spec.Constraints {
-+		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
-+			return fmt.Errorf("constraint id must be non-empty")
-+		}
- 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
-@@ -32,2 +36,5 @@
- 	for _, cn := range spec.CustomConstraints {
-+		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
-+			return fmt.Errorf("custom_constraint id must be non-empty")
-+		}
- 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
-apply_patch(auto_approved=true) exited 0 in 30ms:
-Success. Updated the following files:
-M internal/evaluate/parse.go
-file update:
-diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
-index 5fc2e874e76c17e562acdc5bd1a08ade0d900cf6..f104c4565a7f911ac198d0e3df4857285f7b47bb
---- a/backend/internal/evaluate/parse.go
-+++ b/backend/internal/evaluate/parse.go
-@@ -4,6 +4,7 @@
- 	"encoding/json"
- 	"fmt"
- 	"mime/multipart"
-+	"strings"
- 
- 	"noema/internal/config"
- )
-@@ -25,11 +26,17 @@
- 		return fmt.Errorf("unsupported schema_version")
- 	}
- 	for _, cn := range spec.Constraints {
-+		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
-+			return fmt.Errorf("constraint id must be non-empty")
-+		}
- 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
- 			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
- 		}
- 	}
- 	for _, cn := range spec.CustomConstraints {
-+		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
-+			return fmt.Errorf("custom_constraint id must be non-empty")
-+		}
- 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
- 			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
- 		}
-
-file update:
-diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
-index 5fc2e874e76c17e562acdc5bd1a08ade0d900cf6..f104c4565a7f911ac198d0e3df4857285f7b47bb
---- a/backend/internal/evaluate/parse.go
-+++ b/backend/internal/evaluate/parse.go
-@@ -4,6 +4,7 @@
- 	"encoding/json"
- 	"fmt"
- 	"mime/multipart"
-+	"strings"
- 
- 	"noema/internal/config"
- )
-@@ -25,11 +26,17 @@
- 		return fmt.Errorf("unsupported schema_version")
- 	}
- 	for _, cn := range spec.Constraints {
-+		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
-+			return fmt.Errorf("constraint id must be non-empty")
-+		}
- 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
- 			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
- 		}
- 	}
- 	for _, cn := range spec.CustomConstraints {
-+		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
-+			return fmt.Errorf("custom_constraint id must be non-empty")
-+		}
- 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
- 			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
- 		}
-
-
-thinking
-**Adding test for apply_patch**
-file update
-M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
-@@ -213 +213,26 @@
+M /Users/yani/Noema/backend/web/static/styles.css
+@@ -322,3 +322,5 @@
+ .recent-run-item {
+-  display: block;
++  display: flex;
++  flex-direction: column;
++  gap: 0.35rem;
+   color: var(--text-muted);
+@@ -326,9 +328,57 @@
+   font-size: 0.95rem;
+-  padding: 0.7rem 0.6rem;
+-  border-radius: 10px;
+-  transition: color 0.15s ease, background 0.15s ease;
++  padding: 0.75rem 0.7rem;
++  border-radius: 12px;
++  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
++  border: 1px solid transparent;
  }
-+
-+func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
-+	spec := Spec{
-+		SchemaVersion: 1,
-+		Constraints: []Constraint{
-+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
-+			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
-+		},
-+	}
-+	if err := validateSpec(spec); err == nil {
-+		t.Fatalf("expected error for empty constraint id")
-+	}
+ .recent-run-item:hover {
+-  color: var(--accent);
++  color: var(--text);
+   background: rgba(255,255,255,0.03);
++  border-color: rgba(255,255,255,0.08);
 +}
 +
-+func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
-+	spec := Spec{
-+		SchemaVersion: 1,
-+		CustomConstraints: []CustomConstraint{
-+			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
-+		},
-+	}
-+	if err := validateSpec(spec); err == nil {
-+		t.Fatalf("expected error for empty custom constraint id")
-+	}
++.recent-run-header {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 0.75rem;
 +}
++
++.recent-run-name {
++  font-weight: 500;
++  color: var(--text);
++}
++
++.recent-run-meta {
++  display: flex;
++  align-items: center;
++  gap: 0.75rem;
++  flex-wrap: wrap;
++  font-size: 0.85rem;
++  color: var(--text-muted);
++}
++
++.status-pill {
++  font-size: 0.7rem;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++  padding: 0.2rem 0.55rem;
++  border-radius: 999px;
++  border: 1px solid var(--border);
++  color: var(--text-muted);
++  white-space: nowrap;
++}
++.status-pill-pass {
++  color: #86efac;
++  border-color: rgba(34, 197, 94, 0.5);
++  background: rgba(34, 197, 94, 0.12);
++}
++.status-pill-fail {
++  color: #fca5a5;
++  border-color: rgba(248, 113, 113, 0.5);
++  background: rgba(248, 113, 113, 0.12);
++}
++.status-pill-unknown {
++  color: var(--text-muted);
++  border-color: rgba(255, 255, 255, 0.14);
+ }
+apply_patch(auto_approved=true) exited 0 in 32ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/web/static/styles.css
+file update:
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 2a81f1ed61a902fae23c0ba052b7863c60caec74..43533f4226e7f58e614b89ca453678979770a780
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -320,17 +320,67 @@
+ .recent-runs-list { display: flex; flex-direction: column; gap: 0.6rem; }
+ 
+ .recent-run-item {
+-  display: block;
++  display: flex;
++  flex-direction: column;
++  gap: 0.35rem;
+   color: var(--text-muted);
+   text-decoration: none;
+   font-size: 0.95rem;
+-  padding: 0.7rem 0.6rem;
+-  border-radius: 10px;
+-  transition: color 0.15s ease, background 0.15s ease;
++  padding: 0.75rem 0.7rem;
++  border-radius: 12px;
++  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
++  border: 1px solid transparent;
+ }
+ .recent-run-item:hover {
+-  color: var(--accent);
++  color: var(--text);
+   background: rgba(255,255,255,0.03);
++  border-color: rgba(255,255,255,0.08);
++}
++
++.recent-run-header {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 0.75rem;
++}
++
++.recent-run-name {
++  font-weight: 500;
++  color: var(--text);
++}
++
++.recent-run-meta {
++  display: flex;
++  align-items: center;
++  gap: 0.75rem;
++  flex-wrap: wrap;
++  font-size: 0.85rem;
++  color: var(--text-muted);
++}
++
++.status-pill {
++  font-size: 0.7rem;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++  padding: 0.2rem 0.55rem;
++  border-radius: 999px;
++  border: 1px solid var(--border);
++  color: var(--text-muted);
++  white-space: nowrap;
++}
++.status-pill-pass {
++  color: #86efac;
++  border-color: rgba(34, 197, 94, 0.5);
++  background: rgba(34, 197, 94, 0.12);
++}
++.status-pill-fail {
++  color: #fca5a5;
++  border-color: rgba(248, 113, 113, 0.5);
++  background: rgba(248, 113, 113, 0.12);
++}
++.status-pill-unknown {
++  color: var(--text-muted);
++  border-color: rgba(255, 255, 255, 0.14);
+ }
+ 
+ .demos-list {
+
+file update:
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 2a81f1ed61a902fae23c0ba052b7863c60caec74..43533f4226e7f58e614b89ca453678979770a780
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -320,17 +320,67 @@
+ .recent-runs-list { display: flex; flex-direction: column; gap: 0.6rem; }
+ 
+ .recent-run-item {
+-  display: block;
++  display: flex;
++  flex-direction: column;
++  gap: 0.35rem;
+   color: var(--text-muted);
+   text-decoration: none;
+   font-size: 0.95rem;
+-  padding: 0.7rem 0.6rem;
+-  border-radius: 10px;
+-  transition: color 0.15s ease, background 0.15s ease;
++  padding: 0.75rem 0.7rem;
++  border-radius: 12px;
++  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
++  border: 1px solid transparent;
+ }
+ .recent-run-item:hover {
+-  color: var(--accent);
++  color: var(--text);
+   background: rgba(255,255,255,0.03);
++  border-color: rgba(255,255,255,0.08);
++}
++
++.recent-run-header {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 0.75rem;
++}
++
++.recent-run-name {
++  font-weight: 500;
++  color: var(--text);
++}
++
++.recent-run-meta {
++  display: flex;
++  align-items: center;
++  gap: 0.75rem;
++  flex-wrap: wrap;
++  font-size: 0.85rem;
++  color: var(--text-muted);
++}
++
++.status-pill {
++  font-size: 0.7rem;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++  padding: 0.2rem 0.55rem;
++  border-radius: 999px;
++  border: 1px solid var(--border);
++  color: var(--text-muted);
++  white-space: nowrap;
++}
++.status-pill-pass {
++  color: #86efac;
++  border-color: rgba(34, 197, 94, 0.5);
++  background: rgba(34, 197, 94, 0.12);
++}
++.status-pill-fail {
++  color: #fca5a5;
++  border-color: rgba(248, 113, 113, 0.5);
++  background: rgba(248, 113, 113, 0.12);
++}
++.status-pill-unknown {
++  color: var(--text-muted);
++  border-color: rgba(255, 255, 255, 0.14);
+ }
+ 
+ .demos-list {
+
+
+thinking
+**Updating app.js structure**
+file update
+M /Users/yani/Noema/backend/web/static/app.js
+@@ -5,2 +5,27 @@
+ 
++  function statusClass(status) {
++    if (!status) return 'status-pill-unknown';
++    var normalized = String(status).toUpperCase();
++    if (normalized === 'PASS') return 'status-pill-pass';
++    if (normalized === 'FAIL') return 'status-pill-fail';
++    return 'status-pill-unknown';
++  }
++
++  function formatTimestamp(ts) {
++    if (!ts) return null;
++    var date = new Date(ts);
++    if (Number.isNaN(date.getTime())) return null;
++    var diffMs = Math.abs(Date.now() - date.getTime());
++    var minutes = Math.round(diffMs / 60000);
++    var label = '';
++    if (minutes < 1) label = 'just now';
++    else if (minutes < 60) label = minutes + 'm ago';
++    else if (minutes < 1440) label = Math.round(minutes / 60) + 'h ago';
++    else label = Math.round(minutes / 1440) + 'd ago';
++    return {
++      label: label,
++      title: date.toLocaleString()
++    };
++  }
++
+   function loadRecentRuns() {
+@@ -21,3 +46,34 @@
+         a.className = 'recent-run-item';
+-        a.textContent = (r.name || r.run_id) + ' — ' + r.status + ' · ' + (r.ts ? new Date(r.ts).toLocaleString() : '');
++
++        var header = document.createElement('div');
++        header.className = 'recent-run-header';
++
++        var name = document.createElement('div');
++        name.className = 'recent-run-name';
++        name.textContent = r.name || r.run_id;
++
++        var status = document.createElement('span');
++        status.className = 'status-pill ' + statusClass(r.status);
++        status.textContent = r.status || 'UNKNOWN';
++
++        header.appendChild(name);
++        header.appendChild(status);
++
++        var meta = document.createElement('div');
++        meta.className = 'recent-run-meta';
++
++        var runId = document.createElement('span');
++        runId.textContent = 'Run ID: ' + r.run_id;
++        meta.appendChild(runId);
++
++        var ts = formatTimestamp(r.ts);
++        if (ts) {
++          var time = document.createElement('span');
++          time.textContent = ts.label;
++          time.title = ts.title;
++          meta.appendChild(time);
++        }
++
++        a.appendChild(header);
++        a.appendChild(meta);
+         listEl.appendChild(a);
 apply_patch(auto_approved=true) exited 0 in 37ms:
 Success. Updated the following files:
-M internal/evaluate/handler_test.go
+M /Users/yani/Noema/backend/web/static/app.js
 file update:
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 183c064a31a280c8ca8dba5b4c55420b2f8d445a..51b2b30093747df682b1379eff8e6012b3acffe9
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -211,3 +211,28 @@
- 		t.Fatalf("unexpected error: %v", err)
- 	}
- }
-+
-+func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
-+	spec := Spec{
-+		SchemaVersion: 1,
-+		Constraints: []Constraint{
-+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
-+			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
-+		},
-+	}
-+	if err := validateSpec(spec); err == nil {
-+		t.Fatalf("expected error for empty constraint id")
-+	}
-+}
-+
-+func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
-+	spec := Spec{
-+		SchemaVersion: 1,
-+		CustomConstraints: []CustomConstraint{
-+			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
-+		},
-+	}
-+	if err := validateSpec(spec); err == nil {
-+		t.Fatalf("expected error for empty custom constraint id")
-+	}
-+}
-diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
-index 5fc2e874e76c17e562acdc5bd1a08ade0d900cf6..f104c4565a7f911ac198d0e3df4857285f7b47bb
---- a/backend/internal/evaluate/parse.go
-+++ b/backend/internal/evaluate/parse.go
-@@ -4,6 +4,7 @@
- 	"encoding/json"
- 	"fmt"
- 	"mime/multipart"
-+	"strings"
+diff --git a/backend/web/static/app.js b/backend/web/static/app.js
+index 2c7c47894c206b2f60566adedf5ee6f2c10f59df..72a6ceebf13aabaa3c1aef50c89b07ff75bc5c21
+--- a/backend/web/static/app.js
++++ b/backend/web/static/app.js
+@@ -3,6 +3,31 @@
+   var listEl = document.getElementById('recent-runs-list');
+   var emptyEl = document.getElementById('recent-runs-empty');
  
- 	"noema/internal/config"
- )
-@@ -25,11 +26,17 @@
- 		return fmt.Errorf("unsupported schema_version")
- 	}
- 	for _, cn := range spec.Constraints {
-+		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
-+			return fmt.Errorf("constraint id must be non-empty")
-+		}
- 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
- 			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
- 		}
- 	}
- 	for _, cn := range spec.CustomConstraints {
-+		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
-+			return fmt.Errorf("custom_constraint id must be non-empty")
-+		}
- 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
- 			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
- 		}
++  function statusClass(status) {
++    if (!status) return 'status-pill-unknown';
++    var normalized = String(status).toUpperCase();
++    if (normalized === 'PASS') return 'status-pill-pass';
++    if (normalized === 'FAIL') return 'status-pill-fail';
++    return 'status-pill-unknown';
++  }
++
++  function formatTimestamp(ts) {
++    if (!ts) return null;
++    var date = new Date(ts);
++    if (Number.isNaN(date.getTime())) return null;
++    var diffMs = Math.abs(Date.now() - date.getTime());
++    var minutes = Math.round(diffMs / 60000);
++    var label = '';
++    if (minutes < 1) label = 'just now';
++    else if (minutes < 60) label = minutes + 'm ago';
++    else if (minutes < 1440) label = Math.round(minutes / 60) + 'h ago';
++    else label = Math.round(minutes / 1440) + 'd ago';
++    return {
++      label: label,
++      title: date.toLocaleString()
++    };
++  }
++
+   function loadRecentRuns() {
+     try {
+       var raw = localStorage.getItem(STORAGE_KEY);
+@@ -19,7 +44,38 @@
+         var a = document.createElement('a');
+         a.href = '/app/results/' + r.run_id;
+         a.className = 'recent-run-item';
+-        a.textContent = (r.name || r.run_id) + ' — ' + r.status + ' · ' + (r.ts ? new Date(r.ts).toLocaleString() : '');
++
++        var header = document.createElement('div');
++        header.className = 'recent-run-header';
++
++        var name = document.createElement('div');
++        name.className = 'recent-run-name';
++        name.textContent = r.name || r.run_id;
++
++        var status = document.createElement('span');
++        status.className = 'status-pill ' + statusClass(r.status);
++        status.textContent = r.status || 'UNKNOWN';
++
++        header.appendChild(name);
++        header.appendChild(status);
++
++        var meta = document.createElement('div');
++        meta.className = 'recent-run-meta';
++
++        var runId = document.createElement('span');
++        runId.textContent = 'Run ID: ' + r.run_id;
++        meta.appendChild(runId);
++
++        var ts = formatTimestamp(r.ts);
++        if (ts) {
++          var time = document.createElement('span');
++          time.textContent = ts.label;
++          time.title = ts.title;
++          meta.appendChild(time);
++        }
++
++        a.appendChild(header);
++        a.appendChild(meta);
+         listEl.appendChild(a);
+       });
+     } catch (e) {
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 2a81f1ed61a902fae23c0ba052b7863c60caec74..43533f4226e7f58e614b89ca453678979770a780
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -320,17 +320,67 @@
+ .recent-runs-list { display: flex; flex-direction: column; gap: 0.6rem; }
+ 
+ .recent-run-item {
+-  display: block;
++  display: flex;
++  flex-direction: column;
++  gap: 0.35rem;
+   color: var(--text-muted);
+   text-decoration: none;
+   font-size: 0.95rem;
+-  padding: 0.7rem 0.6rem;
+-  border-radius: 10px;
+-  transition: color 0.15s ease, background 0.15s ease;
++  padding: 0.75rem 0.7rem;
++  border-radius: 12px;
++  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
++  border: 1px solid transparent;
+ }
+ .recent-run-item:hover {
+-  color: var(--accent);
++  color: var(--text);
+   background: rgba(255,255,255,0.03);
++  border-color: rgba(255,255,255,0.08);
++}
++
++.recent-run-header {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 0.75rem;
++}
++
++.recent-run-name {
++  font-weight: 500;
++  color: var(--text);
++}
++
++.recent-run-meta {
++  display: flex;
++  align-items: center;
++  gap: 0.75rem;
++  flex-wrap: wrap;
++  font-size: 0.85rem;
++  color: var(--text-muted);
++}
++
++.status-pill {
++  font-size: 0.7rem;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++  padding: 0.2rem 0.55rem;
++  border-radius: 999px;
++  border: 1px solid var(--border);
++  color: var(--text-muted);
++  white-space: nowrap;
++}
++.status-pill-pass {
++  color: #86efac;
++  border-color: rgba(34, 197, 94, 0.5);
++  background: rgba(34, 197, 94, 0.12);
++}
++.status-pill-fail {
++  color: #fca5a5;
++  border-color: rgba(248, 113, 113, 0.5);
++  background: rgba(248, 113, 113, 0.12);
++}
++.status-pill-unknown {
++  color: var(--text-muted);
++  border-color: rgba(255, 255, 255, 0.14);
+ }
+ 
+ .demos-list {
 
 file update:
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 183c064a31a280c8ca8dba5b4c55420b2f8d445a..51b2b30093747df682b1379eff8e6012b3acffe9
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -211,3 +211,28 @@
- 		t.Fatalf("unexpected error: %v", err)
- 	}
- }
-+
-+func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
-+	spec := Spec{
-+		SchemaVersion: 1,
-+		Constraints: []Constraint{
-+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
-+			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
-+		},
-+	}
-+	if err := validateSpec(spec); err == nil {
-+		t.Fatalf("expected error for empty constraint id")
-+	}
-+}
-+
-+func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
-+	spec := Spec{
-+		SchemaVersion: 1,
-+		CustomConstraints: []CustomConstraint{
-+			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
-+		},
-+	}
-+	if err := validateSpec(spec); err == nil {
-+		t.Fatalf("expected error for empty custom constraint id")
-+	}
-+}
-diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
-index 5fc2e874e76c17e562acdc5bd1a08ade0d900cf6..f104c4565a7f911ac198d0e3df4857285f7b47bb
---- a/backend/internal/evaluate/parse.go
-+++ b/backend/internal/evaluate/parse.go
-@@ -4,6 +4,7 @@
- 	"encoding/json"
- 	"fmt"
- 	"mime/multipart"
-+	"strings"
+diff --git a/backend/web/static/app.js b/backend/web/static/app.js
+index 2c7c47894c206b2f60566adedf5ee6f2c10f59df..72a6ceebf13aabaa3c1aef50c89b07ff75bc5c21
+--- a/backend/web/static/app.js
++++ b/backend/web/static/app.js
+@@ -3,6 +3,31 @@
+   var listEl = document.getElementById('recent-runs-list');
+   var emptyEl = document.getElementById('recent-runs-empty');
  
- 	"noema/internal/config"
- )
-@@ -25,11 +26,17 @@
- 		return fmt.Errorf("unsupported schema_version")
- 	}
- 	for _, cn := range spec.Constraints {
-+		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
-+			return fmt.Errorf("constraint id must be non-empty")
-+		}
- 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
- 			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
- 		}
- 	}
- 	for _, cn := range spec.CustomConstraints {
-+		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
-+			return fmt.Errorf("custom_constraint id must be non-empty")
-+		}
- 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
- 			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
- 		}
++  function statusClass(status) {
++    if (!status) return 'status-pill-unknown';
++    var normalized = String(status).toUpperCase();
++    if (normalized === 'PASS') return 'status-pill-pass';
++    if (normalized === 'FAIL') return 'status-pill-fail';
++    return 'status-pill-unknown';
++  }
++
++  function formatTimestamp(ts) {
++    if (!ts) return null;
++    var date = new Date(ts);
++    if (Number.isNaN(date.getTime())) return null;
++    var diffMs = Math.abs(Date.now() - date.getTime());
++    var minutes = Math.round(diffMs / 60000);
++    var label = '';
++    if (minutes < 1) label = 'just now';
++    else if (minutes < 60) label = minutes + 'm ago';
++    else if (minutes < 1440) label = Math.round(minutes / 60) + 'h ago';
++    else label = Math.round(minutes / 1440) + 'd ago';
++    return {
++      label: label,
++      title: date.toLocaleString()
++    };
++  }
++
+   function loadRecentRuns() {
+     try {
+       var raw = localStorage.getItem(STORAGE_KEY);
+@@ -19,7 +44,38 @@
+         var a = document.createElement('a');
+         a.href = '/app/results/' + r.run_id;
+         a.className = 'recent-run-item';
+-        a.textContent = (r.name || r.run_id) + ' — ' + r.status + ' · ' + (r.ts ? new Date(r.ts).toLocaleString() : '');
++
++        var header = document.createElement('div');
++        header.className = 'recent-run-header';
++
++        var name = document.createElement('div');
++        name.className = 'recent-run-name';
++        name.textContent = r.name || r.run_id;
++
++        var status = document.createElement('span');
++        status.className = 'status-pill ' + statusClass(r.status);
++        status.textContent = r.status || 'UNKNOWN';
++
++        header.appendChild(name);
++        header.appendChild(status);
++
++        var meta = document.createElement('div');
++        meta.className = 'recent-run-meta';
++
++        var runId = document.createElement('span');
++        runId.textContent = 'Run ID: ' + r.run_id;
++        meta.appendChild(runId);
++
++        var ts = formatTimestamp(r.ts);
++        if (ts) {
++          var time = document.createElement('span');
++          time.textContent = ts.label;
++          time.title = ts.title;
++          meta.appendChild(time);
++        }
++
++        a.appendChild(header);
++        a.appendChild(meta);
+         listEl.appendChild(a);
+       });
+     } catch (e) {
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 2a81f1ed61a902fae23c0ba052b7863c60caec74..43533f4226e7f58e614b89ca453678979770a780
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -320,17 +320,67 @@
+ .recent-runs-list { display: flex; flex-direction: column; gap: 0.6rem; }
+ 
+ .recent-run-item {
+-  display: block;
++  display: flex;
++  flex-direction: column;
++  gap: 0.35rem;
+   color: var(--text-muted);
+   text-decoration: none;
+   font-size: 0.95rem;
+-  padding: 0.7rem 0.6rem;
+-  border-radius: 10px;
+-  transition: color 0.15s ease, background 0.15s ease;
++  padding: 0.75rem 0.7rem;
++  border-radius: 12px;
++  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
++  border: 1px solid transparent;
+ }
+ .recent-run-item:hover {
+-  color: var(--accent);
++  color: var(--text);
+   background: rgba(255,255,255,0.03);
++  border-color: rgba(255,255,255,0.08);
++}
++
++.recent-run-header {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 0.75rem;
++}
++
++.recent-run-name {
++  font-weight: 500;
++  color: var(--text);
++}
++
++.recent-run-meta {
++  display: flex;
++  align-items: center;
++  gap: 0.75rem;
++  flex-wrap: wrap;
++  font-size: 0.85rem;
++  color: var(--text-muted);
++}
++
++.status-pill {
++  font-size: 0.7rem;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++  padding: 0.2rem 0.55rem;
++  border-radius: 999px;
++  border: 1px solid var(--border);
++  color: var(--text-muted);
++  white-space: nowrap;
++}
++.status-pill-pass {
++  color: #86efac;
++  border-color: rgba(34, 197, 94, 0.5);
++  background: rgba(34, 197, 94, 0.12);
++}
++.status-pill-fail {
++  color: #fca5a5;
++  border-color: rgba(248, 113, 113, 0.5);
++  background: rgba(248, 113, 113, 0.12);
++}
++.status-pill-unknown {
++  color: var(--text-muted);
++  border-color: rgba(255, 255, 255, 0.14);
+ }
+ 
+ .demos-list {
 
 
 thinking
-**Running all tests**
-
-I'm executing the full test suite with `go test ./...` to verify correctness across the entire codebase.
+**Running full test suite**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backendfile update:
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 183c064a31a280c8ca8dba5b4c55420b2f8d445a..51b2b30093747df682b1379eff8e6012b3acffe9
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -211,3 +211,28 @@
- 		t.Fatalf("unexpected error: %v", err)
- 	}
- }
-+
-+func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
-+	spec := Spec{
-+		SchemaVersion: 1,
-+		Constraints: []Constraint{
-+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
-+			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
-+		},
-+	}
-+	if err := validateSpec(spec); err == nil {
-+		t.Fatalf("expected error for empty constraint id")
-+	}
-+}
-+
-+func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
-+	spec := Spec{
-+		SchemaVersion: 1,
-+		CustomConstraints: []CustomConstraint{
-+			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
-+		},
-+	}
-+	if err := validateSpec(spec); err == nil {
-+		t.Fatalf("expected error for empty custom constraint id")
-+	}
-+}
-diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
-index 5fc2e874e76c17e562acdc5bd1a08ade0d900cf6..f104c4565a7f911ac198d0e3df4857285f7b47bb
---- a/backend/internal/evaluate/parse.go
-+++ b/backend/internal/evaluate/parse.go
-@@ -4,6 +4,7 @@
- 	"encoding/json"
- 	"fmt"
- 	"mime/multipart"
-+	"strings"
- 
- 	"noema/internal/config"
- )
-@@ -25,11 +26,17 @@
- 		return fmt.Errorf("unsupported schema_version")
- 	}
- 	for _, cn := range spec.Constraints {
-+		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
-+			return fmt.Errorf("constraint id must be non-empty")
-+		}
- 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
- 			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
- 		}
- 	}
- 	for _, cn := range spec.CustomConstraints {
-+		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
-+			return fmt.Errorf("custom_constraint id must be non-empty")
-+		}
- 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
- 			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
- 		}
-
- succeeded in 2.22s:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 201ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	0.027s
+ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
-?   	noema/internal/verify	[no test files]
+ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
-
-thinking
-**Waiting for process output**
 file update:
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 183c064a31a280c8ca8dba5b4c55420b2f8d445a..51b2b30093747df682b1379eff8e6012b3acffe9
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -211,3 +211,28 @@
- 		t.Fatalf("unexpected error: %v", err)
- 	}
- }
-+
-+func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
-+	spec := Spec{
-+		SchemaVersion: 1,
-+		Constraints: []Constraint{
-+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
-+			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
-+		},
-+	}
-+	if err := validateSpec(spec); err == nil {
-+		t.Fatalf("expected error for empty constraint id")
-+	}
-+}
-+
-+func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
-+	spec := Spec{
-+		SchemaVersion: 1,
-+		CustomConstraints: []CustomConstraint{
-+			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
-+		},
-+	}
-+	if err := validateSpec(spec); err == nil {
-+		t.Fatalf("expected error for empty custom constraint id")
-+	}
-+}
-diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
-index 5fc2e874e76c17e562acdc5bd1a08ade0d900cf6..f104c4565a7f911ac198d0e3df4857285f7b47bb
---- a/backend/internal/evaluate/parse.go
-+++ b/backend/internal/evaluate/parse.go
-@@ -4,6 +4,7 @@
- 	"encoding/json"
- 	"fmt"
- 	"mime/multipart"
-+	"strings"
+diff --git a/backend/web/static/app.js b/backend/web/static/app.js
+index 2c7c47894c206b2f60566adedf5ee6f2c10f59df..72a6ceebf13aabaa3c1aef50c89b07ff75bc5c21
+--- a/backend/web/static/app.js
++++ b/backend/web/static/app.js
+@@ -3,6 +3,31 @@
+   var listEl = document.getElementById('recent-runs-list');
+   var emptyEl = document.getElementById('recent-runs-empty');
  
- 	"noema/internal/config"
- )
-@@ -25,11 +26,17 @@
- 		return fmt.Errorf("unsupported schema_version")
- 	}
- 	for _, cn := range spec.Constraints {
-+		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
-+			return fmt.Errorf("constraint id must be non-empty")
-+		}
- 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
- 			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
- 		}
- 	}
- 	for _, cn := range spec.CustomConstraints {
-+		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
-+			return fmt.Errorf("custom_constraint id must be non-empty")
-+		}
- 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
- 			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
- 		}
++  function statusClass(status) {
++    if (!status) return 'status-pill-unknown';
++    var normalized = String(status).toUpperCase();
++    if (normalized === 'PASS') return 'status-pill-pass';
++    if (normalized === 'FAIL') return 'status-pill-fail';
++    return 'status-pill-unknown';
++  }
++
++  function formatTimestamp(ts) {
++    if (!ts) return null;
++    var date = new Date(ts);
++    if (Number.isNaN(date.getTime())) return null;
++    var diffMs = Math.abs(Date.now() - date.getTime());
++    var minutes = Math.round(diffMs / 60000);
++    var label = '';
++    if (minutes < 1) label = 'just now';
++    else if (minutes < 60) label = minutes + 'm ago';
++    else if (minutes < 1440) label = Math.round(minutes / 60) + 'h ago';
++    else label = Math.round(minutes / 1440) + 'd ago';
++    return {
++      label: label,
++      title: date.toLocaleString()
++    };
++  }
++
+   function loadRecentRuns() {
+     try {
+       var raw = localStorage.getItem(STORAGE_KEY);
+@@ -19,7 +44,38 @@
+         var a = document.createElement('a');
+         a.href = '/app/results/' + r.run_id;
+         a.className = 'recent-run-item';
+-        a.textContent = (r.name || r.run_id) + ' — ' + r.status + ' · ' + (r.ts ? new Date(r.ts).toLocaleString() : '');
++
++        var header = document.createElement('div');
++        header.className = 'recent-run-header';
++
++        var name = document.createElement('div');
++        name.className = 'recent-run-name';
++        name.textContent = r.name || r.run_id;
++
++        var status = document.createElement('span');
++        status.className = 'status-pill ' + statusClass(r.status);
++        status.textContent = r.status || 'UNKNOWN';
++
++        header.appendChild(name);
++        header.appendChild(status);
++
++        var meta = document.createElement('div');
++        meta.className = 'recent-run-meta';
++
++        var runId = document.createElement('span');
++        runId.textContent = 'Run ID: ' + r.run_id;
++        meta.appendChild(runId);
++
++        var ts = formatTimestamp(r.ts);
++        if (ts) {
++          var time = document.createElement('span');
++          time.textContent = ts.label;
++          time.title = ts.title;
++          meta.appendChild(time);
++        }
++
++        a.appendChild(header);
++        a.appendChild(meta);
+         listEl.appendChild(a);
+       });
+     } catch (e) {
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 2a81f1ed61a902fae23c0ba052b7863c60caec74..43533f4226e7f58e614b89ca453678979770a780
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -320,17 +320,67 @@
+ .recent-runs-list { display: flex; flex-direction: column; gap: 0.6rem; }
+ 
+ .recent-run-item {
+-  display: block;
++  display: flex;
++  flex-direction: column;
++  gap: 0.35rem;
+   color: var(--text-muted);
+   text-decoration: none;
+   font-size: 0.95rem;
+-  padding: 0.7rem 0.6rem;
+-  border-radius: 10px;
+-  transition: color 0.15s ease, background 0.15s ease;
++  padding: 0.75rem 0.7rem;
++  border-radius: 12px;
++  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
++  border: 1px solid transparent;
+ }
+ .recent-run-item:hover {
+-  color: var(--accent);
++  color: var(--text);
+   background: rgba(255,255,255,0.03);
++  border-color: rgba(255,255,255,0.08);
++}
++
++.recent-run-header {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 0.75rem;
++}
++
++.recent-run-name {
++  font-weight: 500;
++  color: var(--text);
++}
++
++.recent-run-meta {
++  display: flex;
++  align-items: center;
++  gap: 0.75rem;
++  flex-wrap: wrap;
++  font-size: 0.85rem;
++  color: var(--text-muted);
++}
++
++.status-pill {
++  font-size: 0.7rem;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++  padding: 0.2rem 0.55rem;
++  border-radius: 999px;
++  border: 1px solid var(--border);
++  color: var(--text-muted);
++  white-space: nowrap;
++}
++.status-pill-pass {
++  color: #86efac;
++  border-color: rgba(34, 197, 94, 0.5);
++  background: rgba(34, 197, 94, 0.12);
++}
++.status-pill-fail {
++  color: #fca5a5;
++  border-color: rgba(248, 113, 113, 0.5);
++  background: rgba(248, 113, 113, 0.12);
++}
++.status-pill-unknown {
++  color: var(--text-muted);
++  border-color: rgba(255, 255, 255, 0.14);
+ }
+ 
+ .demos-list {
 
-
-thinking
-**Preparing final summary and tests**
-
-I'm consolidating the final changed files list and test results, confirming only two files changed and that 'go test ./...' passes successfully.
 codex
-**Summary**
-Added validation to reject enabled constraints with empty IDs and added tests covering both preset and custom constraints.
+What you changed (short)
+1. Improved the dashboard recent runs list with clearer status pills and structured metadata (run ID + relative time) for faster scanning.
+2. Added styling to support the richer recent run layout and status indicators.
 
-**What Changed**
-- Enforced non-empty IDs for enabled constraints and custom constraints in `internal/evaluate/parse.go`.
-- Added tests for empty constraint IDs in `internal/evaluate/handler_test.go`.
-
-**Tests Run**
-- `cd /Users/yani/Noema/backend && go test ./...`
-
-**Next Steps**
-1. If you want stricter validation, we can also enforce non-empty `title`/`description` for enabled custom constraints.
+Tests run
+1. `go test ./...`
 file update:
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 183c064a31a280c8ca8dba5b4c55420b2f8d445a..51b2b30093747df682b1379eff8e6012b3acffe9
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -211,3 +211,28 @@
- 		t.Fatalf("unexpected error: %v", err)
- 	}
- }
-+
-+func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
-+	spec := Spec{
-+		SchemaVersion: 1,
-+		Constraints: []Constraint{
-+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
-+			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
-+		},
-+	}
-+	if err := validateSpec(spec); err == nil {
-+		t.Fatalf("expected error for empty constraint id")
-+	}
-+}
-+
-+func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
-+	spec := Spec{
-+		SchemaVersion: 1,
-+		CustomConstraints: []CustomConstraint{
-+			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
-+		},
-+	}
-+	if err := validateSpec(spec); err == nil {
-+		t.Fatalf("expected error for empty custom constraint id")
-+	}
-+}
-diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
-index 5fc2e874e76c17e562acdc5bd1a08ade0d900cf6..f104c4565a7f911ac198d0e3df4857285f7b47bb
---- a/backend/internal/evaluate/parse.go
-+++ b/backend/internal/evaluate/parse.go
-@@ -4,6 +4,7 @@
- 	"encoding/json"
- 	"fmt"
- 	"mime/multipart"
-+	"strings"
+diff --git a/backend/web/static/app.js b/backend/web/static/app.js
+index 2c7c47894c206b2f60566adedf5ee6f2c10f59df..72a6ceebf13aabaa3c1aef50c89b07ff75bc5c21
+--- a/backend/web/static/app.js
++++ b/backend/web/static/app.js
+@@ -3,6 +3,31 @@
+   var listEl = document.getElementById('recent-runs-list');
+   var emptyEl = document.getElementById('recent-runs-empty');
  
- 	"noema/internal/config"
- )
-@@ -25,11 +26,17 @@
- 		return fmt.Errorf("unsupported schema_version")
- 	}
- 	for _, cn := range spec.Constraints {
-+		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
-+			return fmt.Errorf("constraint id must be non-empty")
-+		}
- 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
- 			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
- 		}
- 	}
- 	for _, cn := range spec.CustomConstraints {
-+		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
-+			return fmt.Errorf("custom_constraint id must be non-empty")
-+		}
- 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
- 			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
- 		}
++  function statusClass(status) {
++    if (!status) return 'status-pill-unknown';
++    var normalized = String(status).toUpperCase();
++    if (normalized === 'PASS') return 'status-pill-pass';
++    if (normalized === 'FAIL') return 'status-pill-fail';
++    return 'status-pill-unknown';
++  }
++
++  function formatTimestamp(ts) {
++    if (!ts) return null;
++    var date = new Date(ts);
++    if (Number.isNaN(date.getTime())) return null;
++    var diffMs = Math.abs(Date.now() - date.getTime());
++    var minutes = Math.round(diffMs / 60000);
++    var label = '';
++    if (minutes < 1) label = 'just now';
++    else if (minutes < 60) label = minutes + 'm ago';
++    else if (minutes < 1440) label = Math.round(minutes / 60) + 'h ago';
++    else label = Math.round(minutes / 1440) + 'd ago';
++    return {
++      label: label,
++      title: date.toLocaleString()
++    };
++  }
++
+   function loadRecentRuns() {
+     try {
+       var raw = localStorage.getItem(STORAGE_KEY);
+@@ -19,7 +44,38 @@
+         var a = document.createElement('a');
+         a.href = '/app/results/' + r.run_id;
+         a.className = 'recent-run-item';
+-        a.textContent = (r.name || r.run_id) + ' — ' + r.status + ' · ' + (r.ts ? new Date(r.ts).toLocaleString() : '');
++
++        var header = document.createElement('div');
++        header.className = 'recent-run-header';
++
++        var name = document.createElement('div');
++        name.className = 'recent-run-name';
++        name.textContent = r.name || r.run_id;
++
++        var status = document.createElement('span');
++        status.className = 'status-pill ' + statusClass(r.status);
++        status.textContent = r.status || 'UNKNOWN';
++
++        header.appendChild(name);
++        header.appendChild(status);
++
++        var meta = document.createElement('div');
++        meta.className = 'recent-run-meta';
++
++        var runId = document.createElement('span');
++        runId.textContent = 'Run ID: ' + r.run_id;
++        meta.appendChild(runId);
++
++        var ts = formatTimestamp(r.ts);
++        if (ts) {
++          var time = document.createElement('span');
++          time.textContent = ts.label;
++          time.title = ts.title;
++          meta.appendChild(time);
++        }
++
++        a.appendChild(header);
++        a.appendChild(meta);
+         listEl.appendChild(a);
+       });
+     } catch (e) {
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 2a81f1ed61a902fae23c0ba052b7863c60caec74..43533f4226e7f58e614b89ca453678979770a780
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -320,17 +320,67 @@
+ .recent-runs-list { display: flex; flex-direction: column; gap: 0.6rem; }
+ 
+ .recent-run-item {
+-  display: block;
++  display: flex;
++  flex-direction: column;
++  gap: 0.35rem;
+   color: var(--text-muted);
+   text-decoration: none;
+   font-size: 0.95rem;
+-  padding: 0.7rem 0.6rem;
+-  border-radius: 10px;
+-  transition: color 0.15s ease, background 0.15s ease;
++  padding: 0.75rem 0.7rem;
++  border-radius: 12px;
++  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
++  border: 1px solid transparent;
+ }
+ .recent-run-item:hover {
+-  color: var(--accent);
++  color: var(--text);
+   background: rgba(255,255,255,0.03);
++  border-color: rgba(255,255,255,0.08);
++}
++
++.recent-run-header {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 0.75rem;
++}
++
++.recent-run-name {
++  font-weight: 500;
++  color: var(--text);
++}
++
++.recent-run-meta {
++  display: flex;
++  align-items: center;
++  gap: 0.75rem;
++  flex-wrap: wrap;
++  font-size: 0.85rem;
++  color: var(--text-muted);
++}
++
++.status-pill {
++  font-size: 0.7rem;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++  padding: 0.2rem 0.55rem;
++  border-radius: 999px;
++  border: 1px solid var(--border);
++  color: var(--text-muted);
++  white-space: nowrap;
++}
++.status-pill-pass {
++  color: #86efac;
++  border-color: rgba(34, 197, 94, 0.5);
++  background: rgba(34, 197, 94, 0.12);
++}
++.status-pill-fail {
++  color: #fca5a5;
++  border-color: rgba(248, 113, 113, 0.5);
++  background: rgba(248, 113, 113, 0.12);
++}
++.status-pill-unknown {
++  color: var(--text-muted);
++  border-color: rgba(255, 255, 255, 0.14);
+ }
+ 
+ .demos-list {
 
 tokens used
-30,184
-**Summary**
-Added validation to reject enabled constraints with empty IDs and added tests covering both preset and custom constraints.
+38,432
+What you changed (short)
+1. Improved the dashboard recent runs list with clearer status pills and structured metadata (run ID + relative time) for faster scanning.
+2. Added styling to support the richer recent run layout and status indicators.
 
-**What Changed**
-- Enforced non-empty IDs for enabled constraints and custom constraints in `internal/evaluate/parse.go`.
-- Added tests for empty constraint IDs in `internal/evaluate/handler_test.go`.
-
-**Tests Run**
-- `cd /Users/yani/Noema/backend && go test ./...`
-
-**Next Steps**
-1. If you want stricter validation, we can also enforce non-empty `title`/`description` for enabled custom constraints.
+Tests run
+1. `go test ./...`
