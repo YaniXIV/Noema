@@ -22,10 +22,13 @@ func readImages(files []*multipart.FileHeader) ([]ImageInfo, error) {
 		if err != nil {
 			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
 		}
-		defer src.Close()
 		data, err := io.ReadAll(src)
+		closeErr := src.Close()
 		if err != nil {
 			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("could not close image %q: %w", fh.Filename, closeErr)
 		}
 		mimeType := strings.TrimSpace(fh.Header.Get("Content-Type"))
 		if mimeType == "" {
