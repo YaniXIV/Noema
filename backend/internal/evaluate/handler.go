@@ -44,9 +44,17 @@ type Proof struct {
 // Handler handles POST /api/evaluate. Expects CookieAuth to have run first.
 func Handler(runsDir string, maxRuns int) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		const multipartOverhead = 2 << 20
+		maxBody := int64(config.MaxDatasetBytes) + int64(config.MaxImages*config.MaxImageBytes) + multipartOverhead
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBody)
+
 		// Parse multipart: spec (string), dataset (file, required), images (files, optional)
 		form, err := c.MultipartForm()
 		if err != nil {
+			if isBodyTooLarge(err) {
+				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+				return
+			}
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid multipart form"})
 			return
 		}
@@ -251,4 +259,11 @@ func stubEvalOutput(enabled map[string]ConstraintRule) EvalOutput {
 
 func jsonBytes(v any) ([]byte, error) {
 	return json.Marshal(v)
+}
+
+func isBodyTooLarge(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "request body too large")
 }

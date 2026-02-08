@@ -1,0 +1,521 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3c96-73d3-7483-a087-f7f83bb6d6bb
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Running tests with exec**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 91ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Searching for reliability improvements**
+
+I'll look for flaky or fragile test patterns to target one meaningful improvement in up to three files.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"TODO|FIXME|panic\\(|log\\.Fatal\" -S" in /Users/yani/Noema/backend succeeded in 52ms:
+cmd/server/main.go:127:		log.Fatal(err)
+
+thinking
+**Checking for log.Fatal usage**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' cmd/server/main.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package main
+
+import (
+	"context"
+	"log"
+	"os"
+	"strings"
+
+	"noema/internal/auth"
+	"noema/internal/config"
+	"noema/internal/evaluate"
+	"noema/internal/gemini"
+	"noema/internal/verify"
+	"noema/internal/web"
+
+	"github.com/gin-gonic/gin"
+)
+
+func main() {
+	if err := config.Load(); err != nil {
+
+thinking
+**Considering startup readiness checks**
+
+I'm exploring adding startup checks to ensure HTML templates and required directories for uploads and runs exist, aiming to prevent runtime errors and improve server reliability. Next, I'll search for error handling around config dirs like UploadsDir or RunsDir.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"UploadsDir\\(|RunsDir\\(\" internal -S" in /Users/yani/Noema/backend succeeded in 51ms:
+internal/config/config.go:44:func UploadsDir() string {
+internal/config/config.go:52:func RunsDir() string {
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,160p' internal/config/config.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package config
+
+import (
+	"os"
+	"strconv"
+
+	"github.com/joho/godotenv"
+)
+
+const devCookieSecret = "dev-secret-change-in-production"
+
+// Load reads .env from the current directory and sets env vars.
+// Safe to call multiple times; existing env vars are not overwritten.
+func Load() error {
+	return godotenv.Load()
+}
+
+// JudgeKey returns the judge key used to gate protected routes.
+func JudgeKey() string {
+	return os.Getenv("JUDGE_KEY")
+
+thinking
+**Checking upload directory creation**
+
+I'm verifying whether the uploads/runs directory is created before handling POST requests, focusing on the upload handler to ensure it prevents runtime errors.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/web/upload.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package web
+
+import (
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+
+	"github.com/gin-gonic/gin"
+)
+
+// UploadData is passed to the upload template.
+type UploadData struct {
+	Error    string
+	Success  bool
+
+thinking
+**Planning robustness improvements**
+
+Considering normalizing file extensions to lowercase and adding context cancellation handling in evaluation or verification functions; next step is inspecting those areas for potential issues.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+
+thinking
+**Considering multipart size limits**
+
+I'm assessing that multipart form reading might lack size caps in evaluate and could allow large uploads, so adding a MaxBytesReader wrapping with config max limits could prevent memory issues. I'll verify config settings and current usage next.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "MaxMultipartMemory|MaxUploadBytes" -S' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/web/upload.go:33:	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
+internal/web/upload.go:49:	if file.Size > config.MaxUploadBytes {
+internal/config/limits.go:7:	MaxUploadBytes     = 50 * 1024 * 1024 // 50MB
+internal/config/limits.go:8:	MaxMultipartMemory = 100 << 20        // 100MB for evaluate (dataset + images)
+cmd/server/main.go:32:	r.MaxMultipartMemory = config.MaxMultipartMemory
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,120p' internal/config/limits.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package config
+
+const (
+	MaxDatasetBytes    = 50 * 1024 * 1024 // 50MB
+	MaxImageBytes      = 5 * 1024 * 1024  // 5MB
+	MaxImages          = 10
+	MaxUploadBytes     = 50 * 1024 * 1024 // 50MB
+	MaxMultipartMemory = 100 << 20        // 100MB for evaluate (dataset + images)
+)
+
+thinking
+**Reviewing validation for max bytes enforcement**
+
+I'm checking whether the system enforces a maximum byte limit during validation, particularly in functions related to parsing uploads.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '240,520p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+		out.Constraints = append(out.Constraints, EvalConstraintResult{
+			ID:        id,
+			Severity:  0,
+			Rationale: "stub",
+		})
+	}
+	sort.Slice(out.Constraints, func(i, j int) bool {
+		return out.Constraints[i].ID < out.Constraints[j].ID
+	})
+	return out
+}
+
+func jsonBytes(v any) ([]byte, error) {
+	return json.Marshal(v)
+}
+
+thinking
+**Planning request size enforcement**
+
+The multipart parser relies on gin's MaxMultipartMemory for in-memory limits, but file data may still be stored on disk temporarily, allowing large uploads. I'll enforce dataset and image size limits explicitly in the upload parsing logic.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "parseUploads" -n internal/evaluate -S' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/parse.go:56:func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.FileHeader, error) {
+internal/evaluate/handler_test.go:316:	if _, _, err := parseUploads(form); err == nil {
+internal/evaluate/handler_test.go:328:	if _, _, err := parseUploads(form); err == nil {
+internal/evaluate/handler.go:65:		datasetFile, imageFiles, err := parseUploads(form)
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"strings"
+
+	"noema/internal/config"
+)
+
+func parseSpec(form *multipart.Form) (Spec, error) {
+	specStrs := form.Value["spec"]
+	if len(specStrs) == 0 || specStrs[0] == "" {
+		return Spec{}, fmt.Errorf("missing field: spec")
+	}
+	if len(specStrs) > 1 {
+		return Spec{}, fmt.Errorf("only one spec value allowed")
+	}
+
+thinking
+**Noting dataset JSON read during parsing**
+
+Parsing uses sizes from FileHeader Size but still reads dataset JSON, which seems acceptable; improving validateDatasetJSON could help avoid panics in readDatasetFile.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "readDatasetFile" -n internal/evaluate -S' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/parse.go:89:	_, ds, err := readDatasetFile(fh)
+internal/evaluate/dataset.go:22:func readDatasetFile(fh *multipart.FileHeader) ([]byte, Dataset, error) {
+internal/evaluate/gemini_eval.go:35:	rawDataset, ds, err := readDatasetFile(datasetFile)
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+)
+
+type Dataset struct {
+	Items []DatasetItem `json:"items"`
+}
+
+type DatasetItem struct {
+	ID       string         `json:"id"`
+	Text     string         `json:"text"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+	ImageRef string         `json:"image_ref,omitempty"`
+}
+
+thinking
+**Planning request size limit**
+
+I'm planning to add a max request body size limit on the evaluate handler by wrapping the request body reader, using config values for dataset and image sizes to prevent DOS risks. I'll check and update existing tests for 413 responses accordingly.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"mime/multipart"
+	"net/textproto"
+	"os"
+	"path/filepath"
+	"sort"
+	"testing"
+	"time"
+)
+
+type formFile struct {
+	field       string
+	filename    string
+	contentType string
+	content     []byte
+
+
+thinking
+**Adding request size limit with MaxBytesReader**
+
+Planning to protect the evaluate handler by wrapping the request body with a MaxBytesReader using a computed limit from config plus multipart overhead, and improving error handling by detecting oversized bodies with a helper inside evaluate/handler.go to keep changes minimal and localized.
+thinking
+**Changing to 413 response for large bodies**
+
+Decided to return HTTP 413 with a clear "request body too large" message when MultipartForm reports oversized bodies, adding a helper to detect this error and applying MaxBytesReader with computed limits in handler.go, keeping all changes within one file and no new tests for now.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler.go
+@@ -46,2 +46,6 @@
+ 	return func(c *gin.Context) {
++		const multipartOverhead = 2 << 20
++		maxBody := int64(config.MaxDatasetBytes) + int64(config.MaxImages*config.MaxImageBytes) + multipartOverhead
++		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBody)
++
+ 		// Parse multipart: spec (string), dataset (file, required), images (files, optional)
+@@ -49,2 +53,6 @@
+ 		if err != nil {
++			if isBodyTooLarge(err) {
++				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
++				return
++			}
+ 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid multipart form"})
+@@ -254 +262,8 @@
+ }
++
++func isBodyTooLarge(err error) bool {
++	if err == nil {
++		return false
++	}
++	return strings.Contains(err.Error(), "request body too large")
++}
+apply_patch(auto_approved=true) exited 0 in 29ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/handler.go
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 2c620e03190193b00edad1bba0d3a664565c2c23..4f4ec64db9c59520ce0dccb60daa693b94c4fbad
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -44,9 +44,17 @@
+ // Handler handles POST /api/evaluate. Expects CookieAuth to have run first.
+ func Handler(runsDir string, maxRuns int) gin.HandlerFunc {
+ 	return func(c *gin.Context) {
++		const multipartOverhead = 2 << 20
++		maxBody := int64(config.MaxDatasetBytes) + int64(config.MaxImages*config.MaxImageBytes) + multipartOverhead
++		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBody)
++
+ 		// Parse multipart: spec (string), dataset (file, required), images (files, optional)
+ 		form, err := c.MultipartForm()
+ 		if err != nil {
++			if isBodyTooLarge(err) {
++				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
++				return
++			}
+ 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid multipart form"})
+ 			return
+ 		}
+@@ -252,3 +260,10 @@
+ func jsonBytes(v any) ([]byte, error) {
+ 	return json.Marshal(v)
+ }
++
++func isBodyTooLarge(err error) bool {
++	if err == nil {
++		return false
++	}
++	return strings.Contains(err.Error(), "request body too large")
++}
+
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 2c620e03190193b00edad1bba0d3a664565c2c23..4f4ec64db9c59520ce0dccb60daa693b94c4fbad
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -44,9 +44,17 @@
+ // Handler handles POST /api/evaluate. Expects CookieAuth to have run first.
+ func Handler(runsDir string, maxRuns int) gin.HandlerFunc {
+ 	return func(c *gin.Context) {
++		const multipartOverhead = 2 << 20
++		maxBody := int64(config.MaxDatasetBytes) + int64(config.MaxImages*config.MaxImageBytes) + multipartOverhead
++		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBody)
++
+ 		// Parse multipart: spec (string), dataset (file, required), images (files, optional)
+ 		form, err := c.MultipartForm()
+ 		if err != nil {
++			if isBodyTooLarge(err) {
++				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
++				return
++			}
+ 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid multipart form"})
+ 			return
+ 		}
+@@ -252,3 +260,10 @@
+ func jsonBytes(v any) ([]byte, error) {
+ 	return json.Marshal(v)
+ }
++
++func isBodyTooLarge(err error) bool {
++	if err == nil {
++		return false
++	}
++	return strings.Contains(err.Error(), "request body too large")
++}
+
+
+thinking
+**Rerunning full Go tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 527ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.071s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 2c620e03190193b00edad1bba0d3a664565c2c23..4f4ec64db9c59520ce0dccb60daa693b94c4fbad
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -44,9 +44,17 @@
+ // Handler handles POST /api/evaluate. Expects CookieAuth to have run first.
+ func Handler(runsDir string, maxRuns int) gin.HandlerFunc {
+ 	return func(c *gin.Context) {
++		const multipartOverhead = 2 << 20
++		maxBody := int64(config.MaxDatasetBytes) + int64(config.MaxImages*config.MaxImageBytes) + multipartOverhead
++		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBody)
++
+ 		// Parse multipart: spec (string), dataset (file, required), images (files, optional)
+ 		form, err := c.MultipartForm()
+ 		if err != nil {
++			if isBodyTooLarge(err) {
++				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
++				return
++			}
+ 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid multipart form"})
+ 			return
+ 		}
+@@ -252,3 +260,10 @@
+ func jsonBytes(v any) ([]byte, error) {
+ 	return json.Marshal(v)
+ }
++
++func isBodyTooLarge(err error) bool {
++	if err == nil {
++		return false
++	}
++	return strings.Contains(err.Error(), "request body too large")
++}
+
+codex
+What you changed (short)
+- Added a request body size cap for `/api/evaluate` and return `413` when multipart payloads exceed the configured dataset+image limits. This prevents oversized requests from exhausting memory.
+
+Tests run
+- `go test ./...`
+
+If you want, I can add a small test that asserts the 413 behavior on oversized bodies.
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 2c620e03190193b00edad1bba0d3a664565c2c23..4f4ec64db9c59520ce0dccb60daa693b94c4fbad
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -44,9 +44,17 @@
+ // Handler handles POST /api/evaluate. Expects CookieAuth to have run first.
+ func Handler(runsDir string, maxRuns int) gin.HandlerFunc {
+ 	return func(c *gin.Context) {
++		const multipartOverhead = 2 << 20
++		maxBody := int64(config.MaxDatasetBytes) + int64(config.MaxImages*config.MaxImageBytes) + multipartOverhead
++		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBody)
++
+ 		// Parse multipart: spec (string), dataset (file, required), images (files, optional)
+ 		form, err := c.MultipartForm()
+ 		if err != nil {
++			if isBodyTooLarge(err) {
++				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
++				return
++			}
+ 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid multipart form"})
+ 			return
+ 		}
+@@ -252,3 +260,10 @@
+ func jsonBytes(v any) ([]byte, error) {
+ 	return json.Marshal(v)
+ }
++
++func isBodyTooLarge(err error) bool {
++	if err == nil {
++		return false
++	}
++	return strings.Contains(err.Error(), "request body too large")
++}
+
+tokens used
+30,952
+What you changed (short)
+- Added a request body size cap for `/api/evaluate` and return `413` when multipart payloads exceed the configured dataset+image limits. This prevents oversized requests from exhausting memory.
+
+Tests run
+- `go test ./...`
+
+If you want, I can add a small test that asserts the 413 behavior on oversized bodies.
