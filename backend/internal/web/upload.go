@@ -84,9 +84,20 @@ func UploadPost(c *gin.Context, uploadTmpl string, uploadsDir string) {
 		return
 	}
 	defer out.Close()
-	if _, err := io.Copy(out, src); err != nil {
+	written, err := io.Copy(out, src)
+	if err != nil {
 		os.Remove(dst)
 		UploadGet(c, uploadTmpl, UploadData{Error: "Server error saving file."})
+		return
+	}
+	if err := out.Sync(); err != nil {
+		os.Remove(dst)
+		UploadGet(c, uploadTmpl, UploadData{Error: "Server error saving file."})
+		return
+	}
+	if file.Size > 0 && written != file.Size {
+		os.Remove(dst)
+		UploadGet(c, uploadTmpl, UploadData{Error: "Upload incomplete. Please try again."})
 		return
 	}
 	sizeStr := formatSize(file.Size)
