@@ -1,0 +1,612 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3c91-3c86-7e81-b337-ffabc77d8aa4
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Confirming skills not required**
+
+The user clarified that skill-creator/installer isn't needed now; instead, tests must be run using exec as per AGENTS.md instructions.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 96ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Planning targeted reliability improvement**
+
+I'm searching the repo with ripgrep for TODOs to identify a meaningful reliability-related change affecting at most three files.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "TODO|FIXME|panic|unsafe|error" -g"*.go"' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/prompt.go:func marshalSampledDataset(ds Dataset) ([]byte, error) {
+internal/evaluate/parse.go:func parseSpec(form *multipart.Form) (Spec, error) {
+internal/evaluate/parse.go:func validateSpec(spec Spec) error {
+internal/evaluate/parse.go:func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.FileHeader, error) {
+internal/evaluate/parse.go:func validateDatasetJSON(fh *multipart.FileHeader, imageFiles []*multipart.FileHeader) error {
+internal/evaluate/output.go:func parseEvalOutput(raw string) (EvalOutput, error) {
+internal/evaluate/output.go:func validateEvalOutput(out EvalOutput, enabled map[string]ConstraintRule) error {
+internal/evaluate/handler_test.go:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:		t.Fatalf("parseEvalOutputOptional error: %v", err)
+internal/evaluate/handler_test.go:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:		t.Fatalf("parseEvalOutputOptional error: %v", err)
+internal/evaluate/handler_test.go:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:		t.Fatalf("expected validation error for unknown constraint")
+internal/evaluate/handler_test.go:		t.Fatalf("expected error for image_ref without images")
+internal/evaluate/handler_test.go:		t.Fatalf("unexpected error: %v", err)
+internal/evaluate/handler_test.go:		t.Fatalf("expected error for duplicate dataset ids")
+internal/evaluate/handler_test.go:		t.Fatalf("expected error for unknown dataset fields")
+internal/evaluate/handler_test.go:		t.Fatalf("expected error for empty dataset file")
+internal/evaluate/handler_test.go:		t.Fatalf("expected error for multiple dataset files")
+internal/evaluate/handler_test.go:		t.Fatalf("expected error for duplicate image filenames")
+
+thinking
+**Reviewing storage update logic**
+
+I'm checking the evaluate storage updateRunsIndex function to assess its reliability and identify needed improvements. Next, I'll analyze its implementation to decide the best approach.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math/big"
+	"mime/multipart"
+	"os"
+	"path/filepath"
+	"strconv"
+	"sync/atomic"
+	"time"
+)
+
+var runIDCounter uint64
+
+func genRunID() string {
+	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
+
+thinking
+**Considering data integrity and error handling**
+
+I'm noting that saveUpload lacks fsync, which may impact data integrity, and file permissions or partial writes might need handling. Also, updateRunsIndex could return a corrupted error even if saveJSON succeeds, so I'll check how this error is treated downstream.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+// EvaluateResponse is the JSON response for POST /api/evaluate.
+
+thinking
+**Noting partial write risk**
+
+UpdateRunsIndex returns an error even if rename succeeds, which logs but doesn't block flow; considering improving saveUpload to use a temp file plus rename to prevent partial writes if copy errors occur.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+)
+
+type Dataset struct {
+	Items []DatasetItem `json:"items"`
+}
+
+type DatasetItem struct {
+	ID       string         `json:"id"`
+	Text     string         `json:"text"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+	ImageRef string         `json:"image_ref,omitempty"`
+}
+
+thinking
+**Checking upload size limits**
+
+I'm considering adding size limits based on the spec and will verify how parseUploads currently handles this.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"strings"
+
+	"noema/internal/config"
+)
+
+func parseSpec(form *multipart.Form) (Spec, error) {
+	specStrs := form.Value["spec"]
+	if len(specStrs) == 0 || specStrs[0] == "" {
+		return Spec{}, fmt.Errorf("missing field: spec")
+	}
+	var spec Spec
+	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
+	dec.DisallowUnknownFields()
+
+thinking
+**Considering validation and reliability improvements**
+
+I'm noting potential enhancements: making error messages in reading datasets more specific, ensuring file writes use proper permissions and fsync for reliability, and adding validation to enforce unique constraint IDs in enabled constraints. Next, I'll check the policy for validation scope.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/policy.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import "fmt"
+
+type ConstraintRule struct {
+	ID                 string
+	AllowedMaxSeverity int
+}
+
+func enabledConstraints(spec Spec) (map[string]ConstraintRule, error) {
+	out := make(map[string]ConstraintRule)
+	for _, c := range spec.Constraints {
+		if !c.Enabled {
+			continue
+		}
+		if _, exists := out[c.ID]; exists {
+			return nil, fmt.Errorf("duplicate constraint id: %s", c.ID)
+		}
+		out[c.ID] = ConstraintRule{ID: c.ID, AllowedMaxSeverity: c.AllowedMaxSeverity}
+	}
+
+thinking
+**Reviewing constraint handling in evaluation output**
+
+I'm examining the evaluation output handling to check if missing enabled constraints are treated as failures, focusing on parseEvalOutput and validateEvalOutput in internal/evaluate/output.go.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/output.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+)
+
+type EvalConstraintResult struct {
+	ID        string `json:"id"`
+	Severity  int    `json:"severity"`
+	Rationale string `json:"rationale"`
+}
+
+type EvalOutput struct {
+	SchemaVersion int                    `json:"schema_version"`
+	Constraints   []EvalConstraintResult `json:"constraints"`
+	MaxSeverity   int                    `json:"max_severity"`
+	Confidence    *float64               `json:"confidence,omitempty"`
+}
+
+thinking
+**Planning atomic save improvement**
+
+I identified that saveUpload currently risks leaving partial files on copy failure; switching to a temp file plus rename would ensure atomic writes and better reliability. Next, I'll check existing tests around saveUpload and consider adding targeted tests without exceeding file limits.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"mime/multipart"
+	"net/textproto"
+	"os"
+	"path/filepath"
+	"sort"
+	"testing"
+	"time"
+)
+
+type formFile struct {
+	field       string
+	filename    string
+	contentType string
+	content     []byte
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '260,620p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+
+func TestParseUploads_RejectsDuplicateImageNames(t *testing.T) {
+	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"img.png"}]}`
+	form := buildMultipartForm(t, []formFile{
+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
+		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
+		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
+	})
+	if _, _, err := parseUploads(form); err == nil {
+		t.Fatalf("expected error for duplicate image filenames")
+	}
+}
+
+func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
+	spec := Spec{
+		SchemaVersion: 1,
+		Constraints: []Constraint{
+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+		},
+
+thinking
+**Assessing saveUpload test challenges**
+
+Testing saveUpload's error handling is tricky due to difficulty simulating io.Copy failures; forcing os.Create errors via read-only temp directories could test error paths but not partial writes or atomicity directly.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/gemini_eval.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"context"
+	"log"
+	"mime/multipart"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/gemini"
+)
+
+const geminiEvalTimeout = 45 * time.Second
+
+func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
+	if form != nil && len(form.Value["eval_output"]) > 0 && form.Value["eval_output"][0] != "" {
+		raw := form.Value["eval_output"][0]
+		out, err := parseEvalOutput(raw)
+		if err != nil {
+			return EvalOutput{}, err
+
+
+thinking
+**Planning atomic write for uploads**
+
+I'm designing atomic file writes by creating a temp file in the target directory using CreateTemp, then chmod 0644, syncing, closing, and renaming it to the final path. Next, I'll implement this with careful error handling and cleanup, followed by adding tests to verify behavior during copy errors.
+thinking
+**Deciding test scope for atomic upload**
+
+Testing cleanup on partial-copy errors is impractical due to multipart.FileHeader constraints, so I'll implement the atomic save change without tests and add a simple test verifying that saveUpload writes content correctly instead.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/storage.go
+@@ -54,11 +54,34 @@
+ 	defer src.Close()
+-	out, err := os.Create(dst)
++	dir := filepath.Dir(dst)
++	base := filepath.Base(dst)
++	tmp, err := os.CreateTemp(dir, base+".tmp-*")
+ 	if err != nil {
+-		return fmt.Errorf("create %s: %w", dst, err)
++		return fmt.Errorf("create temp for %s: %w", dst, err)
+ 	}
+-	defer out.Close()
+-	_, err = io.Copy(out, src)
+-	if err != nil {
++	tmpName := tmp.Name()
++	cleanup := true
++	defer func() {
++		if cleanup {
++			_ = os.Remove(tmpName)
++		}
++	}()
++	if err := tmp.Chmod(0644); err != nil {
++		_ = tmp.Close()
++		return fmt.Errorf("chmod temp for %s: %w", dst, err)
++	}
++	if _, err := io.Copy(tmp, src); err != nil {
++		_ = tmp.Close()
+ 		return fmt.Errorf("copy to %s: %w", dst, err)
+ 	}
++	if err := tmp.Sync(); err != nil {
++		_ = tmp.Close()
++		return fmt.Errorf("sync %s: %w", dst, err)
++	}
++	if err := tmp.Close(); err != nil {
++		return fmt.Errorf("close %s: %w", dst, err)
++	}
++	if err := os.Rename(tmpName, dst); err != nil {
++		return fmt.Errorf("rename %s: %w", dst, err)
++	}
++	cleanup = false
+ 	return nil
+apply_patch(auto_approved=true) exited 0 in 31ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/storage.go
+file update:
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index e85a0702209ca351eff8a5238f4cc1b73fbe6822..86cc53272dc561f9692f36a8b8722ddc27fe3754
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -52,15 +52,38 @@
+ 		return fmt.Errorf("open upload: %w", err)
+ 	}
+ 	defer src.Close()
+-	out, err := os.Create(dst)
++	dir := filepath.Dir(dst)
++	base := filepath.Base(dst)
++	tmp, err := os.CreateTemp(dir, base+".tmp-*")
+ 	if err != nil {
+-		return fmt.Errorf("create %s: %w", dst, err)
++		return fmt.Errorf("create temp for %s: %w", dst, err)
+ 	}
+-	defer out.Close()
+-	_, err = io.Copy(out, src)
+-	if err != nil {
++	tmpName := tmp.Name()
++	cleanup := true
++	defer func() {
++		if cleanup {
++			_ = os.Remove(tmpName)
++		}
++	}()
++	if err := tmp.Chmod(0644); err != nil {
++		_ = tmp.Close()
++		return fmt.Errorf("chmod temp for %s: %w", dst, err)
++	}
++	if _, err := io.Copy(tmp, src); err != nil {
++		_ = tmp.Close()
+ 		return fmt.Errorf("copy to %s: %w", dst, err)
+ 	}
++	if err := tmp.Sync(); err != nil {
++		_ = tmp.Close()
++		return fmt.Errorf("sync %s: %w", dst, err)
++	}
++	if err := tmp.Close(); err != nil {
++		return fmt.Errorf("close %s: %w", dst, err)
++	}
++	if err := os.Rename(tmpName, dst); err != nil {
++		return fmt.Errorf("rename %s: %w", dst, err)
++	}
++	cleanup = false
+ 	return nil
+ }
+ 
+
+file update:
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index e85a0702209ca351eff8a5238f4cc1b73fbe6822..86cc53272dc561f9692f36a8b8722ddc27fe3754
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -52,15 +52,38 @@
+ 		return fmt.Errorf("open upload: %w", err)
+ 	}
+ 	defer src.Close()
+-	out, err := os.Create(dst)
++	dir := filepath.Dir(dst)
++	base := filepath.Base(dst)
++	tmp, err := os.CreateTemp(dir, base+".tmp-*")
+ 	if err != nil {
+-		return fmt.Errorf("create %s: %w", dst, err)
++		return fmt.Errorf("create temp for %s: %w", dst, err)
+ 	}
+-	defer out.Close()
+-	_, err = io.Copy(out, src)
+-	if err != nil {
++	tmpName := tmp.Name()
++	cleanup := true
++	defer func() {
++		if cleanup {
++			_ = os.Remove(tmpName)
++		}
++	}()
++	if err := tmp.Chmod(0644); err != nil {
++		_ = tmp.Close()
++		return fmt.Errorf("chmod temp for %s: %w", dst, err)
++	}
++	if _, err := io.Copy(tmp, src); err != nil {
++		_ = tmp.Close()
+ 		return fmt.Errorf("copy to %s: %w", dst, err)
+ 	}
++	if err := tmp.Sync(); err != nil {
++		_ = tmp.Close()
++		return fmt.Errorf("sync %s: %w", dst, err)
++	}
++	if err := tmp.Close(); err != nil {
++		return fmt.Errorf("close %s: %w", dst, err)
++	}
++	if err := os.Rename(tmpName, dst); err != nil {
++		return fmt.Errorf("rename %s: %w", dst, err)
++	}
++	cleanup = false
+ 	return nil
+ }
+ 
+
+
+thinking
+**Adjusting cleanup flag post-rename**
+
+I'm ensuring the cleanup flag is set to false only after a successful rename to avoid removing the temp file, and verifying this behavior by running the Go tests.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 498ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.054s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index e85a0702209ca351eff8a5238f4cc1b73fbe6822..86cc53272dc561f9692f36a8b8722ddc27fe3754
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -52,15 +52,38 @@
+ 		return fmt.Errorf("open upload: %w", err)
+ 	}
+ 	defer src.Close()
+-	out, err := os.Create(dst)
++	dir := filepath.Dir(dst)
++	base := filepath.Base(dst)
++	tmp, err := os.CreateTemp(dir, base+".tmp-*")
+ 	if err != nil {
+-		return fmt.Errorf("create %s: %w", dst, err)
++		return fmt.Errorf("create temp for %s: %w", dst, err)
+ 	}
+-	defer out.Close()
+-	_, err = io.Copy(out, src)
+-	if err != nil {
++	tmpName := tmp.Name()
++	cleanup := true
++	defer func() {
++		if cleanup {
++			_ = os.Remove(tmpName)
++		}
++	}()
++	if err := tmp.Chmod(0644); err != nil {
++		_ = tmp.Close()
++		return fmt.Errorf("chmod temp for %s: %w", dst, err)
++	}
++	if _, err := io.Copy(tmp, src); err != nil {
++		_ = tmp.Close()
+ 		return fmt.Errorf("copy to %s: %w", dst, err)
+ 	}
++	if err := tmp.Sync(); err != nil {
++		_ = tmp.Close()
++		return fmt.Errorf("sync %s: %w", dst, err)
++	}
++	if err := tmp.Close(); err != nil {
++		return fmt.Errorf("close %s: %w", dst, err)
++	}
++	if err := os.Rename(tmpName, dst); err != nil {
++		return fmt.Errorf("rename %s: %w", dst, err)
++	}
++	cleanup = false
+ 	return nil
+ }
+ 
+
+codex
+What you changed (short)
+- Made `saveUpload` write uploads via a temp file + fsync + atomic rename to avoid leaving partial files on disk if a copy fails (`internal/evaluate/storage.go`).
+
+Tests run (must include go test ./...)
+- `go test ./...`
+
+If you want, I can add a small test around `saveUpload` error cleanup next iteration, but it will require a bit of scaffolding to simulate a mid-copy failure.
+file update:
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index e85a0702209ca351eff8a5238f4cc1b73fbe6822..86cc53272dc561f9692f36a8b8722ddc27fe3754
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -52,15 +52,38 @@
+ 		return fmt.Errorf("open upload: %w", err)
+ 	}
+ 	defer src.Close()
+-	out, err := os.Create(dst)
++	dir := filepath.Dir(dst)
++	base := filepath.Base(dst)
++	tmp, err := os.CreateTemp(dir, base+".tmp-*")
+ 	if err != nil {
+-		return fmt.Errorf("create %s: %w", dst, err)
++		return fmt.Errorf("create temp for %s: %w", dst, err)
+ 	}
+-	defer out.Close()
+-	_, err = io.Copy(out, src)
+-	if err != nil {
++	tmpName := tmp.Name()
++	cleanup := true
++	defer func() {
++		if cleanup {
++			_ = os.Remove(tmpName)
++		}
++	}()
++	if err := tmp.Chmod(0644); err != nil {
++		_ = tmp.Close()
++		return fmt.Errorf("chmod temp for %s: %w", dst, err)
++	}
++	if _, err := io.Copy(tmp, src); err != nil {
++		_ = tmp.Close()
+ 		return fmt.Errorf("copy to %s: %w", dst, err)
+ 	}
++	if err := tmp.Sync(); err != nil {
++		_ = tmp.Close()
++		return fmt.Errorf("sync %s: %w", dst, err)
++	}
++	if err := tmp.Close(); err != nil {
++		return fmt.Errorf("close %s: %w", dst, err)
++	}
++	if err := os.Rename(tmpName, dst); err != nil {
++		return fmt.Errorf("rename %s: %w", dst, err)
++	}
++	cleanup = false
+ 	return nil
+ }
+ 
+
+tokens used
+20,031
+What you changed (short)
+- Made `saveUpload` write uploads via a temp file + fsync + atomic rename to avoid leaving partial files on disk if a copy fails (`internal/evaluate/storage.go`).
+
+Tests run (must include go test ./...)
+- `go test ./...`
+
+If you want, I can add a small test around `saveUpload` error cleanup next iteration, but it will require a bit of scaffolding to simulate a mid-copy failure.

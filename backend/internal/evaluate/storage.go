@@ -52,15 +52,38 @@ func saveUpload(fh *multipart.FileHeader, dst string) error {
 		return fmt.Errorf("open upload: %w", err)
 	}
 	defer src.Close()
-	out, err := os.Create(dst)
+	dir := filepath.Dir(dst)
+	base := filepath.Base(dst)
+	tmp, err := os.CreateTemp(dir, base+".tmp-*")
 	if err != nil {
-		return fmt.Errorf("create %s: %w", dst, err)
+		return fmt.Errorf("create temp for %s: %w", dst, err)
 	}
-	defer out.Close()
-	_, err = io.Copy(out, src)
-	if err != nil {
+	tmpName := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if err := tmp.Chmod(0644); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("chmod temp for %s: %w", dst, err)
+	}
+	if _, err := io.Copy(tmp, src); err != nil {
+		_ = tmp.Close()
 		return fmt.Errorf("copy to %s: %w", dst, err)
 	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("sync %s: %w", dst, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close %s: %w", dst, err)
+	}
+	if err := os.Rename(tmpName, dst); err != nil {
+		return fmt.Errorf("rename %s: %w", dst, err)
+	}
+	cleanup = false
 	return nil
 }
 
