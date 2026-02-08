@@ -1,0 +1,974 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3ca2-6357-7442-9a3d-6c651053994c
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Running tests via exec**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 325ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Starting reliability check**
+
+I'm going to use ripgrep to inspect the repo for the Gemini integration area as a target for a reliability improvement involving at most three files without cosmetic changes.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "TODO|FIXME|panic|TODO:" internal -n' in /Users/yani/Noema/backend exited 1 in 52ms:
+
+
+thinking
+**Noticing no matches in search**
+
+No matches were found with the current approach, indicating a need to improve or add validation in the evaluation step. Next, I'll inspect the evaluate function to identify gaps.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "error" internal/evaluate -n' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/prompt.go:160:func marshalSampledDataset(ds Dataset) ([]byte, error) {
+internal/evaluate/parse.go:13:func parseSpec(form *multipart.Form) (Spec, error) {
+internal/evaluate/parse.go:33:func validateSpec(spec Spec) error {
+internal/evaluate/parse.go:56:func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.FileHeader, error) {
+internal/evaluate/parse.go:88:func validateDatasetJSON(fh *multipart.FileHeader, imageFiles []*multipart.FileHeader) error {
+internal/evaluate/output.go:23:func parseEvalOutput(raw string) (EvalOutput, error) {
+internal/evaluate/output.go:50:func validateEvalOutput(out EvalOutput, enabled map[string]ConstraintRule) error {
+internal/evaluate/handler_test.go:67:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:73:		t.Fatalf("parseEvalOutputOptional error: %v", err)
+internal/evaluate/handler_test.go:110:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:129:		t.Fatalf("parseEvalOutputOptional error: %v", err)
+internal/evaluate/handler_test.go:148:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:165:		t.Fatalf("expected validation error for unknown constraint")
+internal/evaluate/handler_test.go:178:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:195:		t.Fatalf("expected error for trailing garbage")
+internal/evaluate/handler_test.go:208:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:225:		t.Fatalf("expected error for multiple eval_output values")
+internal/evaluate/handler_test.go:239:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:245:		t.Fatalf("parseEvalOutputOptional error: %v", err)
+internal/evaluate/handler_test.go:287:		t.Fatalf("expected error for image_ref without images")
+
+thinking
+**Examining storage write-atomic handling**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math/big"
+	"mime/multipart"
+	"os"
+	"path/filepath"
+	"strconv"
+	"sync/atomic"
+	"time"
+)
+
+var runIDCounter uint64
+
+func genRunID() string {
+	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
+
+thinking
+**Noticing potential data handling issues**
+
+The updateRunsIndex function may return corrupted errors despite successful JSON saves, hinting at subtle bugs. I'm considering improving file pointer resets after uploads and adding JSON size validation during dataset evaluation to prevent corruption.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"strings"
+
+	"noema/internal/config"
+)
+
+func parseSpec(form *multipart.Form) (Spec, error) {
+	specStrs := form.Value["spec"]
+	if len(specStrs) == 0 || specStrs[0] == "" {
+		return Spec{}, fmt.Errorf("missing field: spec")
+	}
+	if len(specStrs) > 1 {
+		return Spec{}, fmt.Errorf("only one spec value allowed")
+	}
+
+thinking
+**Noting potential error detail loss**
+
+The parseSpec error message may be losing details but might be acceptable; I'll check dataset.go to see how validateDatasetJSON uses readDatasetFile and whether it impacts loading.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"strings"
+)
+
+type Dataset struct {
+	Items []DatasetItem `json:"items"`
+}
+
+type DatasetItem struct {
+	ID       string         `json:"id"`
+	Text     string         `json:"text"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+	ImageRef string         `json:"image_ref,omitempty"`
+
+thinking
+**Planning cache reliability improvements**
+
+Noticed writeAtomic might lack directory fsync after tmp file errors, which could affect durability. Next, I'll inspect cache.go to explore potential reliability enhancements.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/cache.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+type CachedGeminiOutput struct {
+	Model         string       `json:"model"`
+	PromptVersion string       `json:"prompt_version"`
+	Output        EvalOutput   `json:"output"`
+	RawText       string       `json:"raw_text"`
+	Usage         *GeminiUsage `json:"usage,omitempty"`
+	CachedAt      string       `json:"cached_at"`
+}
+
+thinking
+**Assessing error handling in cache load**
+
+I'm considering whether cache load should ignore errors for missing entries and will check how the caller, specifically in gemini_eval, handles these errors next.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/gemini_eval.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"context"
+	"log"
+	"mime/multipart"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/gemini"
+)
+
+const geminiEvalTimeout = 45 * time.Second
+
+func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
+	if out, provided, err := parseEvalOutputProvided(form, enabled); err != nil {
+		return EvalOutput{}, err
+	} else if provided {
+		return out, nil
+	}
+
+thinking
+**Considering adding validation in eval output handling**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '200,330p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+			continue
+		}
+		runs = append(runs, runEntry{
+			path:    filepath.Join(runsDir, entry.Name()),
+			modTime: info.ModTime(),
+		})
+	}
+
+	if len(runs) <= maxRuns {
+		return nil
+	}
+
+	sort.Slice(runs, func(i, j int) bool {
+		return runs[i].modTime.After(runs[j].modTime)
+	})
+
+	for i := maxRuns; i < len(runs); i++ {
+		if err := os.RemoveAll(runs[i].path); err != nil {
+			return err
+		}
+
+thinking
+**Considering improvements to dataset handling and error reporting**
+
+I see some opportunities to enhance error messages in spec and dataset parsing for better clarity and consider caching parsed datasets to avoid rereading files, though multipart datasets might complicate this. I’m also evaluating constraints uniqueness and potential checks on duplicate image filenames, but these may not be necessary.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/spec.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+// Spec is the parsed evaluation spec (schema_version 1).
+type Spec struct {
+	SchemaVersion     int                `json:"schema_version"`
+	EvaluationName    string             `json:"evaluation_name"`
+	Policy            Policy             `json:"policy"`
+	Constraints       []Constraint       `json:"constraints"`
+	CustomConstraints []CustomConstraint `json:"custom_constraints"`
+}
+
+type Policy struct {
+	Reveal RevealPolicy `json:"reveal"`
+}
+
+type RevealPolicy struct {
+	MaxSeverity bool `json:"max_severity"`
+	Commitment  bool `json:"commitment"`
+}
+
+
+thinking
+**Considering unique ID validation**
+
+I'm evaluating adding duplicate ID validation in the spec with error enforcement for reliability and contemplating adding related tests, ideally in handler_test, while keeping changes limited to three files.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "constraint" -n internal/evaluate/handler_test.go' in /Users/yani/Noema/backend succeeded in 52ms:
+82:		t.Fatalf("expected %d constraints, got %d", len(enabled), len(out.Constraints))
+96:		t.Fatalf("expected constraints sorted by id, got %v", ids)
+135:		t.Fatalf("expected 2 constraints, got %d", len(out.Constraints))
+154:			{ID: "unknown_constraint", Severity: 2, Rationale: "bad"},
+165:		t.Fatalf("expected validation error for unknown constraint")
+248:		t.Fatalf("expected %d constraints, got %d", len(enabled), len(out.Constraints))
+379:		t.Fatalf("expected error for empty constraint id")
+391:		t.Fatalf("expected error for empty custom constraint id")
+398:			"spec": {`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[],"extra":true}`},
+410:				`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[]}`,
+411:				`{"schema_version":1,"evaluation_name":"other","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[]}`,
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '340,430p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+	})
+	datasetFile := form.File["dataset"][0]
+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
+		t.Fatalf("expected error for empty dataset file")
+	}
+}
+
+func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
+	dataset := `{"items":[{"id":"1","text":"hello"}]}`
+	form := buildMultipartForm(t, []formFile{
+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
+		{field: "dataset", filename: "dataset2.json", contentType: "application/json", content: []byte(dataset)},
+	})
+	if _, _, err := parseUploads(form); err == nil {
+		t.Fatalf("expected error for multiple dataset files")
+	}
+}
+
+func TestParseUploads_RejectsDuplicateImageNames(t *testing.T) {
+	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"img.png"}]}`
+
+thinking
+**Planning duplicate constraint ID checks**
+
+I'll add tests for duplicate constraint IDs and update validation to check duplicates among all constraints, both built-in and custom, potentially also across them, since the evaluation uses an enabled map keyed by IDs. I'll review how enabled constraints are handled in policy.go next.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/policy.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import "fmt"
+
+type ConstraintRule struct {
+	ID                 string
+	AllowedMaxSeverity int
+}
+
+func enabledConstraints(spec Spec) (map[string]ConstraintRule, error) {
+	out := make(map[string]ConstraintRule)
+	for _, c := range spec.Constraints {
+		if !c.Enabled {
+			continue
+		}
+		if _, exists := out[c.ID]; exists {
+			return nil, fmt.Errorf("duplicate constraint id: %s", c.ID)
+		}
+		out[c.ID] = ConstraintRule{ID: c.ID, AllowedMaxSeverity: c.AllowedMaxSeverity}
+	}
+
+thinking
+**Assessing duplicate ID checks**
+
+Considering moving duplicate ID checks into spec validation to catch duplicates earlier for both enabled and disabled constraints, but enabled duplicates rejection remains in enabledConstraints; will verify how handler calls these validations to decide best placement.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,140p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+thinking
+**Assessing error handling improvements**
+
+Considering enhancements like removing corrupted cache files on JSON unmarshal failures and better cleanup on save errors, but current safeguards mostly suffice; deciding to explore other packages next for potential bugs.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/verify/verify.go" in /Users/yani/Noema/backend exited 1 in 52ms:
+sed: internal/verify/verify.go: No such file or directory
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/verify' in /Users/yani/Noema/backend succeeded in 52ms:
+handler.go
+handler_test.go
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/verify/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package verify
+
+import (
+	"encoding/base64"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+// VerifyRequest is the JSON body for POST /api/verify.
+type VerifyRequest struct {
+	RunID           string `json:"run_id"`
+	ProofB64        string `json:"proof_b64"`
+	PublicInputsB64 string `json:"public_inputs_b64"`
+
+thinking
+**Noticing validation gaps and test opportunities**
+
+I'm considering adding duplicate constraint ID validation that includes disabled constraints, even though enabledConstraints already checks enabled ones. There's also a generic error on invalid JSON in parseSpec worth testing. Additionally, I note that image validation doesn't rely on file extensions but could be improved. Next, I'll look for potential bugs and assess test coverage around these areas.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "TODO|FIXME|BUG|HACK" -n internal' in /Users/yani/Noema/backend exited 1 in 52ms:
+
+
+
+thinking
+**Considering minor validations and error handling improvements**
+
+I'm reviewing possible enhancements like enforcing JSON extensions, tightening JSON parsing with DisallowUnknownFields, improving file extension handling for image files, and strengthening atomic writes to handle missing directories or permissions, but none are critical now; validating non-empty evaluation names in specs may be worthwhile to consider next.
+thinking
+**Noting evaluation name usage in runs index**
+
+I see the evaluation name may be used in updating the runs index, so its presence could be important for indexing and listing runs.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '140,240p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
+		if err := updateRunsIndex(runsDir, config.RunsIndexLimit(), RunIndexEntry{
+			RunID:          runID,
+			Status:         status,
+			Timestamp:      time.Now().Unix(),
+			EvaluationName: spec.EvaluationName,
+		}); err != nil {
+			log.Printf("runs index update: %v", err)
+		}
+
+		if err := pruneRuns(runsDir, maxRuns); err != nil {
+			log.Printf("prune runs: %v", err)
+		}
+
+		c.JSON(http.StatusOK, EvaluateResponse{
+			RunID:  runID,
+			Status: status,
+			PublicOutput: PublicOutput{
+				OverallPass:     overallPass,
+				MaxSeverity:     maxSeverity,
+				PolicyThreshold: policyThreshold,
+
+
+thinking
+**Identifying potential validation and sanitization improvements**
+
+I'm considering trimming evaluation names for consistency and adding stricter validation for policy fields in specs. Also, using filepath.Base when saving images could prevent path traversal risks, and logging or removing corrupted cache in gemini_eval might improve reliability.
+thinking
+**Planning stricter spec validation for constraint IDs**
+
+I'm deciding to enhance spec validation by enforcing trimmed, non-empty IDs for all constraints and custom constraints regardless of enabled status, and to reject duplicates across both groups to avoid confusion. Next, I'll add tests to verify these new validations.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/parse.go
+@@ -36,6 +36,15 @@
+ 	}
++	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+-		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++		id := strings.TrimSpace(cn.ID)
++		if id == "" {
+ 			return fmt.Errorf("constraint id must be non-empty")
+ 		}
++		if id != cn.ID {
++			return fmt.Errorf("constraint id must not include leading/trailing whitespace")
++		}
++		if _, exists := seenIDs[id]; exists {
++			return fmt.Errorf("duplicate constraint id: %s", id)
++		}
++		seenIDs[id] = struct{}{}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+@@ -45,5 +54,13 @@
+ 	for _, cn := range spec.CustomConstraints {
+-		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++		id := strings.TrimSpace(cn.ID)
++		if id == "" {
+ 			return fmt.Errorf("custom_constraint id must be non-empty")
+ 		}
++		if id != cn.ID {
++			return fmt.Errorf("custom_constraint id must not include leading/trailing whitespace")
++		}
++		if _, exists := seenIDs[id]; exists {
++			return fmt.Errorf("duplicate constraint id: %s", id)
++		}
++		seenIDs[id] = struct{}{}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+apply_patch(auto_approved=true) exited 0 in 31ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/parse.go
+file update:
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 9a5aa6ee0ad6fbd56abdc94ec904ded459c5e81a..d844664beee856e4797566f516aea76d3c594542
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -34,18 +34,35 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+-		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++		id := strings.TrimSpace(cn.ID)
++		if id == "" {
+ 			return fmt.Errorf("constraint id must be non-empty")
+ 		}
++		if id != cn.ID {
++			return fmt.Errorf("constraint id must not include leading/trailing whitespace")
++		}
++		if _, exists := seenIDs[id]; exists {
++			return fmt.Errorf("duplicate constraint id: %s", id)
++		}
++		seenIDs[id] = struct{}{}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+ 			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
+ 		}
+ 	}
+ 	for _, cn := range spec.CustomConstraints {
+-		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++		id := strings.TrimSpace(cn.ID)
++		if id == "" {
+ 			return fmt.Errorf("custom_constraint id must be non-empty")
+ 		}
++		if id != cn.ID {
++			return fmt.Errorf("custom_constraint id must not include leading/trailing whitespace")
++		}
++		if _, exists := seenIDs[id]; exists {
++			return fmt.Errorf("duplicate constraint id: %s", id)
++		}
++		seenIDs[id] = struct{}{}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+ 			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
+ 		}
+
+file update:
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 9a5aa6ee0ad6fbd56abdc94ec904ded459c5e81a..d844664beee856e4797566f516aea76d3c594542
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -34,18 +34,35 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+-		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++		id := strings.TrimSpace(cn.ID)
++		if id == "" {
+ 			return fmt.Errorf("constraint id must be non-empty")
+ 		}
++		if id != cn.ID {
++			return fmt.Errorf("constraint id must not include leading/trailing whitespace")
++		}
++		if _, exists := seenIDs[id]; exists {
++			return fmt.Errorf("duplicate constraint id: %s", id)
++		}
++		seenIDs[id] = struct{}{}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+ 			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
+ 		}
+ 	}
+ 	for _, cn := range spec.CustomConstraints {
+-		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++		id := strings.TrimSpace(cn.ID)
++		if id == "" {
+ 			return fmt.Errorf("custom_constraint id must be non-empty")
+ 		}
++		if id != cn.ID {
++			return fmt.Errorf("custom_constraint id must not include leading/trailing whitespace")
++		}
++		if _, exists := seenIDs[id]; exists {
++			return fmt.Errorf("duplicate constraint id: %s", id)
++		}
++		seenIDs[id] = struct{}{}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+ 			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
+ 		}
+
+
+thinking
+**Adding duplicate and whitespace tests**
+
+I'm adding two new tests in handler_test.go to cover duplicate constraint IDs and whitespace handling, complementing the existing empty tests.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
+@@ -394,2 +394,27 @@
+ 
++func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for duplicate constraint id")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in constraint id")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+apply_patch(auto_approved=true) exited 0 in 35ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
+file update:
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 3aa4b5a0f693d3353476c503fc057254f88afaf1..fa1c6d8c5b39702e86d3a90d7c103c6fd5947fc3
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -392,6 +392,31 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for duplicate constraint id")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in constraint id")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 9a5aa6ee0ad6fbd56abdc94ec904ded459c5e81a..d844664beee856e4797566f516aea76d3c594542
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -34,18 +34,35 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+-		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++		id := strings.TrimSpace(cn.ID)
++		if id == "" {
+ 			return fmt.Errorf("constraint id must be non-empty")
+ 		}
++		if id != cn.ID {
++			return fmt.Errorf("constraint id must not include leading/trailing whitespace")
++		}
++		if _, exists := seenIDs[id]; exists {
++			return fmt.Errorf("duplicate constraint id: %s", id)
++		}
++		seenIDs[id] = struct{}{}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+ 			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
+ 		}
+ 	}
+ 	for _, cn := range spec.CustomConstraints {
+-		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++		id := strings.TrimSpace(cn.ID)
++		if id == "" {
+ 			return fmt.Errorf("custom_constraint id must be non-empty")
+ 		}
++		if id != cn.ID {
++			return fmt.Errorf("custom_constraint id must not include leading/trailing whitespace")
++		}
++		if _, exists := seenIDs[id]; exists {
++			return fmt.Errorf("duplicate constraint id: %s", id)
++		}
++		seenIDs[id] = struct{}{}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+ 			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
+ 		}
+
+file update:
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 3aa4b5a0f693d3353476c503fc057254f88afaf1..fa1c6d8c5b39702e86d3a90d7c103c6fd5947fc3
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -392,6 +392,31 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for duplicate constraint id")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in constraint id")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 9a5aa6ee0ad6fbd56abdc94ec904ded459c5e81a..d844664beee856e4797566f516aea76d3c594542
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -34,18 +34,35 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+-		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++		id := strings.TrimSpace(cn.ID)
++		if id == "" {
+ 			return fmt.Errorf("constraint id must be non-empty")
+ 		}
++		if id != cn.ID {
++			return fmt.Errorf("constraint id must not include leading/trailing whitespace")
++		}
++		if _, exists := seenIDs[id]; exists {
++			return fmt.Errorf("duplicate constraint id: %s", id)
++		}
++		seenIDs[id] = struct{}{}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+ 			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
+ 		}
+ 	}
+ 	for _, cn := range spec.CustomConstraints {
+-		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++		id := strings.TrimSpace(cn.ID)
++		if id == "" {
+ 			return fmt.Errorf("custom_constraint id must be non-empty")
+ 		}
++		if id != cn.ID {
++			return fmt.Errorf("custom_constraint id must not include leading/trailing whitespace")
++		}
++		if _, exists := seenIDs[id]; exists {
++			return fmt.Errorf("duplicate constraint id: %s", id)
++		}
++		seenIDs[id] = struct{}{}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+ 			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
+ 		}
+
+
+thinking
+**Running full test suite**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 579ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.102s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 3aa4b5a0f693d3353476c503fc057254f88afaf1..fa1c6d8c5b39702e86d3a90d7c103c6fd5947fc3
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -392,6 +392,31 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for duplicate constraint id")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in constraint id")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 9a5aa6ee0ad6fbd56abdc94ec904ded459c5e81a..d844664beee856e4797566f516aea76d3c594542
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -34,18 +34,35 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+-		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++		id := strings.TrimSpace(cn.ID)
++		if id == "" {
+ 			return fmt.Errorf("constraint id must be non-empty")
+ 		}
++		if id != cn.ID {
++			return fmt.Errorf("constraint id must not include leading/trailing whitespace")
++		}
++		if _, exists := seenIDs[id]; exists {
++			return fmt.Errorf("duplicate constraint id: %s", id)
++		}
++		seenIDs[id] = struct{}{}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+ 			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
+ 		}
+ 	}
+ 	for _, cn := range spec.CustomConstraints {
+-		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++		id := strings.TrimSpace(cn.ID)
++		if id == "" {
+ 			return fmt.Errorf("custom_constraint id must be non-empty")
+ 		}
++		if id != cn.ID {
++			return fmt.Errorf("custom_constraint id must not include leading/trailing whitespace")
++		}
++		if _, exists := seenIDs[id]; exists {
++			return fmt.Errorf("duplicate constraint id: %s", id)
++		}
++		seenIDs[id] = struct{}{}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+ 			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
+ 		}
+
+
+thinking
+**Preparing final summary and test details**
+
+I'm summarizing the changes made and the tests run, specifying relevant files without nested bullets for clarity.
+codex
+What you changed
+- Tightened `validateSpec` to reject duplicate constraint IDs and leading/trailing whitespace in IDs, regardless of enabled status.
+- Added tests covering duplicate and whitespace constraint IDs. 
+
+Tests run
+- `go test ./...`
+file update:
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 3aa4b5a0f693d3353476c503fc057254f88afaf1..fa1c6d8c5b39702e86d3a90d7c103c6fd5947fc3
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -392,6 +392,31 @@
+ 	}
+ }
+ 
++func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for duplicate constraint id")
++	}
++}
++
++func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	if err := validateSpec(spec); err == nil {
++		t.Fatalf("expected error for whitespace in constraint id")
++	}
++}
++
+ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+ 	form := &multipart.Form{
+ 		Value: map[string][]string{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 9a5aa6ee0ad6fbd56abdc94ec904ded459c5e81a..d844664beee856e4797566f516aea76d3c594542
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -34,18 +34,35 @@
+ 	if spec.SchemaVersion != 1 {
+ 		return fmt.Errorf("unsupported schema_version")
+ 	}
++	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+ 	for _, cn := range spec.Constraints {
+-		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++		id := strings.TrimSpace(cn.ID)
++		if id == "" {
+ 			return fmt.Errorf("constraint id must be non-empty")
+ 		}
++		if id != cn.ID {
++			return fmt.Errorf("constraint id must not include leading/trailing whitespace")
++		}
++		if _, exists := seenIDs[id]; exists {
++			return fmt.Errorf("duplicate constraint id: %s", id)
++		}
++		seenIDs[id] = struct{}{}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+ 			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
+ 		}
+ 	}
+ 	for _, cn := range spec.CustomConstraints {
+-		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
++		id := strings.TrimSpace(cn.ID)
++		if id == "" {
+ 			return fmt.Errorf("custom_constraint id must be non-empty")
+ 		}
++		if id != cn.ID {
++			return fmt.Errorf("custom_constraint id must not include leading/trailing whitespace")
++		}
++		if _, exists := seenIDs[id]; exists {
++			return fmt.Errorf("duplicate constraint id: %s", id)
++		}
++		seenIDs[id] = struct{}{}
+ 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+ 			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
+ 		}
+
+tokens used
+40,154
+What you changed
+- Tightened `validateSpec` to reject duplicate constraint IDs and leading/trailing whitespace in IDs, regardless of enabled status.
+- Added tests covering duplicate and whitespace constraint IDs. 
+
+Tests run
+- `go test ./...`

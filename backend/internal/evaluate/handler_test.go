@@ -392,6 +392,31 @@ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
 	}
 }
 
+func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+	spec := Spec{
+		SchemaVersion: 1,
+		Constraints: []Constraint{
+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
+		},
+	}
+	if err := validateSpec(spec); err == nil {
+		t.Fatalf("expected error for duplicate constraint id")
+	}
+}
+
+func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
+	spec := Spec{
+		SchemaVersion: 1,
+		Constraints: []Constraint{
+			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+		},
+	}
+	if err := validateSpec(spec); err == nil {
+		t.Fatalf("expected error for whitespace in constraint id")
+	}
+}
+
 func TestParseSpec_RejectsUnknownFields(t *testing.T) {
 	form := &multipart.Form{
 		Value: map[string][]string{

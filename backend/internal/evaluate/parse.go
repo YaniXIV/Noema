@@ -34,18 +34,35 @@ func validateSpec(spec Spec) error {
 	if spec.SchemaVersion != 1 {
 		return fmt.Errorf("unsupported schema_version")
 	}
+	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
 	for _, cn := range spec.Constraints {
-		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
+		id := strings.TrimSpace(cn.ID)
+		if id == "" {
 			return fmt.Errorf("constraint id must be non-empty")
 		}
+		if id != cn.ID {
+			return fmt.Errorf("constraint id must not include leading/trailing whitespace")
+		}
+		if _, exists := seenIDs[id]; exists {
+			return fmt.Errorf("duplicate constraint id: %s", id)
+		}
+		seenIDs[id] = struct{}{}
 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
 			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
 		}
 	}
 	for _, cn := range spec.CustomConstraints {
-		if cn.Enabled && strings.TrimSpace(cn.ID) == "" {
+		id := strings.TrimSpace(cn.ID)
+		if id == "" {
 			return fmt.Errorf("custom_constraint id must be non-empty")
 		}
+		if id != cn.ID {
+			return fmt.Errorf("custom_constraint id must not include leading/trailing whitespace")
+		}
+		if _, exists := seenIDs[id]; exists {
+			return fmt.Errorf("duplicate constraint id: %s", id)
+		}
+		seenIDs[id] = struct{}{}
 		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
 			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
 		}
