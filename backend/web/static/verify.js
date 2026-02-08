@@ -7,6 +7,7 @@
   var countEl = document.getElementById('verify-count');
   var progressEl = document.getElementById('verify-progress');
   var verifyAllBtn = document.getElementById('verify-all');
+  var clearBtn = document.getElementById('verify-clear');
 
   function loadRecentRuns() {
     try {
@@ -257,6 +258,7 @@
       countEl.textContent = '';
     }
     if (verifyAllBtn) verifyAllBtn.disabled = filtered.length === 0;
+    if (clearBtn) clearBtn.disabled = runs.length === 0;
   }
 
   function verifyAllVisible() {
@@ -293,12 +295,36 @@
     });
   }
 
+  function clearHistory() {
+    var runs = loadRecentRuns();
+    if (runs.length === 0) return;
+    var ok = window.confirm('Clear local verification history? This only affects this browser.');
+    if (!ok) return;
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+      runs.forEach(function(r) {
+        if (r && r.run_id) localStorage.removeItem('noema_run_' + r.run_id);
+      });
+    } catch (e) {
+      // Best-effort cleanup only.
+    }
+    progressEl.textContent = 'History cleared';
+    setTimeout(function() {
+      progressEl.textContent = '';
+    }, 2000);
+    render();
+  }
+
   if (filterInput) {
     filterInput.addEventListener('input', render);
   }
 
   if (verifyAllBtn) {
     verifyAllBtn.addEventListener('click', verifyAllVisible);
+  }
+
+  if (clearBtn) {
+    clearBtn.addEventListener('click', clearHistory);
   }
 
   render();
