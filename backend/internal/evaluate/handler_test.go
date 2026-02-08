@@ -336,6 +336,20 @@ func TestParseSpec_RejectsUnknownFields(t *testing.T) {
 	}
 }
 
+func TestParseSpec_RejectsMultipleValues(t *testing.T) {
+	form := &multipart.Form{
+		Value: map[string][]string{
+			"spec": {
+				`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[]}`,
+				`{"schema_version":1,"evaluation_name":"other","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[]}`,
+			},
+		},
+	}
+	if _, err := parseSpec(form); err == nil {
+		t.Fatalf("expected error for multiple spec values")
+	}
+}
+
 func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
 	base := t.TempDir()
 

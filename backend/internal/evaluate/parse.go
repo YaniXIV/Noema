@@ -15,6 +15,9 @@ func parseSpec(form *multipart.Form) (Spec, error) {
 	if len(specStrs) == 0 || specStrs[0] == "" {
 		return Spec{}, fmt.Errorf("missing field: spec")
 	}
+	if len(specStrs) > 1 {
+		return Spec{}, fmt.Errorf("only one spec value allowed")
+	}
 	var spec Spec
 	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
 	dec.DisallowUnknownFields()

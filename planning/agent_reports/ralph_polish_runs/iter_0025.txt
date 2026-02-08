@@ -1,0 +1,496 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3c93-1e9c-79c1-98e6-d0e0e653ac53
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Running Go tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 95ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Inspecting codebase for improvements**
+
+I'm searching for TODO comments or obvious spots that could use small, impactful improvements capped to three files.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME|panic|error" internal | head -n 200' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/prompt.go:160:func marshalSampledDataset(ds Dataset) ([]byte, error) {
+internal/evaluate/parse.go:13:func parseSpec(form *multipart.Form) (Spec, error) {
+internal/evaluate/parse.go:30:func validateSpec(spec Spec) error {
+internal/evaluate/parse.go:53:func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.FileHeader, error) {
+internal/evaluate/parse.go:85:func validateDatasetJSON(fh *multipart.FileHeader, imageFiles []*multipart.FileHeader) error {
+internal/evaluate/output.go:23:func parseEvalOutput(raw string) (EvalOutput, error) {
+internal/evaluate/output.go:50:func validateEvalOutput(out EvalOutput, enabled map[string]ConstraintRule) error {
+internal/evaluate/handler_test.go:67:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:73:		t.Fatalf("parseEvalOutputOptional error: %v", err)
+internal/evaluate/handler_test.go:110:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:129:		t.Fatalf("parseEvalOutputOptional error: %v", err)
+internal/evaluate/handler_test.go:148:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:165:		t.Fatalf("expected validation error for unknown constraint")
+internal/evaluate/handler_test.go:178:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:195:		t.Fatalf("expected error for trailing garbage")
+internal/evaluate/handler_test.go:231:		t.Fatalf("expected error for image_ref without images")
+internal/evaluate/handler_test.go:244:		t.Fatalf("unexpected error: %v", err)
+internal/evaluate/handler_test.go:255:		t.Fatalf("expected error for duplicate dataset ids")
+internal/evaluate/handler_test.go:266:		t.Fatalf("expected error for unknown dataset fields")
+internal/evaluate/handler_test.go:276:		t.Fatalf("expected error for empty dataset file")
+
+thinking
+**Checking index corruption handling**
+
+I'm verifying if updateRunsIndex in evaluate/storage.go properly handles corrupted index data and considering adding validation to improve robustness.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math/big"
+	"mime/multipart"
+	"os"
+	"path/filepath"
+	"strconv"
+	"sync/atomic"
+	"time"
+)
+
+var runIDCounter uint64
+
+func genRunID() string {
+	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
+
+thinking
+**Assessing file save reliability**
+
+I'm noting that saveJSON writes then renames without fsyncing the directory, risking partial writes, and that saveUpload sets file permissions but may also need directory fsyncing for reliability. Next, I'll check dataset file reading and parsing for potential size checks or validations.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+)
+
+type Dataset struct {
+	Items []DatasetItem `json:"items"`
+}
+
+type DatasetItem struct {
+	ID       string         `json:"id"`
+	Text     string         `json:"text"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+	ImageRef string         `json:"image_ref,omitempty"`
+}
+
+thinking
+**Noting potential ImageRef validation**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"strings"
+
+	"noema/internal/config"
+)
+
+func parseSpec(form *multipart.Form) (Spec, error) {
+	specStrs := form.Value["spec"]
+	if len(specStrs) == 0 || specStrs[0] == "" {
+		return Spec{}, fmt.Errorf("missing field: spec")
+	}
+	var spec Spec
+	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
+	dec.DisallowUnknownFields()
+
+thinking
+**Reviewing saveJSON and error handling**
+
+Noticed that saveJSON uses temp files and atomic rename but doesn't fsync the directory, which might be acceptable. Also, updateRunsIndex returns a corrupted error even if saving succeeds, so I'll check how that error is handled to avoid misreporting success as failure.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "updateRunsIndex" -n' in /Users/yani/Noema/backend succeeded in 51ms:
+internal/evaluate/storage.go:109:func updateRunsIndex(runsDir string, limit int, entry RunIndexEntry) error {
+internal/evaluate/handler.go:130:		if err := updateRunsIndex(runsDir, config.RunsIndexLimit(), RunIndexEntry{
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '100,190p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+		overallPass, maxSeverity, policyThreshold := computePolicyResult(evalOut, enabled)
+		status := "FAIL"
+		if overallPass {
+			status = "PASS"
+		}
+
+		specJSON, err := jsonBytes(spec)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode spec"})
+			return
+		}
+		evalJSON, err := jsonBytes(evalOut)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode evaluation output"})
+			return
+		}
+		commitment := zk.CommitmentSHA256([]byte("spec"), specJSON, []byte("eval"), evalJSON)
+		proof, err := zk.GenerateProof(zk.PublicInputs{
+			PolicyThreshold: policyThreshold,
+			MaxSeverity:     maxSeverity,
+
+thinking
+**Reviewing updateRunsIndex error handling and tests**
+
+Noted that updateRunsIndex returns a corruption error without failing the handler, which logs it; considering adding atomic write with fsync for reliability in saveJSON and ensuring directory sync. Planning to check existing tests for updateRunsIndex, especially in handler_test, to possibly add tests covering corruption scenarios before improving the writing logic.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '320,450p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+		},
+	}
+	if err := validateSpec(spec); err == nil {
+		t.Fatalf("expected error for empty custom constraint id")
+	}
+}
+
+func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+	form := &multipart.Form{
+		Value: map[string][]string{
+			"spec": {`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[],"extra":true}`},
+		},
+	}
+	if _, err := parseSpec(form); err == nil {
+		t.Fatalf("expected error for unknown spec fields")
+	}
+}
+
+func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
+
+
+thinking
+**Identifying reliability improvements**
+
+Noticed saveJSON doesn’t ensure directory existence but runsDir should exist, so that’s safe. A key reliability fix is to error if multiple spec fields appear in the input, as currently extras are ignored—this avoids ambiguity in parseSpec. Other minor points include collision risk in run ID generation being low and dataset decoding already disallowing unknown keys.
+thinking
+**Planning parseSpec error handling**
+
+I'll modify parseSpec to error when multiple spec values appear, adding a clear error message consistent with existing patterns. I'll add tests in handler_test to cover this case, updating two files: parse.go and handler_test.go.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/parse.go
+@@ -17,2 +17,5 @@
+ 	}
++	if len(specStrs) > 1 {
++		return Spec{}, fmt.Errorf("only one spec value allowed")
++	}
+ 	var spec Spec
+apply_patch(auto_approved=true) exited 0 in 29ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/parse.go
+file update:
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 1bdabd2155f1907fa9725b41753a1d9e5c2f4250..7f73c3f896a585a47b99564fea2c1df281a40e62
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -15,6 +15,9 @@
+ 	if len(specStrs) == 0 || specStrs[0] == "" {
+ 		return Spec{}, fmt.Errorf("missing field: spec")
+ 	}
++	if len(specStrs) > 1 {
++		return Spec{}, fmt.Errorf("only one spec value allowed")
++	}
+ 	var spec Spec
+ 	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
+ 	dec.DisallowUnknownFields()
+
+file update:
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 1bdabd2155f1907fa9725b41753a1d9e5c2f4250..7f73c3f896a585a47b99564fea2c1df281a40e62
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -15,6 +15,9 @@
+ 	if len(specStrs) == 0 || specStrs[0] == "" {
+ 		return Spec{}, fmt.Errorf("missing field: spec")
+ 	}
++	if len(specStrs) > 1 {
++		return Spec{}, fmt.Errorf("only one spec value allowed")
++	}
+ 	var spec Spec
+ 	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
+ 	dec.DisallowUnknownFields()
+
+
+thinking
+**Adding a test**
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
+@@ -338,2 +338,16 @@
+ 
++func TestParseSpec_RejectsMultipleValues(t *testing.T) {
++	form := &multipart.Form{
++		Value: map[string][]string{
++			"spec": {
++				`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[]}`,
++				`{"schema_version":1,"evaluation_name":"other","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[]}`,
++			},
++		},
++	}
++	if _, err := parseSpec(form); err == nil {
++		t.Fatalf("expected error for multiple spec values")
++	}
++}
++
+ func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
+apply_patch(auto_approved=true) exited 0 in 34ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
+file update:
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 2327c77b3fc12627ef79c95c3df0c0eeaa092646..6715f5a6c06cb43c6785fba82827cfd46facbe8b
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -336,6 +336,20 @@
+ 	}
+ }
+ 
++func TestParseSpec_RejectsMultipleValues(t *testing.T) {
++	form := &multipart.Form{
++		Value: map[string][]string{
++			"spec": {
++				`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[]}`,
++				`{"schema_version":1,"evaluation_name":"other","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[]}`,
++			},
++		},
++	}
++	if _, err := parseSpec(form); err == nil {
++		t.Fatalf("expected error for multiple spec values")
++	}
++}
++
+ func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
+ 	base := t.TempDir()
+ 
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 1bdabd2155f1907fa9725b41753a1d9e5c2f4250..7f73c3f896a585a47b99564fea2c1df281a40e62
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -15,6 +15,9 @@
+ 	if len(specStrs) == 0 || specStrs[0] == "" {
+ 		return Spec{}, fmt.Errorf("missing field: spec")
+ 	}
++	if len(specStrs) > 1 {
++		return Spec{}, fmt.Errorf("only one spec value allowed")
++	}
+ 	var spec Spec
+ 	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
+ 	dec.DisallowUnknownFields()
+
+file update:
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 2327c77b3fc12627ef79c95c3df0c0eeaa092646..6715f5a6c06cb43c6785fba82827cfd46facbe8b
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -336,6 +336,20 @@
+ 	}
+ }
+ 
++func TestParseSpec_RejectsMultipleValues(t *testing.T) {
++	form := &multipart.Form{
++		Value: map[string][]string{
++			"spec": {
++				`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[]}`,
++				`{"schema_version":1,"evaluation_name":"other","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[]}`,
++			},
++		},
++	}
++	if _, err := parseSpec(form); err == nil {
++		t.Fatalf("expected error for multiple spec values")
++	}
++}
++
+ func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
+ 	base := t.TempDir()
+ 
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 1bdabd2155f1907fa9725b41753a1d9e5c2f4250..7f73c3f896a585a47b99564fea2c1df281a40e62
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -15,6 +15,9 @@
+ 	if len(specStrs) == 0 || specStrs[0] == "" {
+ 		return Spec{}, fmt.Errorf("missing field: spec")
+ 	}
++	if len(specStrs) > 1 {
++		return Spec{}, fmt.Errorf("only one spec value allowed")
++	}
+ 	var spec Spec
+ 	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
+ 	dec.DisallowUnknownFields()
+
+
+thinking
+**Running all tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 491ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.050s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 2327c77b3fc12627ef79c95c3df0c0eeaa092646..6715f5a6c06cb43c6785fba82827cfd46facbe8b
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -336,6 +336,20 @@
+ 	}
+ }
+ 
++func TestParseSpec_RejectsMultipleValues(t *testing.T) {
++	form := &multipart.Form{
++		Value: map[string][]string{
++			"spec": {
++				`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[]}`,
++				`{"schema_version":1,"evaluation_name":"other","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[]}`,
++			},
++		},
++	}
++	if _, err := parseSpec(form); err == nil {
++		t.Fatalf("expected error for multiple spec values")
++	}
++}
++
+ func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
+ 	base := t.TempDir()
+ 
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 1bdabd2155f1907fa9725b41753a1d9e5c2f4250..7f73c3f896a585a47b99564fea2c1df281a40e62
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -15,6 +15,9 @@
+ 	if len(specStrs) == 0 || specStrs[0] == "" {
+ 		return Spec{}, fmt.Errorf("missing field: spec")
+ 	}
++	if len(specStrs) > 1 {
++		return Spec{}, fmt.Errorf("only one spec value allowed")
++	}
+ 	var spec Spec
+ 	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
+ 	dec.DisallowUnknownFields()
+
+codex
+What you changed (short)
+- Rejected multipart requests with multiple `spec` values and added a test to cover this case.
+
+Tests run
+- `go test ./...`
+
+Next steps if you want them:
+1. Add a similar guard for multiple `dataset` values in multipart form values (not files), if applicable.
+file update:
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 2327c77b3fc12627ef79c95c3df0c0eeaa092646..6715f5a6c06cb43c6785fba82827cfd46facbe8b
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -336,6 +336,20 @@
+ 	}
+ }
+ 
++func TestParseSpec_RejectsMultipleValues(t *testing.T) {
++	form := &multipart.Form{
++		Value: map[string][]string{
++			"spec": {
++				`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[]}`,
++				`{"schema_version":1,"evaluation_name":"other","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[]}`,
++			},
++		},
++	}
++	if _, err := parseSpec(form); err == nil {
++		t.Fatalf("expected error for multiple spec values")
++	}
++}
++
+ func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
+ 	base := t.TempDir()
+ 
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 1bdabd2155f1907fa9725b41753a1d9e5c2f4250..7f73c3f896a585a47b99564fea2c1df281a40e62
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -15,6 +15,9 @@
+ 	if len(specStrs) == 0 || specStrs[0] == "" {
+ 		return Spec{}, fmt.Errorf("missing field: spec")
+ 	}
++	if len(specStrs) > 1 {
++		return Spec{}, fmt.Errorf("only one spec value allowed")
++	}
+ 	var spec Spec
+ 	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
+ 	dec.DisallowUnknownFields()
+
+tokens used
+23,235
+What you changed (short)
+- Rejected multipart requests with multiple `spec` values and added a test to cover this case.
+
+Tests run
+- `go test ./...`
+
+Next steps if you want them:
+1. Add a similar guard for multiple `dataset` values in multipart form values (not files), if applicable.
