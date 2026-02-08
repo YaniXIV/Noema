@@ -10,12 +10,19 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync/atomic"
 	"time"
 )
 
+var runIDCounter uint64
+
 func genRunID() string {
-	n, _ := rand.Int(rand.Reader, big.NewInt(1e9))
-	return fmt.Sprintf("run_%d_%d", time.Now().UnixMilli(), n.Int64())
+	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
+	if err == nil {
+		return fmt.Sprintf("run_%d_%d", time.Now().UnixMilli(), n.Int64())
+	}
+	counter := atomic.AddUint64(&runIDCounter, 1)
+	return fmt.Sprintf("run_%d_%d_%d", time.Now().UnixMilli(), os.Getpid(), counter)
 }
 
 func ensureRunDir(path string) error {
