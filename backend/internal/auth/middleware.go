@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"crypto/subtle"
 	"net/http"
 	"net/url"
 	"strings"
@@ -24,7 +25,7 @@ func JudgeKey() gin.HandlerFunc {
 		if got == "" {
 			got = c.Query("judge_key")
 		}
-		if got != expect {
+		if !constantTimeEqual(got, expect) {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid judge key"})
 			return
 		}
@@ -48,7 +49,7 @@ func CookieAuth() gin.HandlerFunc {
 			return
 		}
 		payload, ok := session.Verify(config.CookieSecret(), cookie)
-		if !ok || payload != expect {
+		if !ok || !constantTimeEqual(payload, expect) {
 			abortCookieAuth(c, "Invalid session")
 			return
 		}
@@ -63,4 +64,8 @@ func abortCookieAuth(c *gin.Context, msg string) {
 	}
 	c.Redirect(http.StatusSeeOther, "/?err="+url.QueryEscape(msg))
 	c.Abort()
+}
+
+func constantTimeEqual(a, b string) bool {
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
