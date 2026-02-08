@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 )
 
@@ -78,12 +79,23 @@ func updateRunsIndex(runsDir string, limit int, entry RunIndexEntry) error {
 	}
 	indexPath := filepath.Join(runsDir, "index.json")
 	var entries []RunIndexEntry
+	var corruptedErr error
 	if b, err := os.ReadFile(indexPath); err == nil {
-		_ = json.Unmarshal(b, &entries)
+		if err := json.Unmarshal(b, &entries); err != nil {
+			backup := indexPath + ".corrupt-" + strconv.FormatInt(time.Now().UnixMilli(), 10)
+			if renameErr := os.Rename(indexPath, backup); renameErr != nil {
+				corruptedErr = fmt.Errorf("runs index corrupted; failed to archive: %w", renameErr)
+			} else {
+				corruptedErr = fmt.Errorf("runs index corrupted; archived as %s", backup)
+			}
+		}
 	}
 	entries = append([]RunIndexEntry{entry}, entries...)
 	if len(entries) > limit {
 		entries = entries[:limit]
 	}
-	return saveJSON(indexPath, entries)
+	if err := saveJSON(indexPath, entries); err != nil {
+		return err
+	}
+	return corruptedErr
 }

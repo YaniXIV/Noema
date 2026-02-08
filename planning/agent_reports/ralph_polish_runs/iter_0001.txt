@@ -1,8 +1,416 @@
-What you changed
-- Updated `/api/evaluate` to write a run entry to `data/runs/index.json` (via `updateRunsIndex`) after a successful evaluation, with timestamp and evaluation name: `internal/evaluate/handler.go`.
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3c7a-79e1-7693-a238-2d745c25e1ef
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
 
-Tests you ran
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Running Go tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 94ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+?   	noema/internal/session	[no test files]
+?   	noema/internal/verify	[no test files]
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Searching TODOs for improvements**
+
+I'm running searches for TODOs or potential bugs to identify meaningful improvement areas, focusing on input validation or error handling to boost reliability.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "TODO|FIXME|panic" internal -n' in /Users/yani/Noema/backend exited 1 in 52ms:
+
+
+thinking
+**Searching for session handling improvements**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "_ =|TODO|error" internal -n' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/prompt.go:160:func marshalSampledDataset(ds Dataset) ([]byte, error) {
+internal/evaluate/parse.go:11:func parseSpec(form *multipart.Form) (Spec, error) {
+internal/evaluate/parse.go:23:func validateSpec(spec Spec) error {
+internal/evaluate/parse.go:40:func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.FileHeader, error) {
+internal/evaluate/parse.go:65:func validateDatasetJSON(fh *multipart.FileHeader) error {
+internal/evaluate/output.go:22:func parseEvalOutput(raw string) (EvalOutput, error) {
+internal/evaluate/output.go:49:func validateEvalOutput(out EvalOutput, enabled map[string]ConstraintRule) error {
+internal/evaluate/handler_test.go:20:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:26:		t.Fatalf("parseEvalOutputOptional error: %v", err)
+internal/evaluate/handler_test.go:63:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:82:		t.Fatalf("parseEvalOutputOptional error: %v", err)
+internal/evaluate/handler_test.go:101:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:118:		t.Fatalf("expected validation error for unknown constraint")
+internal/evaluate/dataset.go:22:func readDatasetFile(fh *multipart.FileHeader) ([]byte, Dataset, error) {
+internal/evaluate/storage.go:20:func ensureRunDir(path string) error {
+internal/evaluate/storage.go:24:func saveRunFiles(runPath string, dataset *multipart.FileHeader, images []*multipart.FileHeader) error {
+internal/evaluate/storage.go:41:func saveUpload(fh *multipart.FileHeader, dst string) error {
+internal/evaluate/storage.go:56:func saveJSON(path string, v any) error {
+internal/evaluate/storage.go:75:func updateRunsIndex(runsDir string, limit int, entry RunIndexEntry) error {
+internal/evaluate/storage.go:82:		_ = json.Unmarshal(b, &entries)
+
+thinking
+**Noticing silent error risk in storage update**
+
+I see that ignoring unmarshal errors in storage updateRunsIndex could cause silent failures, so I plan to check the file and add error handling to avoid this issue.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,140p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math/big"
+	"mime/multipart"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+func genRunID() string {
+	n, _ := rand.Int(rand.Reader, big.NewInt(1e9))
+	return fmt.Sprintf("run_%d_%d", time.Now().UnixMilli(), n.Int64())
+}
+
+func ensureRunDir(path string) error {
+
+thinking
+**Considering error handling improvements**
+
+I'm evaluating adding fallback for rand errors in run ID generation to prevent panics and handling unmarshal errors in run index to avoid silent overwrites by renaming corrupted files; balancing robustness without breaking request flow since errors might propagate in handlers.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+// EvaluateResponse is the JSON response for POST /api/evaluate.
+type EvaluateResponse struct {
+
+
+thinking
+**Planning corrupted index handling**
+
+I'm deciding to improve resilience by detecting unmarshal failures on reading the runs index, renaming the corrupted file with a timestamped backup, logging and returning an error, but continuing with an empty index to keep the service running.
+thinking
+**Refining corrupted index recovery**
+
+The plan is to rename the corrupted index file on unmarshal failure, log related errors without aborting, rebuild and save a new empty index, and finally return any corruption or save errors—ensuring the index updates despite corruption.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/storage.go
+@@ -11,2 +11,3 @@
+ 	"path/filepath"
++	"strconv"
+ 	"time"
+@@ -80,4 +81,12 @@
+ 	var entries []RunIndexEntry
++	var corruptedErr error
+ 	if b, err := os.ReadFile(indexPath); err == nil {
+-		_ = json.Unmarshal(b, &entries)
++		if err := json.Unmarshal(b, &entries); err != nil {
++			backup := indexPath + ".corrupt-" + strconv.FormatInt(time.Now().UnixMilli(), 10)
++			if renameErr := os.Rename(indexPath, backup); renameErr != nil {
++				corruptedErr = fmt.Errorf("runs index corrupted; failed to archive: %w", renameErr)
++			} else {
++				corruptedErr = fmt.Errorf("runs index corrupted; archived as %s", backup)
++			}
++		}
+ 	}
+@@ -87,3 +96,6 @@
+ 	}
+-	return saveJSON(indexPath, entries)
++	if err := saveJSON(indexPath, entries); err != nil {
++		return err
++	}
++	return corruptedErr
+ }
+apply_patch(auto_approved=true) exited 0 in 30ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/storage.go
+file update:
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 096ad91ac714526b95d087b61e4dbe6db253f741..feee4fa4267200936cb5a908180b9464719a6c55
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -9,6 +9,7 @@
+ 	"mime/multipart"
+ 	"os"
+ 	"path/filepath"
++	"strconv"
+ 	"time"
+ )
+ 
+@@ -78,12 +79,23 @@
+ 	}
+ 	indexPath := filepath.Join(runsDir, "index.json")
+ 	var entries []RunIndexEntry
++	var corruptedErr error
+ 	if b, err := os.ReadFile(indexPath); err == nil {
+-		_ = json.Unmarshal(b, &entries)
++		if err := json.Unmarshal(b, &entries); err != nil {
++			backup := indexPath + ".corrupt-" + strconv.FormatInt(time.Now().UnixMilli(), 10)
++			if renameErr := os.Rename(indexPath, backup); renameErr != nil {
++				corruptedErr = fmt.Errorf("runs index corrupted; failed to archive: %w", renameErr)
++			} else {
++				corruptedErr = fmt.Errorf("runs index corrupted; archived as %s", backup)
++			}
++		}
+ 	}
+ 	entries = append([]RunIndexEntry{entry}, entries...)
+ 	if len(entries) > limit {
+ 		entries = entries[:limit]
+ 	}
+-	return saveJSON(indexPath, entries)
++	if err := saveJSON(indexPath, entries); err != nil {
++		return err
++	}
++	return corruptedErr
+ }
+
+file update:
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 096ad91ac714526b95d087b61e4dbe6db253f741..feee4fa4267200936cb5a908180b9464719a6c55
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -9,6 +9,7 @@
+ 	"mime/multipart"
+ 	"os"
+ 	"path/filepath"
++	"strconv"
+ 	"time"
+ )
+ 
+@@ -78,12 +79,23 @@
+ 	}
+ 	indexPath := filepath.Join(runsDir, "index.json")
+ 	var entries []RunIndexEntry
++	var corruptedErr error
+ 	if b, err := os.ReadFile(indexPath); err == nil {
+-		_ = json.Unmarshal(b, &entries)
++		if err := json.Unmarshal(b, &entries); err != nil {
++			backup := indexPath + ".corrupt-" + strconv.FormatInt(time.Now().UnixMilli(), 10)
++			if renameErr := os.Rename(indexPath, backup); renameErr != nil {
++				corruptedErr = fmt.Errorf("runs index corrupted; failed to archive: %w", renameErr)
++			} else {
++				corruptedErr = fmt.Errorf("runs index corrupted; archived as %s", backup)
++			}
++		}
+ 	}
+ 	entries = append([]RunIndexEntry{entry}, entries...)
+ 	if len(entries) > limit {
+ 		entries = entries[:limit]
+ 	}
+-	return saveJSON(indexPath, entries)
++	if err := saveJSON(indexPath, entries); err != nil {
++		return err
++	}
++	return corruptedErr
+ }
+
+
+thinking
+**Running tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backendfile update:
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 096ad91ac714526b95d087b61e4dbe6db253f741..feee4fa4267200936cb5a908180b9464719a6c55
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -9,6 +9,7 @@
+ 	"mime/multipart"
+ 	"os"
+ 	"path/filepath"
++	"strconv"
+ 	"time"
+ )
+ 
+@@ -78,12 +79,23 @@
+ 	}
+ 	indexPath := filepath.Join(runsDir, "index.json")
+ 	var entries []RunIndexEntry
++	var corruptedErr error
+ 	if b, err := os.ReadFile(indexPath); err == nil {
+-		_ = json.Unmarshal(b, &entries)
++		if err := json.Unmarshal(b, &entries); err != nil {
++			backup := indexPath + ".corrupt-" + strconv.FormatInt(time.Now().UnixMilli(), 10)
++			if renameErr := os.Rename(indexPath, backup); renameErr != nil {
++				corruptedErr = fmt.Errorf("runs index corrupted; failed to archive: %w", renameErr)
++			} else {
++				corruptedErr = fmt.Errorf("runs index corrupted; archived as %s", backup)
++			}
++		}
+ 	}
+ 	entries = append([]RunIndexEntry{entry}, entries...)
+ 	if len(entries) > limit {
+ 		entries = entries[:limit]
+ 	}
+-	return saveJSON(indexPath, entries)
++	if err := saveJSON(indexPath, entries); err != nil {
++		return err
++	}
++	return corruptedErr
+ }
+
+ succeeded in 1.48s:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.013s
+?   	noema/internal/gemini	[no test files]
+?   	noema/internal/session	[no test files]
+?   	noema/internal/verify	[no test files]
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 096ad91ac714526b95d087b61e4dbe6db253f741..feee4fa4267200936cb5a908180b9464719a6c55
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -9,6 +9,7 @@
+ 	"mime/multipart"
+ 	"os"
+ 	"path/filepath"
++	"strconv"
+ 	"time"
+ )
+ 
+@@ -78,12 +79,23 @@
+ 	}
+ 	indexPath := filepath.Join(runsDir, "index.json")
+ 	var entries []RunIndexEntry
++	var corruptedErr error
+ 	if b, err := os.ReadFile(indexPath); err == nil {
+-		_ = json.Unmarshal(b, &entries)
++		if err := json.Unmarshal(b, &entries); err != nil {
++			backup := indexPath + ".corrupt-" + strconv.FormatInt(time.Now().UnixMilli(), 10)
++			if renameErr := os.Rename(indexPath, backup); renameErr != nil {
++				corruptedErr = fmt.Errorf("runs index corrupted; failed to archive: %w", renameErr)
++			} else {
++				corruptedErr = fmt.Errorf("runs index corrupted; archived as %s", backup)
++			}
++		}
+ 	}
+ 	entries = append([]RunIndexEntry{entry}, entries...)
+ 	if len(entries) > limit {
+ 		entries = entries[:limit]
+ 	}
+-	return saveJSON(indexPath, entries)
++	if err := saveJSON(indexPath, entries); err != nil {
++		return err
++	}
++	return corruptedErr
+ }
+
+codex
+What you changed (short)
+- Made runs index handling resilient to corrupted `index.json` by archiving corrupt files and still writing a fresh index, while surfacing a logged error.
+
+Tests run (must include go test ./...)
 - `go test ./...`
 
-Follow-up (optional)
-1. Add a small integration test to assert `index.json` is written and capped by `NOEMA_RUNS_INDEX_LIMIT`.
+If you want another iteration, say the word.
+file update:
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 096ad91ac714526b95d087b61e4dbe6db253f741..feee4fa4267200936cb5a908180b9464719a6c55
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -9,6 +9,7 @@
+ 	"mime/multipart"
+ 	"os"
+ 	"path/filepath"
++	"strconv"
+ 	"time"
+ )
+ 
+@@ -78,12 +79,23 @@
+ 	}
+ 	indexPath := filepath.Join(runsDir, "index.json")
+ 	var entries []RunIndexEntry
++	var corruptedErr error
+ 	if b, err := os.ReadFile(indexPath); err == nil {
+-		_ = json.Unmarshal(b, &entries)
++		if err := json.Unmarshal(b, &entries); err != nil {
++			backup := indexPath + ".corrupt-" + strconv.FormatInt(time.Now().UnixMilli(), 10)
++			if renameErr := os.Rename(indexPath, backup); renameErr != nil {
++				corruptedErr = fmt.Errorf("runs index corrupted; failed to archive: %w", renameErr)
++			} else {
++				corruptedErr = fmt.Errorf("runs index corrupted; archived as %s", backup)
++			}
++		}
+ 	}
+ 	entries = append([]RunIndexEntry{entry}, entries...)
+ 	if len(entries) > limit {
+ 		entries = entries[:limit]
+ 	}
+-	return saveJSON(indexPath, entries)
++	if err := saveJSON(indexPath, entries); err != nil {
++		return err
++	}
++	return corruptedErr
+ }
+
+tokens used
+9,307
+What you changed (short)
+- Made runs index handling resilient to corrupted `index.json` by archiving corrupt files and still writing a fresh index, while surfacing a logged error.
+
+Tests run (must include go test ./...)
+- `go test ./...`
+
+If you want another iteration, say the word.
