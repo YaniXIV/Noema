@@ -4,10 +4,13 @@ import (
 	"context"
 	"log"
 	"mime/multipart"
+	"time"
 
 	"noema/internal/config"
 	"noema/internal/gemini"
 )
+
+const geminiEvalTimeout = 45 * time.Second
 
 func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
 	if form != nil && len(form.Value["eval_output"]) > 0 && form.Value["eval_output"][0] != "" {
@@ -67,6 +70,8 @@ func evalWithGemini(ctx context.Context, enabled map[string]ConstraintRule, runs
 		Images:          toGeminiImages(images),
 	}
 
+	ctx, cancel := withGeminiTimeout(ctx)
+	defer cancel()
 	resp, err := gemini.Evaluate(ctx, req)
 	if err != nil {
 		log.Printf("gemini evaluate: %v", err)
@@ -95,6 +100,13 @@ func evalWithGemini(ctx context.Context, enabled map[string]ConstraintRule, runs
 	}
 
 	return out
+}
+
+func withGeminiTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, geminiEvalTimeout)
 }
 
 func toGeminiImages(images []ImageInfo) []gemini.ImageInput {
