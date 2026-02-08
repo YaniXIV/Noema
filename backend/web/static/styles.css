@@ -460,6 +460,11 @@ pre,
   border-color: var(--accent);
   background: rgba(59, 130, 246, 0.06);
 }
+.upload-zone:focus-within {
+  border-color: var(--accent);
+  background: rgba(59, 130, 246, 0.1);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
 .upload-zone input[type="file"] {
   position: absolute;
   inset: 0;
@@ -1245,4 +1250,15 @@ pre,
 @media (max-width: 760px) {
   .verify-row { grid-template-columns: 1fr; }
   .verify-actions { justify-content: flex-start; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
