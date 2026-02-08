@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"path/filepath"
 	"strings"
 
 	"noema/internal/config"
@@ -77,6 +78,9 @@ func readDatasetFile(fh *multipart.FileHeader) ([]byte, Dataset, error) {
 			}
 			if trimmedRef != item.ImageRef {
 				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must not include leading/trailing whitespace", i)
+			}
+			if filepath.Base(item.ImageRef) != item.ImageRef {
+				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must not include path separators", i)
 			}
 		}
 		if _, exists := seenIDs[item.ID]; exists {

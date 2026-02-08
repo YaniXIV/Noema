@@ -122,6 +122,24 @@ func TestParseUploads_RejectsImageFilenameWhitespace(t *testing.T) {
 	}
 }
 
+func TestParseUploads_RejectsImageRefPathSeparators(t *testing.T) {
+	dataset := `{"items":[{"id":"item-1","text":"hello","image_ref":"images/pic.png"}]}`
+	form := buildMultipartForm(t, []formFile{
+		{
+			field:       "dataset",
+			filename:    "dataset.json",
+			contentType: "application/json",
+			content:     []byte(dataset),
+		},
+	})
+
+	if _, _, err := parseUploads(form); err == nil {
+		t.Fatalf("expected error for image_ref with path separators")
+	} else if !strings.Contains(err.Error(), "path separators") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestParseEvalOutputOptional_UsesProvidedOutput(t *testing.T) {
 	spec := Spec{
 		SchemaVersion: 1,
