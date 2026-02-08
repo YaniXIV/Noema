@@ -374,15 +374,22 @@
     var datasetFile = getDatasetFile();
     var datasetSourceLabel = datasetSource === 'file' ? 'Uploaded file' : 'Pasted JSON';
     var datasetSource = datasetFile ? (datasetFile.name || datasetSourceLabel) : '—';
+    var datasetSize = datasetFile && datasetFile.size ? formatBytes(datasetFile.size) : '';
+    var datasetLine = datasetSource + (datasetSize ? (' · ' + datasetSize) : '');
     var spec = buildSpec();
     var enabledCount = spec.constraints.filter(function(c) { return c.enabled; }).length +
       spec.custom_constraints.filter(function(c) { return c.enabled; }).length;
+    var imagesInput = document.getElementById('images-file');
+    var images = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
+    var imageTotal = images.reduce(function(sum, file) { return sum + file.size; }, 0);
+    var imagesLine = images.length > 0 ? (images.length + ' files · ' + formatBytes(imageTotal)) : 'None';
 
     document.getElementById('review-summary').innerHTML =
-      '<p><strong>Evaluation name:</strong> ' + escapeHtml(name) + '</p>' +
-      '<p><strong>Dataset:</strong> ' + escapeHtml(datasetSource) + '</p>' +
-      '<p><strong>Reveal:</strong> max_severity=' + spec.policy.reveal.max_severity + ', commitment=' + spec.policy.reveal.commitment + '</p>' +
-      '<p><strong>Constraints enabled:</strong> ' + enabledCount + '</p>';
+      '<div class="review-item"><span class="review-label">Evaluation</span><span class="review-value">' + escapeHtml(name) + '</span></div>' +
+      '<div class="review-item"><span class="review-label">Dataset</span><span class="review-value">' + escapeHtml(datasetLine) + '</span></div>' +
+      '<div class="review-item"><span class="review-label">Images</span><span class="review-value">' + escapeHtml(imagesLine) + '</span></div>' +
+      '<div class="review-item"><span class="review-label">Reveal</span><span class="review-value">Max severity: ' + (spec.policy.reveal.max_severity ? 'Yes' : 'No') + ' · Commitment: ' + (spec.policy.reveal.commitment ? 'Yes' : 'No') + '</span></div>' +
+      '<div class="review-item"><span class="review-label">Constraints</span><span class="review-value">' + enabledCount + ' enabled</span></div>';
   }
 
   document.querySelectorAll('.segmented-btn').forEach(function(btn) {

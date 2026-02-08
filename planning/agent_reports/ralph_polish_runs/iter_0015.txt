@@ -7,7 +7,7 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3c87-e55a-7091-bc20-8edeb986a014
+session id: 019c3ecf-aadb-7c81-84ff-f4855cd27c6e
 --------
 user
 You are an autonomous coding agent polishing the Noema repository.
@@ -18,8 +18,9 @@ Hard rules:
 - Keep changes small: max 3 files per iteration.
 - No cosmetic-only edits.
 - No new dependencies unless absolutely necessary.
+- keep all the same ui functionality, the end user should be able to do the same stuff but the experiance and design should be better.
 
-Goal: continuously improve production quality.
+Goal: continuously improve production quality. continuously improve front end quality and polish.
 
 Iteration:
 1) Run: cd backend && go test ./...
@@ -29,7 +30,7 @@ Iteration:
 Pick the highest-value improvement:
 A) Reliability/correctness: validation, error handling, run persistence, verify robustness
 B) Tests: add/strengthen tests for the change you made
-C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+C) upgrading the user interface so that it looks better.
 D) Maintainability: reduce duplication with tiny refactors
 E) UX: wizard/results/verify clarity (small, safe changes)
 F) Docs: README/DEPLOYMENT polish
@@ -41,706 +42,883 @@ Finish with:
 mcp startup: no servers
 
 thinking
-**Running tests**
+**Running tests command**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 182ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 196ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
 ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
 
 thinking
-**Preparing to identify code improvement**
+**Planning UI improvement**
 
-Tests pass, so now I'll use ripgrep to inspect the code and find one meaningful improvement limited to three files.
+Tests pass, so next I’m inspecting the repo to identify frontend files using searches to find a meaningful UI improvement within a small change scope.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME|panic|log.Fatal|Fatalf|Unhandled|ignore" internal' in /Users/yani/Noema/backend succeeded in 52ms:
-internal/session/session_test.go:16:		t.Fatalf("expected verify ok")
-internal/session/session_test.go:19:		t.Fatalf("expected payload %q, got %q", payload, got)
-internal/session/session_test.go:29:		t.Fatalf("expected signed value to contain dot")
-internal/session/session_test.go:41:		t.Fatalf("expected tampered signature to fail")
-internal/session/session_test.go:58:			t.Fatalf("expected verify to fail for %q", tc)
-internal/verify/handler_test.go:32:		t.Fatalf("new request: %v", err)
-internal/verify/handler_test.go:38:		t.Fatalf("expected status 200, got %d", w.Code)
-internal/verify/handler_test.go:43:		t.Fatalf("decode response: %v", err)
-internal/verify/handler_test.go:46:		t.Fatalf("expected legacy proof to verify")
-internal/verify/handler_test.go:49:		t.Fatalf("expected legacy message, got %q", resp.Message)
-internal/verify/handler_test.go:60:		t.Fatalf("new request: %v", err)
-internal/verify/handler_test.go:66:		t.Fatalf("expected status 400, got %d", w.Code)
-internal/verify/handler_test.go:71:		t.Fatalf("decode response: %v", err)
-internal/verify/handler_test.go:74:		t.Fatalf("expected invalid proof encoding, got %q", resp.Error)
-internal/verify/handler_test.go:85:		t.Fatalf("new request: %v", err)
-internal/verify/handler_test.go:91:		t.Fatalf("expected status 400, got %d", w.Code)
-internal/verify/handler_test.go:96:		t.Fatalf("decode response: %v", err)
-internal/verify/handler_test.go:99:		t.Fatalf("expected missing run_id, got %q", resp.Error)
-internal/evaluate/handler_integration_test.go:45:		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
-internal/evaluate/handler_integration_test.go:50:		t.Fatalf("decode response: %v", err)
+/bin/zsh -lc "cd /Users/yani/Noema/backend && rg --files -g '*.{go,html,css,js,ts,tsx,jsx}'" in /Users/yani/Noema/backend succeeded in 52ms:
+internal/session/session_test.go
+internal/session/session.go
+internal/evaluate/prompt.go
+internal/evaluate/parse.go
+internal/evaluate/output.go
+internal/evaluate/handler_test.go
+internal/evaluate/schema.go
+internal/evaluate/dataset.go
+internal/evaluate/storage.go
+internal/evaluate/storage_test.go
+internal/evaluate/images.go
+internal/evaluate/handler_integration_test.go
+internal/evaluate/cache.go
+internal/evaluate/commitment.go
+internal/evaluate/policy.go
+internal/evaluate/spec.go
+internal/evaluate/gemini_eval.go
+internal/evaluate/handler.go
+internal/web/auth.go
+internal/web/upload.go
 
 thinking
-**Inspecting error handling**
-
-I'm planning to review error handling in handlers and check internal/evaluate for robustness to improve reliability. Next, I'll open relevant files to examine their implementations.
+**Reviewing styles for UI improvement**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
-cache.go
-commitment.go
-dataset.go
-gemini_eval.go
-handler.go
-handler_integration_test.go
-handler_test.go
-images.go
-output.go
-parse.go
-policy.go
-prompt.go
-schema.go
-spec.go
-storage.go
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap');
 
-thinking
-**Considering request size validation**
-
-I'm planning to enhance the handler by validating the incoming request size to improve robustness. Next, I'll check the handler implementation for where to integrate this validation.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package evaluate
-
-import (
-	"encoding/json"
-	"log"
-	"mime/multipart"
-	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
-	"time"
-
-	"noema/internal/config"
-	"noema/internal/zk"
-
-	"github.com/gin-gonic/gin"
-)
-
-// EvaluateResponse is the JSON response for POST /api/evaluate.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
-	if err := validateEvalOutput(out, enabled); err != nil {
-		return EvalOutput{}, err
-	}
-	return out, nil
+:root {
+  --bg: #05060a;
+  --bg-card: rgba(9, 12, 18, 0.9);
+  --text: #f4f6fb;
+  --text-muted: #9aa3b2;
+  --accent: #45d4ff;
+  --accent-strong: #2c7bff;
+  --accent-glow: rgba(69, 212, 255, 0.35);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(69, 212, 255, 0.4);
+  --error: #f87171;
+  --success: #22c55e;
+  --warning: #fbbf24;
+  --shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
 }
 
-func stubEvalOutput(enabled map[string]ConstraintRule) EvalOutput {
-	out := EvalOutput{
-		SchemaVersion: 1,
-		Constraints:   make([]EvalConstraintResult, 0, len(enabled)),
-		MaxSeverity:   0,
-	}
-	for id := range enabled {
-		out.Constraints = append(out.Constraints, EvalConstraintResult{
-			ID:        id,
-			Severity:  0,
-			Rationale: "stub",
-		})
-	}
-	sort.Slice(out.Constraints, func(i, j int) bool {
-
-thinking
-**Planning validation and error improvements**
-
-Considering enhancing error messages for clarity and adding validation for multipart upload sizes, focusing next on examining the upload parsing logic for practical checks.
+*,
+*::before,
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '240,520p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 51ms:
 
-import (
-	"encoding/json"
-	"fmt"
-	"mime/multipart"
-	"strings"
-
-	"noema/internal/config"
-)
-
-func parseSpec(form *multipart.Form) (Spec, error) {
-	specStrs := form.Value["spec"]
-	if len(specStrs) == 0 || specStrs[0] == "" {
-		return Spec{}, fmt.Errorf("missing field: spec")
-	}
-	var spec Spec
-	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
-		return Spec{}, fmt.Errorf("invalid spec JSON")
-	}
-
-thinking
-**Identifying robustness improvements**
-
-I'm considering making pruning more robust by ignoring errors and handling a missing runs directory, but this will require updating tests. Next, I'll review updateRunsIndex in internal/evaluate/storage.go for related adjustments.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"crypto/rand"
-	"encoding/json"
-	"fmt"
-	"io"
-	"math/big"
-	"mime/multipart"
-	"os"
-	"path/filepath"
-	"strconv"
-	"sync/atomic"
-	"time"
-)
-
-var runIDCounter uint64
-
-func genRunID() string {
-	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
-
-
-thinking
-**Planning reliability improvements**
-
-I'm considering enhancing saveUpload to remove partial files on copy failure for better reliability and adding tests for this behavior, while also noting other potential improvements like limiting request body size and pruning safeguards.
-thinking
-**Assessing error handling and validation**
-
-I'm noting that parseUploads size checks may be unreliable due to multipart data and considering ensuring pruneRuns handles directory entry errors gracefully; also reviewing error responses from resolveEvalOutput for possible internal failure handling improvements.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "resolveEvalOutput" -n internal/evaluate' in /Users/yani/Noema/backend succeeded in 51ms:
-internal/evaluate/gemini_eval.go:15:func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
-internal/evaluate/handler.go:94:		evalOut, err := resolveEvalOutput(c.Request.Context(), form, enabled, runsDir, spec, datasetFile, imageFiles)
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/gemini_eval.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"context"
-	"log"
-	"mime/multipart"
-	"time"
-
-	"noema/internal/config"
-	"noema/internal/gemini"
-)
-
-const geminiEvalTimeout = 45 * time.Second
-
-func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
-	if form != nil && len(form.Value["eval_output"]) > 0 && form.Value["eval_output"][0] != "" {
-		raw := form.Value["eval_output"][0]
-		out, err := parseEvalOutput(raw)
-		if err != nil {
-			return EvalOutput{}, err
-
-thinking
-**Identifying unused parsing function**
-
-parseEvalOutputOptional in handler.go appears unused outside tests, while resolveEvalOutput is the active parsing function; considering consolidating or removing the unused helper.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "parseEvalOutputOptional" -n' in /Users/yani/Noema/backend succeeded in 52ms:
-internal/evaluate/handler_test.go:71:	out, err := parseEvalOutputOptional(form, enabled)
-internal/evaluate/handler_test.go:73:		t.Fatalf("parseEvalOutputOptional error: %v", err)
-internal/evaluate/handler_test.go:127:	out, err := parseEvalOutputOptional(form, enabled)
-internal/evaluate/handler_test.go:129:		t.Fatalf("parseEvalOutputOptional error: %v", err)
-internal/evaluate/handler_test.go:164:	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
-internal/evaluate/handler.go:211:func parseEvalOutputOptional(form *multipart.Form, enabled map[string]ConstraintRule) (EvalOutput, error) {
-
-thinking
-**Considering multipart form size limits**
-
-Noticed the current multipart form handling may allow very large uploads; planning to verify default limits and possibly add rejection for oversized forms to prevent memory issues during dataset validation.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package evaluate
-
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io"
-	"mime/multipart"
-)
-
-type Dataset struct {
-	Items []DatasetItem `json:"items"`
+.label {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text);
 }
 
-type DatasetItem struct {
-	ID       string         `json:"id"`
-	Text     string         `json:"text"`
-	Metadata map[string]any `json:"metadata,omitempty"`
-	ImageRef string         `json:"image_ref,omitempty"`
+.form-hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
 }
 
-thinking
-**Reviewing potential validation and error handling improvements**
-
-I'm identifying several small potential improvements like stronger dataset JSON validation, guarding image naming extensions, confirming runs directory existence, and better error handling in updates and evaluation. I'll prioritize adding a focused test for pruning runs with negative limits and verifying duplicate constraints in specs.
+.input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border);
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/policy.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import "fmt"
-
-type ConstraintRule struct {
-	ID                 string
-	AllowedMaxSeverity int
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '520,1040p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+  min-width: 0;
 }
 
-func enabledConstraints(spec Spec) (map[string]ConstraintRule, error) {
-	out := make(map[string]ConstraintRule)
-	for _, c := range spec.Constraints {
-		if !c.Enabled {
-			continue
-		}
-		if _, exists := out[c.ID]; exists {
-			return nil, fmt.Errorf("duplicate constraint id: %s", c.ID)
-		}
-		out[c.ID] = ConstraintRule{ID: c.ID, AllowedMaxSeverity: c.AllowedMaxSeverity}
-	}
-
-thinking
-**Noting minor robustness improvements**
-
-I'm considering small enhancements like stricter file permission usage and better temp file cleanup on error, plus verifying error handling in multipart parsing and the internal verification logic.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/verify/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package verify
-
-import (
-	"encoding/base64"
-	"fmt"
-	"net/http"
-	"strings"
-
-	"noema/internal/zk"
-
-	"github.com/gin-gonic/gin"
-)
-
-// VerifyRequest is the JSON body for POST /api/verify.
-type VerifyRequest struct {
-	RunID           string `json:"run_id"`
-	ProofB64        string `json:"proof_b64"`
-	PublicInputsB64 string `json:"public_inputs_b64"`
+.upload-file-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-
-thinking
-**Considering validation and error handling improvements**
-
-I'm weighing adding stricter run_id checks in verify handlers and improving saveUpload to avoid partially-written files by testing cleanup on copy errors, though simulating those errors is tricky. Also considering ensuring directories exist in updateRunsIndex and enhancing error messages or data validations around JSON and dataset handling.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/gemini/client.go" in /Users/yani/Noema/backend exited 1 in 52ms:
-sed: internal/gemini/client.go: No such file or directory
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/gemini' in /Users/yani/Noema/backend succeeded in 51ms:
-gemini.go
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/gemini/gemini.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package gemini
-
-import (
-	"context"
-	"fmt"
-	"log"
-	"os"
-	"strings"
-
-	"google.golang.org/genai"
-)
-
-const defaultModel = "gemini-3-pro"
-
-type ImageInput struct {
-	MIMEType string
-	Data     []byte
+.upload-file-size {
+  font-size: 0.82rem;
+  color: var(--text-muted);
 }
 
-type EvalRequest struct {
-
-
-thinking
-**Identifying subtle reliability improvements**
-
-Considering stronger error handling for file close operations and file syncing to prevent partial writes, plus refining pruning to ignore missing directories to reduce noise; also reviewing handler logic for robust error and cleanup flows.
-thinking
-**Improving upload validation and error messaging**
-
-Planning to enforce file size limits using config values instead of hardcoded limits and update error messages dynamically for maintainability and accuracy.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/config/config.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package config
-
-import (
-	"os"
-	"strconv"
-
-	"github.com/joho/godotenv"
-)
-
-const devCookieSecret = "dev-secret-change-in-production"
-
-// Load reads .env from the current directory and sets env vars.
-// Safe to call multiple times; existing env vars are not overwritten.
-func Load() error {
-	return godotenv.Load()
+.upload-hint {
+  margin-top: 0.65rem;
 }
 
-// JudgeKey returns the judge key used to gate protected routes.
-func JudgeKey() string {
-	return os.Getenv("JUDGE_KEY")
-
-thinking
-**Considering max dataset config location**
+/* ===== Wizard ===== */
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "MaxDataset|MaxImage|MaxImages" internal/config' in /Users/yani/Noema/backend succeeded in 51ms:
-internal/config/limits.go:4:	MaxDatasetBytes    = 50 * 1024 * 1024 // 50MB
-internal/config/limits.go:5:	MaxImageBytes      = 5 * 1024 * 1024  // 5MB
-internal/config/limits.go:6:	MaxImages          = 10
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,120p' internal/config/limits.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package config
-
-const (
-	MaxDatasetBytes    = 50 * 1024 * 1024 // 50MB
-	MaxImageBytes      = 5 * 1024 * 1024  // 5MB
-	MaxImages          = 10
-	MaxUploadBytes     = 50 * 1024 * 1024 // 50MB
-	MaxMultipartMemory = 100 << 20        // 100MB for evaluate (dataset + images)
-)
-
-thinking
-**Planning request size enforcement**
-
-Considering using config values dynamically in error messages but prioritizing enforcing MaxUploadBytes and MaxMultipartMemory limits in the handler to improve reliability by restricting request size before parsing, possibly via http.MaxBytesReader on the request body in the gin context.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "MaxUploadBytes|MaxMultipartMemory"' in /Users/yani/Noema/backend succeeded in 52ms:
-internal/web/upload.go:43:	if file.Size > config.MaxUploadBytes {
-internal/config/limits.go:7:	MaxUploadBytes     = 50 * 1024 * 1024 // 50MB
-internal/config/limits.go:8:	MaxMultipartMemory = 100 << 20        // 100MB for evaluate (dataset + images)
-cmd/server/main.go:32:	r.MaxMultipartMemory = config.MaxMultipartMemory
-
-thinking
-**Considering request size capping and tests**
-
-Noticed handler lacks total body size cap despite gin using MaxMultipartMemory; planning to add MaxBytesReader for reliability. Debating adding tests for oversize uploads but mindful of test size and constant limits; next step is inspecting existing handler tests for coverage.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"mime/multipart"
-	"net/textproto"
-	"os"
-	"path/filepath"
-	"sort"
-	"testing"
-	"time"
-)
-
-type formFile struct {
-	field       string
-	filename    string
-	contentType string
-	content     []byte
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 51ms:
-	form := buildMultipartForm(t, []formFile{
-		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-	})
-	datasetFile := form.File["dataset"][0]
-	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-		t.Fatalf("expected error for duplicate dataset ids")
-	}
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1040,1560p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 
-func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
-	dataset := `{"items":[{"id":"1","text":"hello"}]}`
-	form := buildMultipartForm(t, []formFile{
-		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-		{field: "dataset", filename: "dataset2.json", contentType: "application/json", content: []byte(dataset)},
-	})
-	if _, _, err := parseUploads(form); err == nil {
-		t.Fatalf("expected error for multiple dataset files")
-	}
-}
+@media (max-width: 720px) {
+  .card {
+    padding: 2rem 1.6rem;
+  }
 
+  .stepper {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .stepper-sep {
+    width: 100%;
+  }
+
+  .constraint-row {
+
+thinking
+**Exploring subtle UX improvements**
+
+I'm considering meaningful UI tweaks like better focus/hover states for cards, showing filenames in the upload zone, adding loading indicators on buttons, and improving skip links or error states, focusing on both HTML/CSS and relevant JS files like upload.js and wizard.js.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' web/static/upload.js" in /Users/yani/Noema/backend succeeded in 52ms:
+(function() {
+  var input = document.getElementById('file-input');
+  var zone = document.getElementById('drop-zone');
+  var zoneText = document.getElementById('zone-text');
+  var submitBtn = document.getElementById('submit-btn');
+  var details = document.getElementById('upload-details');
+  var fileName = document.getElementById('upload-file-name');
+  var fileSize = document.getElementById('upload-file-size');
+  var clearBtn = document.getElementById('clear-file');
+  var clientError = document.getElementById('upload-client-error');
+  var maxBytes = parseInt(input.dataset.maxBytes || '', 10);
+  var maxBytesLabel = input.dataset.maxBytesLabel || '';
+
+  function formatBytes(bytes) {
+    if (!bytes && bytes !== 0) return '';
+    if (bytes < 1024) return bytes + ' B';
+    var kb = bytes / 1024;
+    if (kb < 1024) return kb.toFixed(1) + ' KB';
+    var mb = kb / 1024;
+    if (mb < 1024) return mb.toFixed(1) + ' MB';
+
+thinking
+**Considering UX improvements**
+
+I'm evaluating disabling the submit button until inputs are valid and possibly adding an accessible focus trap, planning to check the wizard.js file for related user experience patterns.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' web/static/wizard.js" in /Users/yani/Noema/backend succeeded in 52ms:
+(function() {
+  var PRESET_CONSTRAINTS = window.NOEMA_PRESET_CONSTRAINTS || [];
+  var currentStep = 1;
+  var maxStep = 3;
+  var customConstraintCount = 0;
+  var maxCustomConstraints = 5;
+  var datasetSource = 'file';
+  var MAX_DATASET_BYTES = 50 * 1024 * 1024;
+  var MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+  var MAX_IMAGE_COUNT = 10;
+
+  function stepEl(n) { return document.querySelector('.stepper-step[data-step="' + n + '"]'); }
+  function paneEl(n) { return document.getElementById('pane-' + n); }
+
+  function titleCase(str) {
+    return str
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, function(m) { return m.toUpperCase(); });
+  }
+
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '260,640p' web/static/wizard.js" in /Users/yani/Noema/backend succeeded in 51ms:
+
+    var list = document.getElementById('custom-constraints-list');
+    list.appendChild(div);
+
+    div.querySelectorAll('.custom-title, .custom-desc, .custom-enabled').forEach(function(el) {
+      el.addEventListener('input', function() { validateCustomConstraint(div); });
+      el.addEventListener('change', function() { validateCustomConstraint(div); updateConstraintsCount(); });
+    });
+
+    div.querySelector('.remove-custom').addEventListener('click', function() {
+      div.remove();
+      customConstraintCount--;
+      updateCustomLimitHint();
+      updateConstraintsCount();
+    });
+
+    validateCustomConstraint(div);
+    updateConstraintsCount();
+  }
 
 
 thinking
-**Planning payload size enforcement**
+**Considering UI improvements**
 
-Considering adding io.LimitReader in dataset reading to enforce max payload bytes even if multipart file size is inaccurate, improving reliability with minimal changes and tests for oversized uploads.
+I'm noting possible UI enhancements like preventing step skipping in the wizard, adding smooth scrolling, showing the selected dataset in the review summary rather than just the filename, and displaying dataset size. I'll also check the results page for potential improvements.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' web/static/results.js" in /Users/yani/Noema/backend succeeded in 52ms:
+(function() {
+  var runId = document.body.getAttribute('data-run-id') || document.getElementById('results-run-id').textContent.replace('Run ID: ', '').trim();
+  var key = 'noema_run_' + runId;
+  var data;
+  try {
+    var raw = localStorage.getItem(key);
+    data = raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    data = null;
+  }
+
+  function copyText(text, button) {
+    if (!text) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function() {
+        if (button) showCopied(button);
+      });
+    } else {
+      var temp = document.createElement('textarea');
+      temp.value = text;
+
 thinking
-**Adding missing-dir handling in pruneRuns**
+**Considering error handling for missing elements**
 
-Planning to modify pruneRuns to return nil instead of error if the runs directory is missing, improving reliability for edge cases before any runs exist. I'll add a test confirming no error occurs when pruneRuns runs on a non-existent directory using a temp dir removed beforehand.
+Noticing that some elements like the results-loading indicator might be missing, so planning to verify the presence of templates and app_results before accessing them to avoid errors.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' web/templates/app_results.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "app_results"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Results</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body data-run-id="{{.RunID}}">
+  {{template "header_app" .}}
+
+  <main class="main main-results">
+    {{template "orb" .}}
+    <div class="card results-card">
+      <div class="results-header">
+        <div>
+          <h1 class="card-title">Evaluation results</h1>
+          <div class="results-runline">
+            <p class="text-muted" id="results-run-id">Run ID: <span class="results-run-id">{{.RunID}}</span></p>
+
+thinking
+**Considering UX improvements**
+
+I'm reviewing the wizard page to potentially enhance the image selection summary and validation, balancing the requirement to keep the same UI functionality while improving user experience. Next, I'll inspect the wizard template and related HTML/JS to assess feasibility.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' web/templates/app.html" in /Users/yani/Noema/backend succeeded in 51ms:
+{{define "app"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Dashboard</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_app" .}}
+
+  <main class="main main-dashboard">
+    {{template "orb" .}}
+    <div class="dashboard-content">
+      <section class="card dashboard-hero">
+        <div class="card-kicker">Dashboard</div>
+        <h1 class="card-title">Evaluations</h1>
+        <p class="card-text">Run policy evaluations on your datasets and publish verifiable results.</p>
+        <div class="form-actions">
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,320p' web/templates/app_new.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "app_new"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — New Evaluation</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_app" .}}
+
+  <main class="main main-wizard">
+    {{template "orb" .}}
+    <div class="wizard-card card">
+      <h1 class="card-title">New Evaluation</h1>
+      <div class="stepper" role="tablist">
+        <button type="button" class="stepper-step active" data-step="1" aria-selected="true">Dataset</button>
+        <span class="stepper-sep"></span>
+        <button type="button" class="stepper-step" data-step="2">Policy</button>
+
+thinking
+**Planning UI improvements**
+
+Considering adding image file sizes and warnings in the dataset status to enhance UX with minimal changes, plus exploring client-side validation and a styled review summary if the related CSS exists.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "review-summary" -n' in /Users/yani/Noema/backend succeeded in 52ms:
+web/templates/app_new.html:90:          <div id="review-summary" class="review-summary"></div>
+web/static/wizard.js:381:    document.getElementById('review-summary').innerHTML =
+
+
+thinking
+**Planning UI review summary improvements**
+
+I'm planning to enhance the review summary UI by rendering it as a styled table-like grid with labeled rows showing dataset source, size, image count, and warnings for missing data, updating both wizard.js and styles.css without changing backend logic.
+thinking
+**Implementing styled review summary grid**
+
+I'm adding CSS for a grid-based review summary with labeled rows and values, updating the summary's innerHTML in wizard.js to include dataset info, image counts, and option states, while reusing existing format helpers for sizes and counts.
 file update
-M /Users/yani/Noema/backend/internal/evaluate/handler.go
-@@ -173,2 +173,5 @@
- 	if err != nil {
-+		if os.IsNotExist(err) {
-+			return nil
-+		}
- 		return err
-apply_patch(auto_approved=true) exited 0 in 28ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/handler.go
-file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 62fa3bdfaaedcdeddf339acd922de262e124aa49..48d901941d4380f015b2ab243679d5e3a17b8cb9
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -171,6 +171,9 @@
- 	}
- 	entries, err := os.ReadDir(runsDir)
- 	if err != nil {
-+		if os.IsNotExist(err) {
-+			return nil
-+		}
- 		return err
- 	}
+M /Users/yani/Noema/backend/web/static/wizard.js
+@@ -376,2 +376,4 @@
+     var datasetSource = datasetFile ? (datasetFile.name || datasetSourceLabel) : '—';
++    var datasetSize = datasetFile && datasetFile.size ? formatBytes(datasetFile.size) : '';
++    var datasetLine = datasetSource + (datasetSize ? (' · ' + datasetSize) : '');
+     var spec = buildSpec();
+@@ -379,8 +381,13 @@
+       spec.custom_constraints.filter(function(c) { return c.enabled; }).length;
++    var imagesInput = document.getElementById('images-file');
++    var images = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
++    var imageTotal = images.reduce(function(sum, file) { return sum + file.size; }, 0);
++    var imagesLine = images.length > 0 ? (images.length + ' files · ' + formatBytes(imageTotal)) : 'None';
  
+     document.getElementById('review-summary').innerHTML =
+-      '<p><strong>Evaluation name:</strong> ' + escapeHtml(name) + '</p>' +
+-      '<p><strong>Dataset:</strong> ' + escapeHtml(datasetSource) + '</p>' +
+-      '<p><strong>Reveal:</strong> max_severity=' + spec.policy.reveal.max_severity + ', commitment=' + spec.policy.reveal.commitment + '</p>' +
+-      '<p><strong>Constraints enabled:</strong> ' + enabledCount + '</p>';
++      '<div class="review-item"><span class="review-label">Evaluation</span><span class="review-value">' + escapeHtml(name) + '</span></div>' +
++      '<div class="review-item"><span class="review-label">Dataset</span><span class="review-value">' + escapeHtml(datasetLine) + '</span></div>' +
++      '<div class="review-item"><span class="review-label">Images</span><span class="review-value">' + escapeHtml(imagesLine) + '</span></div>' +
++      '<div class="review-item"><span class="review-label">Reveal</span><span class="review-value">Max severity: ' + (spec.policy.reveal.max_severity ? 'Yes' : 'No') + ' · Commitment: ' + (spec.policy.reveal.commitment ? 'Yes' : 'No') + '</span></div>' +
++      '<div class="review-item"><span class="review-label">Constraints</span><span class="review-value">' + enabledCount + ' enabled</span></div>';
+   }
+apply_patch(auto_approved=true) exited 0 in 27ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/web/static/wizard.js
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index caefda760a8b6b5d547b62b60998c95a16c140ee..3987fdb525a0a6f065e39a2784f16d5342967a1c
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -374,15 +374,22 @@
+     var datasetFile = getDatasetFile();
+     var datasetSourceLabel = datasetSource === 'file' ? 'Uploaded file' : 'Pasted JSON';
+     var datasetSource = datasetFile ? (datasetFile.name || datasetSourceLabel) : '—';
++    var datasetSize = datasetFile && datasetFile.size ? formatBytes(datasetFile.size) : '';
++    var datasetLine = datasetSource + (datasetSize ? (' · ' + datasetSize) : '');
+     var spec = buildSpec();
+     var enabledCount = spec.constraints.filter(function(c) { return c.enabled; }).length +
+       spec.custom_constraints.filter(function(c) { return c.enabled; }).length;
++    var imagesInput = document.getElementById('images-file');
++    var images = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
++    var imageTotal = images.reduce(function(sum, file) { return sum + file.size; }, 0);
++    var imagesLine = images.length > 0 ? (images.length + ' files · ' + formatBytes(imageTotal)) : 'None';
+ 
+     document.getElementById('review-summary').innerHTML =
+-      '<p><strong>Evaluation name:</strong> ' + escapeHtml(name) + '</p>' +
+-      '<p><strong>Dataset:</strong> ' + escapeHtml(datasetSource) + '</p>' +
+-      '<p><strong>Reveal:</strong> max_severity=' + spec.policy.reveal.max_severity + ', commitment=' + spec.policy.reveal.commitment + '</p>' +
+-      '<p><strong>Constraints enabled:</strong> ' + enabledCount + '</p>';
++      '<div class="review-item"><span class="review-label">Evaluation</span><span class="review-value">' + escapeHtml(name) + '</span></div>' +
++      '<div class="review-item"><span class="review-label">Dataset</span><span class="review-value">' + escapeHtml(datasetLine) + '</span></div>' +
++      '<div class="review-item"><span class="review-label">Images</span><span class="review-value">' + escapeHtml(imagesLine) + '</span></div>' +
++      '<div class="review-item"><span class="review-label">Reveal</span><span class="review-value">Max severity: ' + (spec.policy.reveal.max_severity ? 'Yes' : 'No') + ' · Commitment: ' + (spec.policy.reveal.commitment ? 'Yes' : 'No') + '</span></div>' +
++      '<div class="review-item"><span class="review-label">Constraints</span><span class="review-value">' + enabledCount + ' enabled</span></div>';
+   }
+ 
+   document.querySelectorAll('.segmented-btn').forEach(function(btn) {
 
 file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 62fa3bdfaaedcdeddf339acd922de262e124aa49..48d901941d4380f015b2ab243679d5e3a17b8cb9
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -171,6 +171,9 @@
- 	}
- 	entries, err := os.ReadDir(runsDir)
- 	if err != nil {
-+		if os.IsNotExist(err) {
-+			return nil
-+		}
- 		return err
- 	}
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index caefda760a8b6b5d547b62b60998c95a16c140ee..3987fdb525a0a6f065e39a2784f16d5342967a1c
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -374,15 +374,22 @@
+     var datasetFile = getDatasetFile();
+     var datasetSourceLabel = datasetSource === 'file' ? 'Uploaded file' : 'Pasted JSON';
+     var datasetSource = datasetFile ? (datasetFile.name || datasetSourceLabel) : '—';
++    var datasetSize = datasetFile && datasetFile.size ? formatBytes(datasetFile.size) : '';
++    var datasetLine = datasetSource + (datasetSize ? (' · ' + datasetSize) : '');
+     var spec = buildSpec();
+     var enabledCount = spec.constraints.filter(function(c) { return c.enabled; }).length +
+       spec.custom_constraints.filter(function(c) { return c.enabled; }).length;
++    var imagesInput = document.getElementById('images-file');
++    var images = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
++    var imageTotal = images.reduce(function(sum, file) { return sum + file.size; }, 0);
++    var imagesLine = images.length > 0 ? (images.length + ' files · ' + formatBytes(imageTotal)) : 'None';
  
+     document.getElementById('review-summary').innerHTML =
+-      '<p><strong>Evaluation name:</strong> ' + escapeHtml(name) + '</p>' +
+-      '<p><strong>Dataset:</strong> ' + escapeHtml(datasetSource) + '</p>' +
+-      '<p><strong>Reveal:</strong> max_severity=' + spec.policy.reveal.max_severity + ', commitment=' + spec.policy.reveal.commitment + '</p>' +
+-      '<p><strong>Constraints enabled:</strong> ' + enabledCount + '</p>';
++      '<div class="review-item"><span class="review-label">Evaluation</span><span class="review-value">' + escapeHtml(name) + '</span></div>' +
++      '<div class="review-item"><span class="review-label">Dataset</span><span class="review-value">' + escapeHtml(datasetLine) + '</span></div>' +
++      '<div class="review-item"><span class="review-label">Images</span><span class="review-value">' + escapeHtml(imagesLine) + '</span></div>' +
++      '<div class="review-item"><span class="review-label">Reveal</span><span class="review-value">Max severity: ' + (spec.policy.reveal.max_severity ? 'Yes' : 'No') + ' · Commitment: ' + (spec.policy.reveal.commitment ? 'Yes' : 'No') + '</span></div>' +
++      '<div class="review-item"><span class="review-label">Constraints</span><span class="review-value">' + enabledCount + ' enabled</span></div>';
+   }
+ 
+   document.querySelectorAll('.segmented-btn').forEach(function(btn) {
 
 
 thinking
-**Adding test case**
+**Adding CSS for review summary**
 file update
-M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
-@@ -316 +316,8 @@
- }
-+
-+func TestPruneRuns_MissingDirNoError(t *testing.T) {
-+	base := filepath.Join(t.TempDir(), "missing")
-+	if err := pruneRuns(base, 1); err != nil {
-+		t.Fatalf("expected no error for missing dir, got %v", err)
-+	}
-+}
-apply_patch(auto_approved=true) exited 0 in 34ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
-file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 62fa3bdfaaedcdeddf339acd922de262e124aa49..48d901941d4380f015b2ab243679d5e3a17b8cb9
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -171,6 +171,9 @@
- 	}
- 	entries, err := os.ReadDir(runsDir)
- 	if err != nil {
-+		if os.IsNotExist(err) {
-+			return nil
-+		}
- 		return err
- 	}
+M /Users/yani/Noema/backend/web/static/styles.css
+@@ -814,2 +814,34 @@
  
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index b6941809a407e6a02f82a1c512ca50e67d2611fb..f456593dd1b6d6e8f1c6db2425313749347a13d3
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -314,3 +314,10 @@
- 		t.Fatalf("expected misc dir to remain, got err: %v", err)
- 	}
- }
-+
-+func TestPruneRuns_MissingDirNoError(t *testing.T) {
-+	base := filepath.Join(t.TempDir(), "missing")
-+	if err := pruneRuns(base, 1); err != nil {
-+		t.Fatalf("expected no error for missing dir, got %v", err)
-+	}
++.review-summary {
++  display: grid;
++  gap: 0.75rem;
++  padding: 1.1rem 1.2rem;
++  border-radius: 14px;
++  border: 1px solid var(--border);
++  background: rgba(0, 0, 0, 0.3);
++  margin-bottom: 1rem;
 +}
++
++.review-item {
++  display: flex;
++  justify-content: space-between;
++  align-items: flex-start;
++  gap: 1rem;
++  font-size: 0.95rem;
++}
++
++.review-label {
++  text-transform: uppercase;
++  letter-spacing: 0.16em;
++  font-size: 0.7rem;
++  color: var(--text-muted);
++  flex: 0 0 auto;
++}
++
++.review-value {
++  color: var(--text);
++  font-weight: 500;
++  text-align: right;
++}
++
+ /* ===== Results ===== */
+@@ -1072,2 +1104,11 @@
+ 
++  .review-item {
++    flex-direction: column;
++    align-items: flex-start;
++  }
++
++  .review-value {
++    text-align: left;
++  }
++
+   .results-pre,
+apply_patch(auto_approved=true) exited 0 in 38ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/web/static/styles.css
+file update:
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index a617332ab3bfd84a62c185d75806b800d1c993cf..4020d9833dea3c53bf578b01a4306ce1d9609a07
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -812,6 +812,38 @@
+   margin-top: 1rem;
+ }
+ 
++.review-summary {
++  display: grid;
++  gap: 0.75rem;
++  padding: 1.1rem 1.2rem;
++  border-radius: 14px;
++  border: 1px solid var(--border);
++  background: rgba(0, 0, 0, 0.3);
++  margin-bottom: 1rem;
++}
++
++.review-item {
++  display: flex;
++  justify-content: space-between;
++  align-items: flex-start;
++  gap: 1rem;
++  font-size: 0.95rem;
++}
++
++.review-label {
++  text-transform: uppercase;
++  letter-spacing: 0.16em;
++  font-size: 0.7rem;
++  color: var(--text-muted);
++  flex: 0 0 auto;
++}
++
++.review-value {
++  color: var(--text);
++  font-weight: 500;
++  text-align: right;
++}
++
+ /* ===== Results ===== */
+ .main-results {
+   align-items: flex-start;
+@@ -1070,6 +1102,15 @@
+     align-items: flex-start;
+   }
+ 
++  .review-item {
++    flex-direction: column;
++    align-items: flex-start;
++  }
++
++  .review-value {
++    text-align: left;
++  }
++
+   .results-pre,
+   .dataset-preview {
+     white-space: pre-wrap;
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index caefda760a8b6b5d547b62b60998c95a16c140ee..3987fdb525a0a6f065e39a2784f16d5342967a1c
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -374,15 +374,22 @@
+     var datasetFile = getDatasetFile();
+     var datasetSourceLabel = datasetSource === 'file' ? 'Uploaded file' : 'Pasted JSON';
+     var datasetSource = datasetFile ? (datasetFile.name || datasetSourceLabel) : '—';
++    var datasetSize = datasetFile && datasetFile.size ? formatBytes(datasetFile.size) : '';
++    var datasetLine = datasetSource + (datasetSize ? (' · ' + datasetSize) : '');
+     var spec = buildSpec();
+     var enabledCount = spec.constraints.filter(function(c) { return c.enabled; }).length +
+       spec.custom_constraints.filter(function(c) { return c.enabled; }).length;
++    var imagesInput = document.getElementById('images-file');
++    var images = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
++    var imageTotal = images.reduce(function(sum, file) { return sum + file.size; }, 0);
++    var imagesLine = images.length > 0 ? (images.length + ' files · ' + formatBytes(imageTotal)) : 'None';
+ 
+     document.getElementById('review-summary').innerHTML =
+-      '<p><strong>Evaluation name:</strong> ' + escapeHtml(name) + '</p>' +
+-      '<p><strong>Dataset:</strong> ' + escapeHtml(datasetSource) + '</p>' +
+-      '<p><strong>Reveal:</strong> max_severity=' + spec.policy.reveal.max_severity + ', commitment=' + spec.policy.reveal.commitment + '</p>' +
+-      '<p><strong>Constraints enabled:</strong> ' + enabledCount + '</p>';
++      '<div class="review-item"><span class="review-label">Evaluation</span><span class="review-value">' + escapeHtml(name) + '</span></div>' +
++      '<div class="review-item"><span class="review-label">Dataset</span><span class="review-value">' + escapeHtml(datasetLine) + '</span></div>' +
++      '<div class="review-item"><span class="review-label">Images</span><span class="review-value">' + escapeHtml(imagesLine) + '</span></div>' +
++      '<div class="review-item"><span class="review-label">Reveal</span><span class="review-value">Max severity: ' + (spec.policy.reveal.max_severity ? 'Yes' : 'No') + ' · Commitment: ' + (spec.policy.reveal.commitment ? 'Yes' : 'No') + '</span></div>' +
++      '<div class="review-item"><span class="review-label">Constraints</span><span class="review-value">' + enabledCount + ' enabled</span></div>';
+   }
+ 
+   document.querySelectorAll('.segmented-btn').forEach(function(btn) {
 
 file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 62fa3bdfaaedcdeddf339acd922de262e124aa49..48d901941d4380f015b2ab243679d5e3a17b8cb9
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -171,6 +171,9 @@
- 	}
- 	entries, err := os.ReadDir(runsDir)
- 	if err != nil {
-+		if os.IsNotExist(err) {
-+			return nil
-+		}
- 		return err
- 	}
- 
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index b6941809a407e6a02f82a1c512ca50e67d2611fb..f456593dd1b6d6e8f1c6db2425313749347a13d3
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -314,3 +314,10 @@
- 		t.Fatalf("expected misc dir to remain, got err: %v", err)
- 	}
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index a617332ab3bfd84a62c185d75806b800d1c993cf..4020d9833dea3c53bf578b01a4306ce1d9609a07
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -812,6 +812,38 @@
+   margin-top: 1rem;
  }
-+
-+func TestPruneRuns_MissingDirNoError(t *testing.T) {
-+	base := filepath.Join(t.TempDir(), "missing")
-+	if err := pruneRuns(base, 1); err != nil {
-+		t.Fatalf("expected no error for missing dir, got %v", err)
-+	}
+ 
++.review-summary {
++  display: grid;
++  gap: 0.75rem;
++  padding: 1.1rem 1.2rem;
++  border-radius: 14px;
++  border: 1px solid var(--border);
++  background: rgba(0, 0, 0, 0.3);
++  margin-bottom: 1rem;
 +}
++
++.review-item {
++  display: flex;
++  justify-content: space-between;
++  align-items: flex-start;
++  gap: 1rem;
++  font-size: 0.95rem;
++}
++
++.review-label {
++  text-transform: uppercase;
++  letter-spacing: 0.16em;
++  font-size: 0.7rem;
++  color: var(--text-muted);
++  flex: 0 0 auto;
++}
++
++.review-value {
++  color: var(--text);
++  font-weight: 500;
++  text-align: right;
++}
++
+ /* ===== Results ===== */
+ .main-results {
+   align-items: flex-start;
+@@ -1070,6 +1102,15 @@
+     align-items: flex-start;
+   }
+ 
++  .review-item {
++    flex-direction: column;
++    align-items: flex-start;
++  }
++
++  .review-value {
++    text-align: left;
++  }
++
+   .results-pre,
+   .dataset-preview {
+     white-space: pre-wrap;
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index caefda760a8b6b5d547b62b60998c95a16c140ee..3987fdb525a0a6f065e39a2784f16d5342967a1c
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -374,15 +374,22 @@
+     var datasetFile = getDatasetFile();
+     var datasetSourceLabel = datasetSource === 'file' ? 'Uploaded file' : 'Pasted JSON';
+     var datasetSource = datasetFile ? (datasetFile.name || datasetSourceLabel) : '—';
++    var datasetSize = datasetFile && datasetFile.size ? formatBytes(datasetFile.size) : '';
++    var datasetLine = datasetSource + (datasetSize ? (' · ' + datasetSize) : '');
+     var spec = buildSpec();
+     var enabledCount = spec.constraints.filter(function(c) { return c.enabled; }).length +
+       spec.custom_constraints.filter(function(c) { return c.enabled; }).length;
++    var imagesInput = document.getElementById('images-file');
++    var images = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
++    var imageTotal = images.reduce(function(sum, file) { return sum + file.size; }, 0);
++    var imagesLine = images.length > 0 ? (images.length + ' files · ' + formatBytes(imageTotal)) : 'None';
+ 
+     document.getElementById('review-summary').innerHTML =
+-      '<p><strong>Evaluation name:</strong> ' + escapeHtml(name) + '</p>' +
+-      '<p><strong>Dataset:</strong> ' + escapeHtml(datasetSource) + '</p>' +
+-      '<p><strong>Reveal:</strong> max_severity=' + spec.policy.reveal.max_severity + ', commitment=' + spec.policy.reveal.commitment + '</p>' +
+-      '<p><strong>Constraints enabled:</strong> ' + enabledCount + '</p>';
++      '<div class="review-item"><span class="review-label">Evaluation</span><span class="review-value">' + escapeHtml(name) + '</span></div>' +
++      '<div class="review-item"><span class="review-label">Dataset</span><span class="review-value">' + escapeHtml(datasetLine) + '</span></div>' +
++      '<div class="review-item"><span class="review-label">Images</span><span class="review-value">' + escapeHtml(imagesLine) + '</span></div>' +
++      '<div class="review-item"><span class="review-label">Reveal</span><span class="review-value">Max severity: ' + (spec.policy.reveal.max_severity ? 'Yes' : 'No') + ' · Commitment: ' + (spec.policy.reveal.commitment ? 'Yes' : 'No') + '</span></div>' +
++      '<div class="review-item"><span class="review-label">Constraints</span><span class="review-value">' + enabledCount + ' enabled</span></div>';
+   }
+ 
+   document.querySelectorAll('.segmented-btn').forEach(function(btn) {
 
 
 thinking
-**Running tests**
+**Planning test rerun**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backendfile update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 62fa3bdfaaedcdeddf339acd922de262e124aa49..48d901941d4380f015b2ab243679d5e3a17b8cb9
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -171,6 +171,9 @@
- 	}
- 	entries, err := os.ReadDir(runsDir)
- 	if err != nil {
-+		if os.IsNotExist(err) {
-+			return nil
-+		}
- 		return err
- 	}
- 
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index b6941809a407e6a02f82a1c512ca50e67d2611fb..f456593dd1b6d6e8f1c6db2425313749347a13d3
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -314,3 +314,10 @@
- 		t.Fatalf("expected misc dir to remain, got err: %v", err)
- 	}
- }
-+
-+func TestPruneRuns_MissingDirNoError(t *testing.T) {
-+	base := filepath.Join(t.TempDir(), "missing")
-+	if err := pruneRuns(base, 1); err != nil {
-+		t.Fatalf("expected no error for missing dir, got %v", err)
-+	}
-+}
-
- succeeded in 2.14s:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 383ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	0.028s
+ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
-
-thinking
-**Polling for command completion**
 file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 62fa3bdfaaedcdeddf339acd922de262e124aa49..48d901941d4380f015b2ab243679d5e3a17b8cb9
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -171,6 +171,9 @@
- 	}
- 	entries, err := os.ReadDir(runsDir)
- 	if err != nil {
-+		if os.IsNotExist(err) {
-+			return nil
-+		}
- 		return err
- 	}
- 
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index b6941809a407e6a02f82a1c512ca50e67d2611fb..f456593dd1b6d6e8f1c6db2425313749347a13d3
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -314,3 +314,10 @@
- 		t.Fatalf("expected misc dir to remain, got err: %v", err)
- 	}
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index a617332ab3bfd84a62c185d75806b800d1c993cf..4020d9833dea3c53bf578b01a4306ce1d9609a07
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -812,6 +812,38 @@
+   margin-top: 1rem;
  }
-+
-+func TestPruneRuns_MissingDirNoError(t *testing.T) {
-+	base := filepath.Join(t.TempDir(), "missing")
-+	if err := pruneRuns(base, 1); err != nil {
-+		t.Fatalf("expected no error for missing dir, got %v", err)
-+	}
+ 
++.review-summary {
++  display: grid;
++  gap: 0.75rem;
++  padding: 1.1rem 1.2rem;
++  border-radius: 14px;
++  border: 1px solid var(--border);
++  background: rgba(0, 0, 0, 0.3);
++  margin-bottom: 1rem;
 +}
++
++.review-item {
++  display: flex;
++  justify-content: space-between;
++  align-items: flex-start;
++  gap: 1rem;
++  font-size: 0.95rem;
++}
++
++.review-label {
++  text-transform: uppercase;
++  letter-spacing: 0.16em;
++  font-size: 0.7rem;
++  color: var(--text-muted);
++  flex: 0 0 auto;
++}
++
++.review-value {
++  color: var(--text);
++  font-weight: 500;
++  text-align: right;
++}
++
+ /* ===== Results ===== */
+ .main-results {
+   align-items: flex-start;
+@@ -1070,6 +1102,15 @@
+     align-items: flex-start;
+   }
+ 
++  .review-item {
++    flex-direction: column;
++    align-items: flex-start;
++  }
++
++  .review-value {
++    text-align: left;
++  }
++
+   .results-pre,
+   .dataset-preview {
+     white-space: pre-wrap;
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index caefda760a8b6b5d547b62b60998c95a16c140ee..3987fdb525a0a6f065e39a2784f16d5342967a1c
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -374,15 +374,22 @@
+     var datasetFile = getDatasetFile();
+     var datasetSourceLabel = datasetSource === 'file' ? 'Uploaded file' : 'Pasted JSON';
+     var datasetSource = datasetFile ? (datasetFile.name || datasetSourceLabel) : '—';
++    var datasetSize = datasetFile && datasetFile.size ? formatBytes(datasetFile.size) : '';
++    var datasetLine = datasetSource + (datasetSize ? (' · ' + datasetSize) : '');
+     var spec = buildSpec();
+     var enabledCount = spec.constraints.filter(function(c) { return c.enabled; }).length +
+       spec.custom_constraints.filter(function(c) { return c.enabled; }).length;
++    var imagesInput = document.getElementById('images-file');
++    var images = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
++    var imageTotal = images.reduce(function(sum, file) { return sum + file.size; }, 0);
++    var imagesLine = images.length > 0 ? (images.length + ' files · ' + formatBytes(imageTotal)) : 'None';
+ 
+     document.getElementById('review-summary').innerHTML =
+-      '<p><strong>Evaluation name:</strong> ' + escapeHtml(name) + '</p>' +
+-      '<p><strong>Dataset:</strong> ' + escapeHtml(datasetSource) + '</p>' +
+-      '<p><strong>Reveal:</strong> max_severity=' + spec.policy.reveal.max_severity + ', commitment=' + spec.policy.reveal.commitment + '</p>' +
+-      '<p><strong>Constraints enabled:</strong> ' + enabledCount + '</p>';
++      '<div class="review-item"><span class="review-label">Evaluation</span><span class="review-value">' + escapeHtml(name) + '</span></div>' +
++      '<div class="review-item"><span class="review-label">Dataset</span><span class="review-value">' + escapeHtml(datasetLine) + '</span></div>' +
++      '<div class="review-item"><span class="review-label">Images</span><span class="review-value">' + escapeHtml(imagesLine) + '</span></div>' +
++      '<div class="review-item"><span class="review-label">Reveal</span><span class="review-value">Max severity: ' + (spec.policy.reveal.max_severity ? 'Yes' : 'No') + ' · Commitment: ' + (spec.policy.reveal.commitment ? 'Yes' : 'No') + '</span></div>' +
++      '<div class="review-item"><span class="review-label">Constraints</span><span class="review-value">' + enabledCount + ' enabled</span></div>';
+   }
+ 
+   document.querySelectorAll('.segmented-btn').forEach(function(btn) {
 
 codex
 What you changed (short)
-- Made `pruneRuns` ignore missing runs directories to avoid spurious errors.
-- Added coverage to ensure missing runs dirs don’t error.
+- Improved the Review & Run summary to show dataset size, image counts/size, and clearer reveal/constraint info, with a structured summary layout for easier scanning. Updated `web/static/wizard.js` and `web/static/styles.css`.
 
 Tests run
 - `go test ./...`
 
-Suggested next steps
-1. If you want, I can add a small guard to limit request body size in `Handler` using `config.MaxUploadBytes` for extra robustness.
+If you want, I can tackle the next highest‑value UI polish or a small reliability/validation improvement.
 file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 62fa3bdfaaedcdeddf339acd922de262e124aa49..48d901941d4380f015b2ab243679d5e3a17b8cb9
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -171,6 +171,9 @@
- 	}
- 	entries, err := os.ReadDir(runsDir)
- 	if err != nil {
-+		if os.IsNotExist(err) {
-+			return nil
-+		}
- 		return err
- 	}
- 
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index b6941809a407e6a02f82a1c512ca50e67d2611fb..f456593dd1b6d6e8f1c6db2425313749347a13d3
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -314,3 +314,10 @@
- 		t.Fatalf("expected misc dir to remain, got err: %v", err)
- 	}
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index a617332ab3bfd84a62c185d75806b800d1c993cf..4020d9833dea3c53bf578b01a4306ce1d9609a07
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -812,6 +812,38 @@
+   margin-top: 1rem;
  }
-+
-+func TestPruneRuns_MissingDirNoError(t *testing.T) {
-+	base := filepath.Join(t.TempDir(), "missing")
-+	if err := pruneRuns(base, 1); err != nil {
-+		t.Fatalf("expected no error for missing dir, got %v", err)
-+	}
+ 
++.review-summary {
++  display: grid;
++  gap: 0.75rem;
++  padding: 1.1rem 1.2rem;
++  border-radius: 14px;
++  border: 1px solid var(--border);
++  background: rgba(0, 0, 0, 0.3);
++  margin-bottom: 1rem;
 +}
++
++.review-item {
++  display: flex;
++  justify-content: space-between;
++  align-items: flex-start;
++  gap: 1rem;
++  font-size: 0.95rem;
++}
++
++.review-label {
++  text-transform: uppercase;
++  letter-spacing: 0.16em;
++  font-size: 0.7rem;
++  color: var(--text-muted);
++  flex: 0 0 auto;
++}
++
++.review-value {
++  color: var(--text);
++  font-weight: 500;
++  text-align: right;
++}
++
+ /* ===== Results ===== */
+ .main-results {
+   align-items: flex-start;
+@@ -1070,6 +1102,15 @@
+     align-items: flex-start;
+   }
+ 
++  .review-item {
++    flex-direction: column;
++    align-items: flex-start;
++  }
++
++  .review-value {
++    text-align: left;
++  }
++
+   .results-pre,
+   .dataset-preview {
+     white-space: pre-wrap;
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index caefda760a8b6b5d547b62b60998c95a16c140ee..3987fdb525a0a6f065e39a2784f16d5342967a1c
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -374,15 +374,22 @@
+     var datasetFile = getDatasetFile();
+     var datasetSourceLabel = datasetSource === 'file' ? 'Uploaded file' : 'Pasted JSON';
+     var datasetSource = datasetFile ? (datasetFile.name || datasetSourceLabel) : '—';
++    var datasetSize = datasetFile && datasetFile.size ? formatBytes(datasetFile.size) : '';
++    var datasetLine = datasetSource + (datasetSize ? (' · ' + datasetSize) : '');
+     var spec = buildSpec();
+     var enabledCount = spec.constraints.filter(function(c) { return c.enabled; }).length +
+       spec.custom_constraints.filter(function(c) { return c.enabled; }).length;
++    var imagesInput = document.getElementById('images-file');
++    var images = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
++    var imageTotal = images.reduce(function(sum, file) { return sum + file.size; }, 0);
++    var imagesLine = images.length > 0 ? (images.length + ' files · ' + formatBytes(imageTotal)) : 'None';
+ 
+     document.getElementById('review-summary').innerHTML =
+-      '<p><strong>Evaluation name:</strong> ' + escapeHtml(name) + '</p>' +
+-      '<p><strong>Dataset:</strong> ' + escapeHtml(datasetSource) + '</p>' +
+-      '<p><strong>Reveal:</strong> max_severity=' + spec.policy.reveal.max_severity + ', commitment=' + spec.policy.reveal.commitment + '</p>' +
+-      '<p><strong>Constraints enabled:</strong> ' + enabledCount + '</p>';
++      '<div class="review-item"><span class="review-label">Evaluation</span><span class="review-value">' + escapeHtml(name) + '</span></div>' +
++      '<div class="review-item"><span class="review-label">Dataset</span><span class="review-value">' + escapeHtml(datasetLine) + '</span></div>' +
++      '<div class="review-item"><span class="review-label">Images</span><span class="review-value">' + escapeHtml(imagesLine) + '</span></div>' +
++      '<div class="review-item"><span class="review-label">Reveal</span><span class="review-value">Max severity: ' + (spec.policy.reveal.max_severity ? 'Yes' : 'No') + ' · Commitment: ' + (spec.policy.reveal.commitment ? 'Yes' : 'No') + '</span></div>' +
++      '<div class="review-item"><span class="review-label">Constraints</span><span class="review-value">' + enabledCount + ' enabled</span></div>';
+   }
+ 
+   document.querySelectorAll('.segmented-btn').forEach(function(btn) {
 
 tokens used
-37,387
+48,588
 What you changed (short)
-- Made `pruneRuns` ignore missing runs directories to avoid spurious errors.
-- Added coverage to ensure missing runs dirs don’t error.
+- Improved the Review & Run summary to show dataset size, image counts/size, and clearer reveal/constraint info, with a structured summary layout for easier scanning. Updated `web/static/wizard.js` and `web/static/styles.css`.
 
 Tests run
 - `go test ./...`
 
-Suggested next steps
-1. If you want, I can add a small guard to limit request body size in `Handler` using `config.MaxUploadBytes` for extra robustness.
+If you want, I can tackle the next highest‑value UI polish or a small reliability/validation improvement.
