@@ -1,0 +1,865 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3c95-0ba3-7f02-85a1-f85beb521945
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Running Go tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 99ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Inspecting error handling**
+
+Planning to search the codebase for error handling patterns to identify a meaningful improvement focused on reliability or maintainability within a small set of files.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && rg \"TODO|FIXME|panic\\(\" -n internal" in /Users/yani/Noema/backend exited 1 in 52ms:
+
+
+thinking
+**Listing files for inspection**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 51ms:
+cmd
+data
+go.mod
+go.sum
+internal
+main
+server
+web
+
+thinking
+**Considering validation addition**
+
+I'm checking internal/session modules to determine if adding validation could improve the pick logic.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "error|Err" internal/session' in /Users/yani/Noema/backend exited 1 in 51ms:
+
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/session' in /Users/yani/Noema/backend succeeded in 51ms:
+session.go
+session_test.go
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/session/session.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package session
+
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"strings"
+)
+
+const CookieName = "noema_judge"
+
+// Sign produces a signed cookie value for the given payload (e.g. judge key).
+// Format: base64(payload) + "." + hex(HMAC-SHA256(secret, payload)).
+func Sign(secret, payload string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(payload))
+	sig := hex.EncodeToString(mac.Sum(nil))
+	encoded := base64.StdEncoding.EncodeToString([]byte(payload))
+
+thinking
+**Considering input validation improvements**
+
+I'm evaluating adding input validation for empty secrets or payloads to improve reliability and planning to review related test coverage and internal verification logic next.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "panic|Must|TODO|FIXME" internal' in /Users/yani/Noema/backend exited 1 in 52ms:
+
+
+thinking
+**Considering cookie validation tests**
+
+I'm evaluating adding tests for cookie option validation and the signedValue format, especially checking for invalid or empty values, while also noting the encoding might not be URL-safe—I'll verify if this impacts cookie handling.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/evaluate.go" in /Users/yani/Noema/backend exited 1 in 52ms:
+sed: internal/evaluate/evaluate.go: No such file or directory
+
+thinking
+**Correcting command usage**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/evaluate' in /Users/yani/Noema/backend succeeded in 51ms:
+cache.go
+commitment.go
+dataset.go
+gemini_eval.go
+handler.go
+handler_integration_test.go
+handler_test.go
+images.go
+output.go
+parse.go
+policy.go
+prompt.go
+schema.go
+spec.go
+storage.go
+
+thinking
+**Inspecting parse.go for error handling**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"strings"
+
+	"noema/internal/config"
+)
+
+func parseSpec(form *multipart.Form) (Spec, error) {
+	specStrs := form.Value["spec"]
+	if len(specStrs) == 0 || specStrs[0] == "" {
+		return Spec{}, fmt.Errorf("missing field: spec")
+	}
+	if len(specStrs) > 1 {
+		return Spec{}, fmt.Errorf("only one spec value allowed")
+	}
+
+thinking
+**Reviewing dataset validation**
+
+I'm checking dataset.go to see if the code ensures the dataset contains at least one item and whether the "invalid spec JSON" error message could include more diagnostic details without leaking sensitive info.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+)
+
+type Dataset struct {
+	Items []DatasetItem `json:"items"`
+}
+
+type DatasetItem struct {
+	ID       string         `json:"id"`
+	Text     string         `json:"text"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+	ImageRef string         `json:"image_ref,omitempty"`
+}
+
+thinking
+**Evaluating error handling improvements**
+
+Considering whether to enhance error details in spec parsing but noting potential loss of detail with generic messages; also reviewing parsing logic and extra field checks for reliability improvements.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/verify/verify.go" in /Users/yani/Noema/backend exited 1 in 51ms:
+sed: internal/verify/verify.go: No such file or directory
+
+thinking
+**Listing internal files for verification**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/verify' in /Users/yani/Noema/backend succeeded in 52ms:
+handler.go
+handler_test.go
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/verify/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package verify
+
+import (
+	"encoding/base64"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+// VerifyRequest is the JSON body for POST /api/verify.
+type VerifyRequest struct {
+	RunID           string `json:"run_id"`
+	ProofB64        string `json:"proof_b64"`
+	PublicInputsB64 string `json:"public_inputs_b64"`
+}
+
+
+thinking
+**Reviewing constraint validation and error handling**
+
+I noticed that constraint severity validation runs even on disabled constraints, potentially causing unnecessary blocks, and parseSpec error messages lack detailed causes—improving these could enhance debugging and user experience.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "ValidateAllowedMaxSeverity" -S internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/parse.go:41:		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+internal/evaluate/parse.go:49:		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
+internal/evaluate/spec.go:35:// ValidateAllowedMaxSeverity returns true if v is 0, 1, or 2.
+internal/evaluate/spec.go:36:func ValidateAllowedMaxSeverity(v int) bool {
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,160p' internal/evaluate/spec.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+// Spec is the parsed evaluation spec (schema_version 1).
+type Spec struct {
+	SchemaVersion     int                `json:"schema_version"`
+	EvaluationName    string             `json:"evaluation_name"`
+	Policy            Policy             `json:"policy"`
+	Constraints       []Constraint       `json:"constraints"`
+	CustomConstraints []CustomConstraint `json:"custom_constraints"`
+}
+
+type Policy struct {
+	Reveal RevealPolicy `json:"reveal"`
+}
+
+type RevealPolicy struct {
+	MaxSeverity bool `json:"max_severity"`
+	Commitment  bool `json:"commitment"`
+}
+
+
+thinking
+**Searching for evaluation name usage**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "EvaluationName" internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/storage.go:138:	EvaluationName string `json:"evaluation_name,omitempty"`
+internal/evaluate/handler_integration_test.go:24:		EvaluationName: "test",
+internal/evaluate/handler_integration_test.go:74:		EvaluationName: "test",
+internal/evaluate/spec.go:6:	EvaluationName    string             `json:"evaluation_name"`
+internal/evaluate/handler.go:134:			EvaluationName: spec.EvaluationName,
+
+thinking
+**Considering validation of evaluation name**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+// EvaluateResponse is the JSON response for POST /api/evaluate.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+	if err != nil {
+		return EvalOutput{}, err
+	}
+	if err := validateEvalOutput(out, enabled); err != nil {
+		return EvalOutput{}, err
+	}
+	return out, nil
+}
+
+func stubEvalOutput(enabled map[string]ConstraintRule) EvalOutput {
+	out := EvalOutput{
+		SchemaVersion: 1,
+		Constraints:   make([]EvalConstraintResult, 0, len(enabled)),
+		MaxSeverity:   0,
+	}
+	for id := range enabled {
+		out.Constraints = append(out.Constraints, EvalConstraintResult{
+			ID:        id,
+			Severity:  0,
+			Rationale: "stub",
+
+thinking
+**Reviewing validation logic**
+
+I'm considering enforcing non-empty EvaluationName in validation but want to check handler and integration tests first to confirm if it's optional.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"mime/multipart"
+	"net/textproto"
+	"os"
+	"path/filepath"
+	"sort"
+	"testing"
+	"time"
+)
+
+type formFile struct {
+	field       string
+	filename    string
+	contentType string
+	content     []byte
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '240,520p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+	})
+	datasetFile := form.File["dataset"][0]
+	imageFiles := form.File["images"]
+	if err := validateDatasetJSON(datasetFile, imageFiles); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateDatasetJSON_RejectsDuplicateIDs(t *testing.T) {
+	dataset := `{"items":[{"id":"1","text":"hello"},{"id":"1","text":"world"}]}`
+	form := buildMultipartForm(t, []formFile{
+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
+	})
+	datasetFile := form.File["dataset"][0]
+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
+		t.Fatalf("expected error for duplicate dataset ids")
+	}
+}
+
+func TestValidateDatasetJSON_RejectsUnknownFields(t *testing.T) {
+
+
+thinking
+**Reviewing potential validation improvements**
+
+I considered adding validations like enforcing non-empty evaluation names, stricter metadata typing, or enhanced error detail but found current checks mostly adequate and no clear breaking changes needed now. Next, I'll focus on targeted test improvements and monitoring for actual issues.
+thinking
+**Identifying robustness checks**
+
+I'm spotting opportunities to improve error detail in JSON parsing and to handle partial failures gracefully in run pruning, but current behaviors seem acceptable. Duplicate constraint ID checks might be needed to avoid overrides, so I'll verify constraint handling next.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "enabledConstraints" -n internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/handler_test.go:65:	enabled, err := enabledConstraints(spec)
+internal/evaluate/handler_test.go:67:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:108:	enabled, err := enabledConstraints(spec)
+internal/evaluate/handler_test.go:110:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:146:	enabled, err := enabledConstraints(spec)
+internal/evaluate/handler_test.go:148:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:176:	enabled, err := enabledConstraints(spec)
+internal/evaluate/handler_test.go:178:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/policy.go:10:func enabledConstraints(spec Spec) (map[string]ConstraintRule, error) {
+internal/evaluate/handler.go:88:		enabled, err := enabledConstraints(spec)
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/policy.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import "fmt"
+
+type ConstraintRule struct {
+	ID                 string
+	AllowedMaxSeverity int
+}
+
+func enabledConstraints(spec Spec) (map[string]ConstraintRule, error) {
+	out := make(map[string]ConstraintRule)
+	for _, c := range spec.Constraints {
+		if !c.Enabled {
+			continue
+		}
+		if _, exists := out[c.ID]; exists {
+			return nil, fmt.Errorf("duplicate constraint id: %s", c.ID)
+		}
+		out[c.ID] = ConstraintRule{ID: c.ID, AllowedMaxSeverity: c.AllowedMaxSeverity}
+	}
+
+thinking
+**Adding duplicate eval_output check**
+
+I'm improving parseEvalOutputOptional to return an error if multiple eval_output values appear, enhancing reliability. I'll implement this in the handler and add a test in handler_test.go to cover this case.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler.go
+@@ -217,2 +217,5 @@
+ 	}
++	if len(form.Value["eval_output"]) > 1 {
++		return EvalOutput{}, fmt.Errorf("only one eval_output value allowed")
++	}
+ 	raw := form.Value["eval_output"][0]
+apply_patch(auto_approved=true) exited 0 in 29ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/handler.go
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 48d901941d4380f015b2ab243679d5e3a17b8cb9..419efea5882da2ede3c3d6c026ef7c77178f89a6
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -215,6 +215,9 @@
+ 	if form == nil || len(form.Value["eval_output"]) == 0 || form.Value["eval_output"][0] == "" {
+ 		return stubEvalOutput(enabled), nil
+ 	}
++	if len(form.Value["eval_output"]) > 1 {
++		return EvalOutput{}, fmt.Errorf("only one eval_output value allowed")
++	}
+ 	raw := form.Value["eval_output"][0]
+ 	out, err := parseEvalOutput(raw)
+ 	if err != nil {
+
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 48d901941d4380f015b2ab243679d5e3a17b8cb9..419efea5882da2ede3c3d6c026ef7c77178f89a6
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -215,6 +215,9 @@
+ 	if form == nil || len(form.Value["eval_output"]) == 0 || form.Value["eval_output"][0] == "" {
+ 		return stubEvalOutput(enabled), nil
+ 	}
++	if len(form.Value["eval_output"]) > 1 {
++		return EvalOutput{}, fmt.Errorf("only one eval_output value allowed")
++	}
+ 	raw := form.Value["eval_output"][0]
+ 	out, err := parseEvalOutput(raw)
+ 	if err != nil {
+
+
+thinking
+**Adding fmt import**
+
+fmt is newly needed for parseEvalOutputOptional, so I'm updating the imports in handler.go to include it.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler.go
+@@ -4,2 +4,3 @@
+ 	"encoding/json"
++	"fmt"
+ 	"log"
+apply_patch(auto_approved=true) exited 0 in 34ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/handler.go
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 48d901941d4380f015b2ab243679d5e3a17b8cb9..2c620e03190193b00edad1bba0d3a664565c2c23
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -2,6 +2,7 @@
+ 
+ import (
+ 	"encoding/json"
++	"fmt"
+ 	"log"
+ 	"mime/multipart"
+ 	"net/http"
+@@ -215,6 +216,9 @@
+ 	if form == nil || len(form.Value["eval_output"]) == 0 || form.Value["eval_output"][0] == "" {
+ 		return stubEvalOutput(enabled), nil
+ 	}
++	if len(form.Value["eval_output"]) > 1 {
++		return EvalOutput{}, fmt.Errorf("only one eval_output value allowed")
++	}
+ 	raw := form.Value["eval_output"][0]
+ 	out, err := parseEvalOutput(raw)
+ 	if err != nil {
+
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 48d901941d4380f015b2ab243679d5e3a17b8cb9..2c620e03190193b00edad1bba0d3a664565c2c23
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -2,6 +2,7 @@
+ 
+ import (
+ 	"encoding/json"
++	"fmt"
+ 	"log"
+ 	"mime/multipart"
+ 	"net/http"
+@@ -215,6 +216,9 @@
+ 	if form == nil || len(form.Value["eval_output"]) == 0 || form.Value["eval_output"][0] == "" {
+ 		return stubEvalOutput(enabled), nil
+ 	}
++	if len(form.Value["eval_output"]) > 1 {
++		return EvalOutput{}, fmt.Errorf("only one eval_output value allowed")
++	}
+ 	raw := form.Value["eval_output"][0]
+ 	out, err := parseEvalOutput(raw)
+ 	if err != nil {
+
+
+thinking
+**Adding multi-value error test**
+
+I'm adding a test in the handler tests to check that providing multiple eval_output values results in an error, confirming correct handling of such input.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
+@@ -198,2 +198,32 @@
+ 
++func TestParseEvalOutputOptional_RejectsMultipleValues(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	enabled, err := enabledConstraints(spec)
++	if err != nil {
++		t.Fatalf("enabledConstraints error: %v", err)
++	}
++
++	payload := EvalOutput{
++		SchemaVersion: 1,
++		Constraints: []EvalConstraintResult{
++			{ID: "pii_exposure_risk", Severity: 0, Rationale: "ok"},
++		},
++		MaxSeverity: 0,
++	}
++	raw, err := json.Marshal(payload)
++	if err != nil {
++		t.Fatalf("marshal eval_output: %v", err)
++	}
++
++	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw), string(raw)}}}
++	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
++		t.Fatalf("expected error for multiple eval_output values")
++	}
++}
++
+ func TestComputePolicyResult(t *testing.T) {
+apply_patch(auto_approved=true) exited 0 in 36ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 48d901941d4380f015b2ab243679d5e3a17b8cb9..2c620e03190193b00edad1bba0d3a664565c2c23
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -2,6 +2,7 @@
+ 
+ import (
+ 	"encoding/json"
++	"fmt"
+ 	"log"
+ 	"mime/multipart"
+ 	"net/http"
+@@ -215,6 +216,9 @@
+ 	if form == nil || len(form.Value["eval_output"]) == 0 || form.Value["eval_output"][0] == "" {
+ 		return stubEvalOutput(enabled), nil
+ 	}
++	if len(form.Value["eval_output"]) > 1 {
++		return EvalOutput{}, fmt.Errorf("only one eval_output value allowed")
++	}
+ 	raw := form.Value["eval_output"][0]
+ 	out, err := parseEvalOutput(raw)
+ 	if err != nil {
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 6715f5a6c06cb43c6785fba82827cfd46facbe8b..74c11047c23b20e18c977522b72a884927f6ec2c
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -196,6 +196,36 @@
+ 	}
+ }
+ 
++func TestParseEvalOutputOptional_RejectsMultipleValues(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	enabled, err := enabledConstraints(spec)
++	if err != nil {
++		t.Fatalf("enabledConstraints error: %v", err)
++	}
++
++	payload := EvalOutput{
++		SchemaVersion: 1,
++		Constraints: []EvalConstraintResult{
++			{ID: "pii_exposure_risk", Severity: 0, Rationale: "ok"},
++		},
++		MaxSeverity: 0,
++	}
++	raw, err := json.Marshal(payload)
++	if err != nil {
++		t.Fatalf("marshal eval_output: %v", err)
++	}
++
++	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw), string(raw)}}}
++	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
++		t.Fatalf("expected error for multiple eval_output values")
++	}
++}
++
+ func TestComputePolicyResult(t *testing.T) {
+ 	enabled := map[string]ConstraintRule{
+ 		"pii":    {ID: "pii", AllowedMaxSeverity: 1},
+
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 48d901941d4380f015b2ab243679d5e3a17b8cb9..2c620e03190193b00edad1bba0d3a664565c2c23
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -2,6 +2,7 @@
+ 
+ import (
+ 	"encoding/json"
++	"fmt"
+ 	"log"
+ 	"mime/multipart"
+ 	"net/http"
+@@ -215,6 +216,9 @@
+ 	if form == nil || len(form.Value["eval_output"]) == 0 || form.Value["eval_output"][0] == "" {
+ 		return stubEvalOutput(enabled), nil
+ 	}
++	if len(form.Value["eval_output"]) > 1 {
++		return EvalOutput{}, fmt.Errorf("only one eval_output value allowed")
++	}
+ 	raw := form.Value["eval_output"][0]
+ 	out, err := parseEvalOutput(raw)
+ 	if err != nil {
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 6715f5a6c06cb43c6785fba82827cfd46facbe8b..74c11047c23b20e18c977522b72a884927f6ec2c
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -196,6 +196,36 @@
+ 	}
+ }
+ 
++func TestParseEvalOutputOptional_RejectsMultipleValues(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	enabled, err := enabledConstraints(spec)
++	if err != nil {
++		t.Fatalf("enabledConstraints error: %v", err)
++	}
++
++	payload := EvalOutput{
++		SchemaVersion: 1,
++		Constraints: []EvalConstraintResult{
++			{ID: "pii_exposure_risk", Severity: 0, Rationale: "ok"},
++		},
++		MaxSeverity: 0,
++	}
++	raw, err := json.Marshal(payload)
++	if err != nil {
++		t.Fatalf("marshal eval_output: %v", err)
++	}
++
++	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw), string(raw)}}}
++	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
++		t.Fatalf("expected error for multiple eval_output values")
++	}
++}
++
+ func TestComputePolicyResult(t *testing.T) {
+ 	enabled := map[string]ConstraintRule{
+ 		"pii":    {ID: "pii", AllowedMaxSeverity: 1},
+
+
+thinking
+**Running full test suite**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 515ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.073s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 48d901941d4380f015b2ab243679d5e3a17b8cb9..2c620e03190193b00edad1bba0d3a664565c2c23
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -2,6 +2,7 @@
+ 
+ import (
+ 	"encoding/json"
++	"fmt"
+ 	"log"
+ 	"mime/multipart"
+ 	"net/http"
+@@ -215,6 +216,9 @@
+ 	if form == nil || len(form.Value["eval_output"]) == 0 || form.Value["eval_output"][0] == "" {
+ 		return stubEvalOutput(enabled), nil
+ 	}
++	if len(form.Value["eval_output"]) > 1 {
++		return EvalOutput{}, fmt.Errorf("only one eval_output value allowed")
++	}
+ 	raw := form.Value["eval_output"][0]
+ 	out, err := parseEvalOutput(raw)
+ 	if err != nil {
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 6715f5a6c06cb43c6785fba82827cfd46facbe8b..74c11047c23b20e18c977522b72a884927f6ec2c
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -196,6 +196,36 @@
+ 	}
+ }
+ 
++func TestParseEvalOutputOptional_RejectsMultipleValues(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	enabled, err := enabledConstraints(spec)
++	if err != nil {
++		t.Fatalf("enabledConstraints error: %v", err)
++	}
++
++	payload := EvalOutput{
++		SchemaVersion: 1,
++		Constraints: []EvalConstraintResult{
++			{ID: "pii_exposure_risk", Severity: 0, Rationale: "ok"},
++		},
++		MaxSeverity: 0,
++	}
++	raw, err := json.Marshal(payload)
++	if err != nil {
++		t.Fatalf("marshal eval_output: %v", err)
++	}
++
++	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw), string(raw)}}}
++	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
++		t.Fatalf("expected error for multiple eval_output values")
++	}
++}
++
+ func TestComputePolicyResult(t *testing.T) {
+ 	enabled := map[string]ConstraintRule{
+ 		"pii":    {ID: "pii", AllowedMaxSeverity: 1},
+
+
+thinking
+**Summarizing changes and test results**
+
+The code changes include [briefly state what changed]. I ran tests with `go test ./...` across the codebase, including files at [list affected file paths], and all tests passed. No additional suggestions at this time.
+codex
+What you changed (short)
+- Added validation to reject multiple `eval_output` values in `internal/evaluate/handler.go` and covered it with a new test in `internal/evaluate/handler_test.go`.
+
+Tests run
+- `go test ./...`
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 48d901941d4380f015b2ab243679d5e3a17b8cb9..2c620e03190193b00edad1bba0d3a664565c2c23
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -2,6 +2,7 @@
+ 
+ import (
+ 	"encoding/json"
++	"fmt"
+ 	"log"
+ 	"mime/multipart"
+ 	"net/http"
+@@ -215,6 +216,9 @@
+ 	if form == nil || len(form.Value["eval_output"]) == 0 || form.Value["eval_output"][0] == "" {
+ 		return stubEvalOutput(enabled), nil
+ 	}
++	if len(form.Value["eval_output"]) > 1 {
++		return EvalOutput{}, fmt.Errorf("only one eval_output value allowed")
++	}
+ 	raw := form.Value["eval_output"][0]
+ 	out, err := parseEvalOutput(raw)
+ 	if err != nil {
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 6715f5a6c06cb43c6785fba82827cfd46facbe8b..74c11047c23b20e18c977522b72a884927f6ec2c
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -196,6 +196,36 @@
+ 	}
+ }
+ 
++func TestParseEvalOutputOptional_RejectsMultipleValues(t *testing.T) {
++	spec := Spec{
++		SchemaVersion: 1,
++		Constraints: []Constraint{
++			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
++		},
++	}
++	enabled, err := enabledConstraints(spec)
++	if err != nil {
++		t.Fatalf("enabledConstraints error: %v", err)
++	}
++
++	payload := EvalOutput{
++		SchemaVersion: 1,
++		Constraints: []EvalConstraintResult{
++			{ID: "pii_exposure_risk", Severity: 0, Rationale: "ok"},
++		},
++		MaxSeverity: 0,
++	}
++	raw, err := json.Marshal(payload)
++	if err != nil {
++		t.Fatalf("marshal eval_output: %v", err)
++	}
++
++	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw), string(raw)}}}
++	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
++		t.Fatalf("expected error for multiple eval_output values")
++	}
++}
++
+ func TestComputePolicyResult(t *testing.T) {
+ 	enabled := map[string]ConstraintRule{
+ 		"pii":    {ID: "pii", AllowedMaxSeverity: 1},
+
+tokens used
+30,158
+What you changed (short)
+- Added validation to reject multiple `eval_output` values in `internal/evaluate/handler.go` and covered it with a new test in `internal/evaluate/handler_test.go`.
+
+Tests run
+- `go test ./...`

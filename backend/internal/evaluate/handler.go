@@ -2,6 +2,7 @@ package evaluate
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"mime/multipart"
 	"net/http"
@@ -214,6 +215,9 @@ func pruneRuns(runsDir string, maxRuns int) error {
 func parseEvalOutputOptional(form *multipart.Form, enabled map[string]ConstraintRule) (EvalOutput, error) {
 	if form == nil || len(form.Value["eval_output"]) == 0 || form.Value["eval_output"][0] == "" {
 		return stubEvalOutput(enabled), nil
+	}
+	if len(form.Value["eval_output"]) > 1 {
+		return EvalOutput{}, fmt.Errorf("only one eval_output value allowed")
 	}
 	raw := form.Value["eval_output"][0]
 	out, err := parseEvalOutput(raw)
