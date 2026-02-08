@@ -13,15 +13,9 @@ import (
 const geminiEvalTimeout = 45 * time.Second
 
 func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
-	if form != nil && len(form.Value["eval_output"]) > 0 && form.Value["eval_output"][0] != "" {
-		raw := form.Value["eval_output"][0]
-		out, err := parseEvalOutput(raw)
-		if err != nil {
-			return EvalOutput{}, err
-		}
-		if err := validateEvalOutput(out, enabled); err != nil {
-			return EvalOutput{}, err
-		}
+	if out, provided, err := parseEvalOutputProvided(form, enabled); err != nil {
+		return EvalOutput{}, err
+	} else if provided {
 		return out, nil
 	}
 	return evalWithGemini(ctx, enabled, runsDir, spec, datasetFile, imageFiles), nil

@@ -221,19 +221,12 @@ func pruneRuns(runsDir string, maxRuns int) error {
 }
 
 func parseEvalOutputOptional(form *multipart.Form, enabled map[string]ConstraintRule) (EvalOutput, error) {
-	if form == nil || len(form.Value["eval_output"]) == 0 || form.Value["eval_output"][0] == "" {
-		return stubEvalOutput(enabled), nil
-	}
-	if len(form.Value["eval_output"]) > 1 {
-		return EvalOutput{}, fmt.Errorf("only one eval_output value allowed")
-	}
-	raw := form.Value["eval_output"][0]
-	out, err := parseEvalOutput(raw)
+	out, provided, err := parseEvalOutputProvided(form, enabled)
 	if err != nil {
 		return EvalOutput{}, err
 	}
-	if err := validateEvalOutput(out, enabled); err != nil {
-		return EvalOutput{}, err
+	if !provided {
+		return stubEvalOutput(enabled), nil
 	}
 	return out, nil
 }
@@ -259,6 +252,27 @@ func stubEvalOutput(enabled map[string]ConstraintRule) EvalOutput {
 
 func jsonBytes(v any) ([]byte, error) {
 	return json.Marshal(v)
+}
+
+func parseEvalOutputProvided(form *multipart.Form, enabled map[string]ConstraintRule) (EvalOutput, bool, error) {
+	if form == nil || len(form.Value["eval_output"]) == 0 {
+		return EvalOutput{}, false, nil
+	}
+	if len(form.Value["eval_output"]) > 1 {
+		return EvalOutput{}, true, fmt.Errorf("only one eval_output value allowed")
+	}
+	raw := strings.TrimSpace(form.Value["eval_output"][0])
+	if raw == "" {
+		return EvalOutput{}, false, nil
+	}
+	out, err := parseEvalOutput(raw)
+	if err != nil {
+		return EvalOutput{}, true, err
+	}
+	if err := validateEvalOutput(out, enabled); err != nil {
+		return EvalOutput{}, true, err
+	}
+	return out, true, nil
 }
 
 func isBodyTooLarge(err error) bool {

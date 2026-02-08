@@ -226,6 +226,32 @@ func TestParseEvalOutputOptional_RejectsMultipleValues(t *testing.T) {
 	}
 }
 
+func TestParseEvalOutputOptional_IgnoresWhitespace(t *testing.T) {
+	spec := Spec{
+		SchemaVersion: 1,
+		Constraints: []Constraint{
+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+			{ID: "harm_enabling_content_risk", Enabled: true, AllowedMaxSeverity: 2},
+		},
+	}
+	enabled, err := enabledConstraints(spec)
+	if err != nil {
+		t.Fatalf("enabledConstraints error: %v", err)
+	}
+
+	form := &multipart.Form{Value: map[string][]string{"eval_output": {" \n\t "}}}
+	out, err := parseEvalOutputOptional(form, enabled)
+	if err != nil {
+		t.Fatalf("parseEvalOutputOptional error: %v", err)
+	}
+	if len(out.Constraints) != len(enabled) {
+		t.Fatalf("expected %d constraints, got %d", len(enabled), len(out.Constraints))
+	}
+	if out.MaxSeverity != 0 {
+		t.Fatalf("expected max_severity 0, got %d", out.MaxSeverity)
+	}
+}
+
 func TestComputePolicyResult(t *testing.T) {
 	enabled := map[string]ConstraintRule{
 		"pii":    {ID: "pii", AllowedMaxSeverity: 1},
