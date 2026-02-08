@@ -326,6 +326,21 @@ func TestValidateDatasetJSON_ImageRefMatchesUpload(t *testing.T) {
 	}
 }
 
+func TestValidateDatasetJSON_RejectsUnusedImages(t *testing.T) {
+	dataset := `{"items":[{"id":"1","text":"hello"}]}`
+	form := buildMultipartForm(t, []formFile{
+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
+		{field: "images", filename: "img1.png", contentType: "image/png", content: []byte("png")},
+	})
+	datasetFile := form.File["dataset"][0]
+	imageFiles := form.File["images"]
+	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
+		t.Fatalf("expected error for unused image")
+	} else if !strings.Contains(err.Error(), "not referenced") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateDatasetJSON_RejectsWhitespaceImageRef(t *testing.T) {
 	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"   "}]}`
 	form := buildMultipartForm(t, []formFile{

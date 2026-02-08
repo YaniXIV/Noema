@@ -314,7 +314,7 @@ func buildMultipartEvalRequestWithImages(t *testing.T, spec Spec) (*bytes.Buffer
 	if err != nil {
 		t.Fatalf("create dataset part: %v", err)
 	}
-	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello"}]}`)); err != nil {
+	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello","image_ref":"img1.png"},{"id":"2","text":"world","image_ref":"img2.jpg"}]}`)); err != nil {
 		t.Fatalf("write dataset: %v", err)
 	}
 

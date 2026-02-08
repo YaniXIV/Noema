@@ -1,0 +1,1648 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3cb2-f0c4-77e1-8709-ce601cc8a731
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Running Go tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 263ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+ok  	noema/internal/config	(cached)
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Planning focused improvement**
+
+I'll inspect the codebase with ripgrep to find a small, non-cosmetic correctness or maintainability improvement limited to three files.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"TODO|FIXME|panic\\(|error\" internal | head" in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/prompt.go:160:func marshalSampledDataset(ds Dataset) ([]byte, error) {
+internal/evaluate/parse.go:14:func parseSpec(form *multipart.Form) (Spec, error) {
+internal/evaluate/parse.go:34:func validateSpec(spec Spec) error {
+internal/evaluate/parse.go:81:func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.FileHeader, error) {
+internal/evaluate/parse.go:123:func validateDatasetJSON(fh *multipart.FileHeader, imageFiles []*multipart.FileHeader) error {
+internal/evaluate/output.go:23:func parseEvalOutput(raw string) (EvalOutput, error) {
+internal/evaluate/output.go:50:func validateEvalOutput(out EvalOutput, enabled map[string]ConstraintRule) error {
+internal/evaluate/handler_test.go:68:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:74:		t.Fatalf("parseEvalOutputOptional error: %v", err)
+internal/evaluate/handler_test.go:119:		t.Fatalf("expected error for image filename with whitespace")
+
+thinking
+**Inspecting parsing logic**
+
+I'm checking the parsing code to understand where and how input validation could be integrated for better pick handling.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"path/filepath"
+	"strings"
+
+	"noema/internal/config"
+)
+
+func parseSpec(form *multipart.Form) (Spec, error) {
+	specStrs := form.Value["spec"]
+	if len(specStrs) == 0 || specStrs[0] == "" {
+		return Spec{}, fmt.Errorf("missing field: spec")
+	}
+	if len(specStrs) > 1 {
+		return Spec{}, fmt.Errorf("only one spec value allowed")
+
+thinking
+**Planning dataset JSON validation**
+
+I'm considering adding checks to ensure dataset items are non-empty and validating the dataset structure more thoroughly, focusing on improving error detection beyond cosmetic changes.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "type Dataset|struct .*Dataset" -n internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/dataset.go:14:type Dataset struct {
+internal/evaluate/dataset.go:18:type DatasetItem struct {
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"strings"
+
+	"noema/internal/config"
+)
+
+type Dataset struct {
+	Items []DatasetItem `json:"items"`
+}
+
+type DatasetItem struct {
+	ID       string         `json:"id"`
+	Text     string         `json:"text"`
+
+thinking
+**Considering validation checks**
+
+I'm noting that image reference uniqueness is already validated and leading/trailing whitespace on item text isn't needed; I'll review evaluation and output areas for additional validation points.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/output.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+)
+
+type EvalConstraintResult struct {
+	ID        string `json:"id"`
+	Severity  int    `json:"severity"`
+	Rationale string `json:"rationale"`
+}
+
+type EvalOutput struct {
+	SchemaVersion int                    `json:"schema_version"`
+	Constraints   []EvalConstraintResult `json:"constraints"`
+	MaxSeverity   int                    `json:"max_severity"`
+	Confidence    *float64               `json:"confidence,omitempty"`
+
+thinking
+**Considering validation improvements**
+
+I'm exploring adding meaningful validation like checking dataset item counts against MaxImages or ensuring unique image_ref references to improve error handling beyond cosmetic changes. Next, I'll review internal evaluation handler code for potential validation spots.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,440p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+	}
+
+	sort.Slice(runs, func(i, j int) bool {
+		return runs[i].modTime.After(runs[j].modTime)
+	})
+
+	for i := maxRuns; i < len(runs); i++ {
+		if err := os.RemoveAll(runs[i].path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func parseEvalOutputOptional(form *multipart.Form, enabled map[string]ConstraintRule) (EvalOutput, error) {
+	out, provided, err := parseEvalOutputProvided(form, enabled)
+	if err != nil {
+		return EvalOutput{}, err
+	}
+	if !provided {
+
+thinking
+**Planning improvements around spec parsing**
+
+Considering enhancing parseEvalOutputOptional by ensuring parseSpec and validateSpec are robust; next step is to search for TODOs to identify related areas for improvement.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME" internal' in /Users/yani/Noema/backend exited 1 in 52ms:
+
+
+
+thinking
+**Identifying validation improvements**
+
+I'm reviewing potential bugs and considering adding validations for empty eval_output strings, ensuring image files referenced in the dataset are unique, and verifying that all provided image files are actually used by the dataset for better correctness and robustness.
+thinking
+**Checking for existing tests**
+
+I'm verifying whether relevant tests already exist in the handler code to inform any needed additions.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"mime/multipart"
+	"net/textproto"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"testing"
+	"time"
+)
+
+type formFile struct {
+	field       string
+	filename    string
+	contentType string
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,440p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+		t.Fatalf("expected error for trailing garbage")
+	}
+}
+
+func TestParseEvalOutputOptional_RejectsMultipleValues(t *testing.T) {
+	spec := Spec{
+		SchemaVersion: 1,
+		Constraints: []Constraint{
+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+		},
+	}
+	enabled, err := enabledConstraints(spec)
+	if err != nil {
+		t.Fatalf("enabledConstraints error: %v", err)
+	}
+
+	payload := EvalOutput{
+		SchemaVersion: 1,
+		Constraints: []EvalConstraintResult{
+			{ID: "pii_exposure_risk", Severity: 0, Rationale: "ok"},
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '440,880p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+	}
+	if err := validateSpec(spec); err == nil {
+		t.Fatalf("expected error for empty constraint id")
+	}
+}
+
+func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+	spec := Spec{
+		SchemaVersion:  1,
+		EvaluationName: "eval",
+		CustomConstraints: []CustomConstraint{
+			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+		},
+	}
+	if err := validateSpec(spec); err == nil {
+		t.Fatalf("expected error for empty custom constraint id")
+	}
+}
+
+func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
+
+thinking
+**Considering validation for unused images**
+
+I'm exploring adding validation to detect unused images and tests to prevent unreferenced files, but first I need to confirm if this aligns with requirements by checking docs or searching.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "image_ref" -n README* internal | head' in /Users/yani/Noema/backend succeeded in 52ms:
+zsh:1: no matches found: README*
+
+thinking
+**Checking for README presence**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 51ms:
+cmd
+data
+go.mod
+go.sum
+internal
+main
+server
+web
+
+
+thinking
+**Considering validation enhancements**
+
+Evaluating potential validation additions around image usage, duplicate filenames, and stricter error handling, but most would risk breaking existing behavior or are already handled; leaning toward minimal changes to avoid unintended breaks.
+thinking
+**Reviewing unused images and constraint validation**
+
+Noting the possibility to reject datasets with unused image files for better quality but recognizing the behavior change risk. Also considering consistency checks on custom constraint fields like Title and Description for improved validation.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "type CustomConstraint" -n internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/spec.go:27:type CustomConstraint struct {
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/spec.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+// Spec is the parsed evaluation spec (schema_version 1).
+type Spec struct {
+	SchemaVersion     int                `json:"schema_version"`
+	EvaluationName    string             `json:"evaluation_name"`
+	Policy            Policy             `json:"policy"`
+	Constraints       []Constraint       `json:"constraints"`
+	CustomConstraints []CustomConstraint `json:"custom_constraints"`
+}
+
+type Policy struct {
+	Reveal RevealPolicy `json:"reveal"`
+}
+
+type RevealPolicy struct {
+	MaxSeverity bool `json:"max_severity"`
+	Commitment  bool `json:"commitment"`
+}
+
+
+thinking
+**Identifying missing validation on custom constraints**
+
+I noticed that validateSpec doesn't enforce non-empty title/description on custom constraints, which affects correctness. I'll check all uses of custom constraints and consider requiring these fields universally.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "CustomConstraint|custom_constraints" internal' in /Users/yani/Noema/backend succeeded in 51ms:
+internal/evaluate/prompt.go:130:	for _, c := range spec.CustomConstraints {
+internal/evaluate/parse.go:45:	seenIDs := make(map[string]struct{}, len(spec.Constraints)+len(spec.CustomConstraints))
+internal/evaluate/parse.go:62:	for _, cn := range spec.CustomConstraints {
+internal/evaluate/handler_test.go:446:func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
+internal/evaluate/handler_test.go:450:		CustomConstraints: []CustomConstraint{
+internal/evaluate/handler_test.go:515:			"spec": {`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[],"extra":true}`},
+internal/evaluate/handler_test.go:527:				`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[]}`,
+internal/evaluate/handler_test.go:528:				`{"schema_version":1,"evaluation_name":"other","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[]}`,
+internal/evaluate/policy.go:21:	for _, c := range spec.CustomConstraints {
+internal/evaluate/spec.go:9:	CustomConstraints []CustomConstraint `json:"custom_constraints"`
+internal/evaluate/spec.go:27:type CustomConstraint struct {
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/prompt.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
+)
+
+const promptVersion = "noema-eval-v1"
+
+type PromptConstraint struct {
+	ID                 string
+	Description        string
+	SeverityLevels     map[string]string
+	AllowedMaxSeverity int
+}
+
+var presetConstraints = map[string]PromptConstraint{
+
+
+thinking
+**Considering validation improvements**
+
+I'm weighing adding validation to ensure enabled custom constraints have non-empty titles or descriptions to improve correctness without breaking existing specs; also considering more robust spec validation and error handling for better maintainability and debugging.
+thinking
+**Planning dataset image reference validation**
+
+I'm deciding to enhance dataset validation by rejecting uploaded images not referenced in dataset items to improve correctness and prevent unused uploads; this will involve updating validateDatasetJSON and adding tests while carefully managing error messages to avoid breaking existing behavior.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/parse.go
+@@ -139,2 +139,3 @@
+ 	}
++	seenRefs := make(map[string]struct{}, len(imageFiles))
+ 	for i, item := range ds.Items {
+@@ -146,2 +147,8 @@
+ 		}
++		seenRefs[item.ImageRef] = struct{}{}
++	}
++	for name := range imageNames {
++		if _, ok := seenRefs[name]; !ok {
++			return fmt.Errorf("uploaded image %q is not referenced in dataset.items", name)
++		}
+ 	}
+apply_patch(auto_approved=true) exited 0 in 31ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/parse.go
+file update:
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 278f7461b702eeee501304117c53fc45260331f4..01ccc41d3ad3caab27647f1381ea5060dd73b8a7
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -137,6 +137,7 @@
+ 	for _, img := range imageFiles {
+ 		imageNames[img.Filename] = struct{}{}
+ 	}
++	seenRefs := make(map[string]struct{}, len(imageFiles))
+ 	for i, item := range ds.Items {
+ 		if item.ImageRef == "" {
+ 			continue
+@@ -144,6 +145,12 @@
+ 		if _, ok := imageNames[item.ImageRef]; !ok {
+ 			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
+ 		}
++		seenRefs[item.ImageRef] = struct{}{}
++	}
++	for name := range imageNames {
++		if _, ok := seenRefs[name]; !ok {
++			return fmt.Errorf("uploaded image %q is not referenced in dataset.items", name)
++		}
+ 	}
+ 	return nil
+ }
+
+file update:
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 278f7461b702eeee501304117c53fc45260331f4..01ccc41d3ad3caab27647f1381ea5060dd73b8a7
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -137,6 +137,7 @@
+ 	for _, img := range imageFiles {
+ 		imageNames[img.Filename] = struct{}{}
+ 	}
++	seenRefs := make(map[string]struct{}, len(imageFiles))
+ 	for i, item := range ds.Items {
+ 		if item.ImageRef == "" {
+ 			continue
+@@ -144,6 +145,12 @@
+ 		if _, ok := imageNames[item.ImageRef]; !ok {
+ 			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
+ 		}
++		seenRefs[item.ImageRef] = struct{}{}
++	}
++	for name := range imageNames {
++		if _, ok := seenRefs[name]; !ok {
++			return fmt.Errorf("uploaded image %q is not referenced in dataset.items", name)
++		}
+ 	}
+ 	return nil
+ }
+
+
+thinking
+**Adding test for unreferenced image error**
+
+I'm adding a test in handler_test to verify that uploading images without referencing them in the dataset JSON triggers an expected "not referenced" error, using buildMultipartForm and checking the error message substring with strings.Contains.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
+@@ -328,2 +328,17 @@
+ 
++func TestValidateDatasetJSON_RejectsUnusedImages(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++		{field: "images", filename: "img1.png", contentType: "image/png", content: []byte("png")},
++	})
++	datasetFile := form.File["dataset"][0]
++	imageFiles := form.File["images"]
++	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
++		t.Fatalf("expected error for unused image")
++	} else if !strings.Contains(err.Error(), "not referenced") {
++		t.Fatalf("unexpected error: %v", err)
++	}
++}
++
+ func TestValidateDatasetJSON_RejectsWhitespaceImageRef(t *testing.T) {
+apply_patch(auto_approved=true) exited 0 in 36ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
+file update:
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 6eb494cd28a9318b44487065d4a450b487fde9c2..6ef68ec416df1009d6bb2d08e7b1bc3dbd0083dc
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -326,6 +326,21 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsUnusedImages(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++		{field: "images", filename: "img1.png", contentType: "image/png", content: []byte("png")},
++	})
++	datasetFile := form.File["dataset"][0]
++	imageFiles := form.File["images"]
++	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
++		t.Fatalf("expected error for unused image")
++	} else if !strings.Contains(err.Error(), "not referenced") {
++		t.Fatalf("unexpected error: %v", err)
++	}
++}
++
+ func TestValidateDatasetJSON_RejectsWhitespaceImageRef(t *testing.T) {
+ 	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"   "}]}`
+ 	form := buildMultipartForm(t, []formFile{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 278f7461b702eeee501304117c53fc45260331f4..01ccc41d3ad3caab27647f1381ea5060dd73b8a7
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -137,6 +137,7 @@
+ 	for _, img := range imageFiles {
+ 		imageNames[img.Filename] = struct{}{}
+ 	}
++	seenRefs := make(map[string]struct{}, len(imageFiles))
+ 	for i, item := range ds.Items {
+ 		if item.ImageRef == "" {
+ 			continue
+@@ -144,6 +145,12 @@
+ 		if _, ok := imageNames[item.ImageRef]; !ok {
+ 			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
+ 		}
++		seenRefs[item.ImageRef] = struct{}{}
++	}
++	for name := range imageNames {
++		if _, ok := seenRefs[name]; !ok {
++			return fmt.Errorf("uploaded image %q is not referenced in dataset.items", name)
++		}
+ 	}
+ 	return nil
+ }
+
+file update:
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 6eb494cd28a9318b44487065d4a450b487fde9c2..6ef68ec416df1009d6bb2d08e7b1bc3dbd0083dc
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -326,6 +326,21 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsUnusedImages(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++		{field: "images", filename: "img1.png", contentType: "image/png", content: []byte("png")},
++	})
++	datasetFile := form.File["dataset"][0]
++	imageFiles := form.File["images"]
++	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
++		t.Fatalf("expected error for unused image")
++	} else if !strings.Contains(err.Error(), "not referenced") {
++		t.Fatalf("unexpected error: %v", err)
++	}
++}
++
+ func TestValidateDatasetJSON_RejectsWhitespaceImageRef(t *testing.T) {
+ 	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"   "}]}`
+ 	form := buildMultipartForm(t, []formFile{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 278f7461b702eeee501304117c53fc45260331f4..01ccc41d3ad3caab27647f1381ea5060dd73b8a7
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -137,6 +137,7 @@
+ 	for _, img := range imageFiles {
+ 		imageNames[img.Filename] = struct{}{}
+ 	}
++	seenRefs := make(map[string]struct{}, len(imageFiles))
+ 	for i, item := range ds.Items {
+ 		if item.ImageRef == "" {
+ 			continue
+@@ -144,6 +145,12 @@
+ 		if _, ok := imageNames[item.ImageRef]; !ok {
+ 			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
+ 		}
++		seenRefs[item.ImageRef] = struct{}{}
++	}
++	for name := range imageNames {
++		if _, ok := seenRefs[name]; !ok {
++			return fmt.Errorf("uploaded image %q is not referenced in dataset.items", name)
++		}
+ 	}
+ 	return nil
+ }
+
+
+thinking
+**Running full Go test suite**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend exited 1 in 578ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+ok  	noema/internal/config	(cached)
+?   	noema/internal/crypto	[no test files]
+--- FAIL: TestEvaluateHandler_WithImages (0.00s)
+    handler_integration_test.go:227: expected status 200, got 400: {"error":"uploaded image \"img1.png\" is not referenced in dataset.items"}
+FAIL
+FAIL	noema/internal/evaluate	0.072s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+FAIL
+file update:
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 6eb494cd28a9318b44487065d4a450b487fde9c2..6ef68ec416df1009d6bb2d08e7b1bc3dbd0083dc
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -326,6 +326,21 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsUnusedImages(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++		{field: "images", filename: "img1.png", contentType: "image/png", content: []byte("png")},
++	})
++	datasetFile := form.File["dataset"][0]
++	imageFiles := form.File["images"]
++	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
++		t.Fatalf("expected error for unused image")
++	} else if !strings.Contains(err.Error(), "not referenced") {
++		t.Fatalf("unexpected error: %v", err)
++	}
++}
++
+ func TestValidateDatasetJSON_RejectsWhitespaceImageRef(t *testing.T) {
+ 	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"   "}]}`
+ 	form := buildMultipartForm(t, []formFile{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 278f7461b702eeee501304117c53fc45260331f4..01ccc41d3ad3caab27647f1381ea5060dd73b8a7
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -137,6 +137,7 @@
+ 	for _, img := range imageFiles {
+ 		imageNames[img.Filename] = struct{}{}
+ 	}
++	seenRefs := make(map[string]struct{}, len(imageFiles))
+ 	for i, item := range ds.Items {
+ 		if item.ImageRef == "" {
+ 			continue
+@@ -144,6 +145,12 @@
+ 		if _, ok := imageNames[item.ImageRef]; !ok {
+ 			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
+ 		}
++		seenRefs[item.ImageRef] = struct{}{}
++	}
++	for name := range imageNames {
++		if _, ok := seenRefs[name]; !ok {
++			return fmt.Errorf("uploaded image %q is not referenced in dataset.items", name)
++		}
+ 	}
+ 	return nil
+ }
+
+
+thinking
+**Inspecting failing integration test**
+
+I'm checking the integration test using an unused image to identify the smallest root cause of the failure caused by changed behavior.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '150,260p' internal/evaluate/handler_integration_test.go" in /Users/yani/Noema/backend succeeded in 51ms:
+		MaxSeverity: 2,
+	}
+
+	body, contentType := buildMultipartEvalRequest(t, spec, evalOut, true)
+	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", body)
+	req.Header.Set("Content-Type", contentType)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestEvaluateHandler_CleansUpFailedRun(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	runsDir := t.TempDir()
+	router.POST("/api/evaluate", Handler(runsDir, 0))
+
+file update:
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 6eb494cd28a9318b44487065d4a450b487fde9c2..6ef68ec416df1009d6bb2d08e7b1bc3dbd0083dc
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -326,6 +326,21 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsUnusedImages(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++		{field: "images", filename: "img1.png", contentType: "image/png", content: []byte("png")},
++	})
++	datasetFile := form.File["dataset"][0]
++	imageFiles := form.File["images"]
++	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
++		t.Fatalf("expected error for unused image")
++	} else if !strings.Contains(err.Error(), "not referenced") {
++		t.Fatalf("unexpected error: %v", err)
++	}
++}
++
+ func TestValidateDatasetJSON_RejectsWhitespaceImageRef(t *testing.T) {
+ 	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"   "}]}`
+ 	form := buildMultipartForm(t, []formFile{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 278f7461b702eeee501304117c53fc45260331f4..01ccc41d3ad3caab27647f1381ea5060dd73b8a7
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -137,6 +137,7 @@
+ 	for _, img := range imageFiles {
+ 		imageNames[img.Filename] = struct{}{}
+ 	}
++	seenRefs := make(map[string]struct{}, len(imageFiles))
+ 	for i, item := range ds.Items {
+ 		if item.ImageRef == "" {
+ 			continue
+@@ -144,6 +145,12 @@
+ 		if _, ok := imageNames[item.ImageRef]; !ok {
+ 			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
+ 		}
++		seenRefs[item.ImageRef] = struct{}{}
++	}
++	for name := range imageNames {
++		if _, ok := seenRefs[name]; !ok {
++			return fmt.Errorf("uploaded image %q is not referenced in dataset.items", name)
++		}
+ 	}
+ 	return nil
+ }
+
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '260,380p' internal/evaluate/handler_integration_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+		t.Fatalf("write dataset: %v", err)
+	}
+
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+
+	return &buf, writer.FormDataContentType()
+}
+
+func buildMultipartEvalRequestWithDataset(t *testing.T, spec Spec, datasetJSON string) (*bytes.Buffer, string) {
+	t.Helper()
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+
+	specRaw, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatalf("marshal spec: %v", err)
+	}
+file update:
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 6eb494cd28a9318b44487065d4a450b487fde9c2..6ef68ec416df1009d6bb2d08e7b1bc3dbd0083dc
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -326,6 +326,21 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsUnusedImages(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++		{field: "images", filename: "img1.png", contentType: "image/png", content: []byte("png")},
++	})
++	datasetFile := form.File["dataset"][0]
++	imageFiles := form.File["images"]
++	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
++		t.Fatalf("expected error for unused image")
++	} else if !strings.Contains(err.Error(), "not referenced") {
++		t.Fatalf("unexpected error: %v", err)
++	}
++}
++
+ func TestValidateDatasetJSON_RejectsWhitespaceImageRef(t *testing.T) {
+ 	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"   "}]}`
+ 	form := buildMultipartForm(t, []formFile{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 278f7461b702eeee501304117c53fc45260331f4..01ccc41d3ad3caab27647f1381ea5060dd73b8a7
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -137,6 +137,7 @@
+ 	for _, img := range imageFiles {
+ 		imageNames[img.Filename] = struct{}{}
+ 	}
++	seenRefs := make(map[string]struct{}, len(imageFiles))
+ 	for i, item := range ds.Items {
+ 		if item.ImageRef == "" {
+ 			continue
+@@ -144,6 +145,12 @@
+ 		if _, ok := imageNames[item.ImageRef]; !ok {
+ 			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
+ 		}
++		seenRefs[item.ImageRef] = struct{}{}
++	}
++	for name := range imageNames {
++		if _, ok := seenRefs[name]; !ok {
++			return fmt.Errorf("uploaded image %q is not referenced in dataset.items", name)
++		}
+ 	}
+ 	return nil
+ }
+
+
+thinking
+**Updating test dataset for image references**
+
+I'm modifying the dataset JSON in the integration test helper to include two image references, matching the new rule and updating tests accordingly to reflect this behavior change.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler_integration_test.go
+@@ -258,3 +258,3 @@
+ 	}
+-	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello"}]}`)); err != nil {
++	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello","image_ref":"img1.png"},{"id":"2","text":"world","image_ref":"img2.jpg"}]}`)); err != nil {
+ 		t.Fatalf("write dataset: %v", err)
+apply_patch(auto_approved=true) exited 0 in 38ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/handler_integration_test.go
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index 2e80c7b78f847a70882b7ff88d1f1ea49207653e..7fd1452c76de61a16eb703eb19c1e846853f4392
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -256,7 +256,7 @@
+ 	if err != nil {
+ 		t.Fatalf("create dataset part: %v", err)
+ 	}
+-	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello"}]}`)); err != nil {
++	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello","image_ref":"img1.png"},{"id":"2","text":"world","image_ref":"img2.jpg"}]}`)); err != nil {
+ 		t.Fatalf("write dataset: %v", err)
+ 	}
+ 
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 6eb494cd28a9318b44487065d4a450b487fde9c2..6ef68ec416df1009d6bb2d08e7b1bc3dbd0083dc
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -326,6 +326,21 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsUnusedImages(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++		{field: "images", filename: "img1.png", contentType: "image/png", content: []byte("png")},
++	})
++	datasetFile := form.File["dataset"][0]
++	imageFiles := form.File["images"]
++	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
++		t.Fatalf("expected error for unused image")
++	} else if !strings.Contains(err.Error(), "not referenced") {
++		t.Fatalf("unexpected error: %v", err)
++	}
++}
++
+ func TestValidateDatasetJSON_RejectsWhitespaceImageRef(t *testing.T) {
+ 	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"   "}]}`
+ 	form := buildMultipartForm(t, []formFile{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 278f7461b702eeee501304117c53fc45260331f4..01ccc41d3ad3caab27647f1381ea5060dd73b8a7
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -137,6 +137,7 @@
+ 	for _, img := range imageFiles {
+ 		imageNames[img.Filename] = struct{}{}
+ 	}
++	seenRefs := make(map[string]struct{}, len(imageFiles))
+ 	for i, item := range ds.Items {
+ 		if item.ImageRef == "" {
+ 			continue
+@@ -144,6 +145,12 @@
+ 		if _, ok := imageNames[item.ImageRef]; !ok {
+ 			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
+ 		}
++		seenRefs[item.ImageRef] = struct{}{}
++	}
++	for name := range imageNames {
++		if _, ok := seenRefs[name]; !ok {
++			return fmt.Errorf("uploaded image %q is not referenced in dataset.items", name)
++		}
+ 	}
+ 	return nil
+ }
+
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index 2e80c7b78f847a70882b7ff88d1f1ea49207653e..7fd1452c76de61a16eb703eb19c1e846853f4392
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -256,7 +256,7 @@
+ 	if err != nil {
+ 		t.Fatalf("create dataset part: %v", err)
+ 	}
+-	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello"}]}`)); err != nil {
++	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello","image_ref":"img1.png"},{"id":"2","text":"world","image_ref":"img2.jpg"}]}`)); err != nil {
+ 		t.Fatalf("write dataset: %v", err)
+ 	}
+ 
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 6eb494cd28a9318b44487065d4a450b487fde9c2..6ef68ec416df1009d6bb2d08e7b1bc3dbd0083dc
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -326,6 +326,21 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsUnusedImages(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++		{field: "images", filename: "img1.png", contentType: "image/png", content: []byte("png")},
++	})
++	datasetFile := form.File["dataset"][0]
++	imageFiles := form.File["images"]
++	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
++		t.Fatalf("expected error for unused image")
++	} else if !strings.Contains(err.Error(), "not referenced") {
++		t.Fatalf("unexpected error: %v", err)
++	}
++}
++
+ func TestValidateDatasetJSON_RejectsWhitespaceImageRef(t *testing.T) {
+ 	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"   "}]}`
+ 	form := buildMultipartForm(t, []formFile{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 278f7461b702eeee501304117c53fc45260331f4..01ccc41d3ad3caab27647f1381ea5060dd73b8a7
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -137,6 +137,7 @@
+ 	for _, img := range imageFiles {
+ 		imageNames[img.Filename] = struct{}{}
+ 	}
++	seenRefs := make(map[string]struct{}, len(imageFiles))
+ 	for i, item := range ds.Items {
+ 		if item.ImageRef == "" {
+ 			continue
+@@ -144,6 +145,12 @@
+ 		if _, ok := imageNames[item.ImageRef]; !ok {
+ 			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
+ 		}
++		seenRefs[item.ImageRef] = struct{}{}
++	}
++	for name := range imageNames {
++		if _, ok := seenRefs[name]; !ok {
++			return fmt.Errorf("uploaded image %q is not referenced in dataset.items", name)
++		}
+ 	}
+ 	return nil
+ }
+
+
+thinking
+**Running full Go test suite**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend exited 1 in 437ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+ok  	noema/internal/config	(cached)
+?   	noema/internal/crypto	[no test files]
+--- FAIL: TestEvaluateHandler_WithEvalOutput (0.00s)
+    handler_integration_test.go:45: expected status 200, got 400: {"error":"dataset.items[0].image_ref provided but no images uploaded"}
+--- FAIL: TestEvaluateHandler_StubEvalOutput (0.00s)
+    handler_integration_test.go:89: expected status 200, got 400: {"error":"dataset.items[0].image_ref provided but no images uploaded"}
+--- FAIL: TestEvaluateHandler_WithImages (0.00s)
+    handler_integration_test.go:227: expected status 200, got 400: {"error":"uploaded image \"img1.png\" is not referenced in dataset.items"}
+FAIL
+FAIL	noema/internal/evaluate	0.013s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+FAIL
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index 2e80c7b78f847a70882b7ff88d1f1ea49207653e..7fd1452c76de61a16eb703eb19c1e846853f4392
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -256,7 +256,7 @@
+ 	if err != nil {
+ 		t.Fatalf("create dataset part: %v", err)
+ 	}
+-	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello"}]}`)); err != nil {
++	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello","image_ref":"img1.png"},{"id":"2","text":"world","image_ref":"img2.jpg"}]}`)); err != nil {
+ 		t.Fatalf("write dataset: %v", err)
+ 	}
+ 
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 6eb494cd28a9318b44487065d4a450b487fde9c2..6ef68ec416df1009d6bb2d08e7b1bc3dbd0083dc
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -326,6 +326,21 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsUnusedImages(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++		{field: "images", filename: "img1.png", contentType: "image/png", content: []byte("png")},
++	})
++	datasetFile := form.File["dataset"][0]
++	imageFiles := form.File["images"]
++	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
++		t.Fatalf("expected error for unused image")
++	} else if !strings.Contains(err.Error(), "not referenced") {
++		t.Fatalf("unexpected error: %v", err)
++	}
++}
++
+ func TestValidateDatasetJSON_RejectsWhitespaceImageRef(t *testing.T) {
+ 	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"   "}]}`
+ 	form := buildMultipartForm(t, []formFile{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 278f7461b702eeee501304117c53fc45260331f4..01ccc41d3ad3caab27647f1381ea5060dd73b8a7
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -137,6 +137,7 @@
+ 	for _, img := range imageFiles {
+ 		imageNames[img.Filename] = struct{}{}
+ 	}
++	seenRefs := make(map[string]struct{}, len(imageFiles))
+ 	for i, item := range ds.Items {
+ 		if item.ImageRef == "" {
+ 			continue
+@@ -144,6 +145,12 @@
+ 		if _, ok := imageNames[item.ImageRef]; !ok {
+ 			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
+ 		}
++		seenRefs[item.ImageRef] = struct{}{}
++	}
++	for name := range imageNames {
++		if _, ok := seenRefs[name]; !ok {
++			return fmt.Errorf("uploaded image %q is not referenced in dataset.items", name)
++		}
+ 	}
+ 	return nil
+ }
+
+
+thinking
+**Investigating unexpected image_ref error**
+
+The dataset in the failing test doesn't include image_ref, yet the validation errors as if it does; this suggests the dataset JSON may be altered or mixed with image references in the test setup, so I'll examine related tests calling buildMultipartEvalRequest with images to trace where image_ref sneaks in.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,120p' internal/evaluate/handler_integration_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+)
+
+func TestEvaluateHandler_WithEvalOutput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	runsDir := t.TempDir()
+	router.POST("/api/evaluate", Handler(runsDir, 0))
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index 2e80c7b78f847a70882b7ff88d1f1ea49207653e..7fd1452c76de61a16eb703eb19c1e846853f4392
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -256,7 +256,7 @@
+ 	if err != nil {
+ 		t.Fatalf("create dataset part: %v", err)
+ 	}
+-	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello"}]}`)); err != nil {
++	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello","image_ref":"img1.png"},{"id":"2","text":"world","image_ref":"img2.jpg"}]}`)); err != nil {
+ 		t.Fatalf("write dataset: %v", err)
+ 	}
+ 
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 6eb494cd28a9318b44487065d4a450b487fde9c2..6ef68ec416df1009d6bb2d08e7b1bc3dbd0083dc
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -326,6 +326,21 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsUnusedImages(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++		{field: "images", filename: "img1.png", contentType: "image/png", content: []byte("png")},
++	})
++	datasetFile := form.File["dataset"][0]
++	imageFiles := form.File["images"]
++	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
++		t.Fatalf("expected error for unused image")
++	} else if !strings.Contains(err.Error(), "not referenced") {
++		t.Fatalf("unexpected error: %v", err)
++	}
++}
++
+ func TestValidateDatasetJSON_RejectsWhitespaceImageRef(t *testing.T) {
+ 	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"   "}]}`
+ 	form := buildMultipartForm(t, []formFile{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 278f7461b702eeee501304117c53fc45260331f4..01ccc41d3ad3caab27647f1381ea5060dd73b8a7
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -137,6 +137,7 @@
+ 	for _, img := range imageFiles {
+ 		imageNames[img.Filename] = struct{}{}
+ 	}
++	seenRefs := make(map[string]struct{}, len(imageFiles))
+ 	for i, item := range ds.Items {
+ 		if item.ImageRef == "" {
+ 			continue
+@@ -144,6 +145,12 @@
+ 		if _, ok := imageNames[item.ImageRef]; !ok {
+ 			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
+ 		}
++		seenRefs[item.ImageRef] = struct{}{}
++	}
++	for name := range imageNames {
++		if _, ok := seenRefs[name]; !ok {
++			return fmt.Errorf("uploaded image %q is not referenced in dataset.items", name)
++		}
+ 	}
+ 	return nil
+ }
+
+
+thinking
+**Investigating image_ref error cause**
+
+The error indicates an image_ref present without uploaded images, suggesting the dataset JSON might include image_ref unexpectedly. I'm verifying if buildMultipartEvalRequest or its dataset JSON was modified to add image_ref, causing the validation failure.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"buildMultipartEvalRequest\\(\" -n internal/evaluate/handler_integration_test.go" in /Users/yani/Noema/backend succeeded in 51ms:
+38:	body, contentType := buildMultipartEvalRequest(t, spec, evalOut, true)
+82:	body, contentType := buildMultipartEvalRequest(t, spec, EvalOutput{}, false)
+153:	body, contentType := buildMultipartEvalRequest(t, spec, evalOut, true)
+185:	body, contentType := buildMultipartEvalRequest(t, spec, evalOut, true)
+231:func buildMultipartEvalRequest(t *testing.T, spec Spec, evalOut EvalOutput, includeEvalOutput bool) (*bytes.Buffer, string) {
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index 2e80c7b78f847a70882b7ff88d1f1ea49207653e..7fd1452c76de61a16eb703eb19c1e846853f4392
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -256,7 +256,7 @@
+ 	if err != nil {
+ 		t.Fatalf("create dataset part: %v", err)
+ 	}
+-	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello"}]}`)); err != nil {
++	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello","image_ref":"img1.png"},{"id":"2","text":"world","image_ref":"img2.jpg"}]}`)); err != nil {
+ 		t.Fatalf("write dataset: %v", err)
+ 	}
+ 
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 6eb494cd28a9318b44487065d4a450b487fde9c2..6ef68ec416df1009d6bb2d08e7b1bc3dbd0083dc
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -326,6 +326,21 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsUnusedImages(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++		{field: "images", filename: "img1.png", contentType: "image/png", content: []byte("png")},
++	})
++	datasetFile := form.File["dataset"][0]
++	imageFiles := form.File["images"]
++	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
++		t.Fatalf("expected error for unused image")
++	} else if !strings.Contains(err.Error(), "not referenced") {
++		t.Fatalf("unexpected error: %v", err)
++	}
++}
++
+ func TestValidateDatasetJSON_RejectsWhitespaceImageRef(t *testing.T) {
+ 	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"   "}]}`
+ 	form := buildMultipartForm(t, []formFile{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 278f7461b702eeee501304117c53fc45260331f4..01ccc41d3ad3caab27647f1381ea5060dd73b8a7
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -137,6 +137,7 @@
+ 	for _, img := range imageFiles {
+ 		imageNames[img.Filename] = struct{}{}
+ 	}
++	seenRefs := make(map[string]struct{}, len(imageFiles))
+ 	for i, item := range ds.Items {
+ 		if item.ImageRef == "" {
+ 			continue
+@@ -144,6 +145,12 @@
+ 		if _, ok := imageNames[item.ImageRef]; !ok {
+ 			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
+ 		}
++		seenRefs[item.ImageRef] = struct{}{}
++	}
++	for name := range imageNames {
++		if _, ok := seenRefs[name]; !ok {
++			return fmt.Errorf("uploaded image %q is not referenced in dataset.items", name)
++		}
+ 	}
+ 	return nil
+ }
+
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '231,300p' internal/evaluate/handler_integration_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+func buildMultipartEvalRequest(t *testing.T, spec Spec, evalOut EvalOutput, includeEvalOutput bool) (*bytes.Buffer, string) {
+	t.Helper()
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+
+	specRaw, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatalf("marshal spec: %v", err)
+	}
+	if err := writer.WriteField("spec", string(specRaw)); err != nil {
+		t.Fatalf("write spec field: %v", err)
+	}
+
+	if includeEvalOutput {
+		evalRaw, err := json.Marshal(evalOut)
+		if err != nil {
+			t.Fatalf("marshal eval_output: %v", err)
+		}
+		if err := writer.WriteField("eval_output", string(evalRaw)); err != nil {
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index 2e80c7b78f847a70882b7ff88d1f1ea49207653e..7fd1452c76de61a16eb703eb19c1e846853f4392
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -256,7 +256,7 @@
+ 	if err != nil {
+ 		t.Fatalf("create dataset part: %v", err)
+ 	}
+-	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello"}]}`)); err != nil {
++	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello","image_ref":"img1.png"},{"id":"2","text":"world","image_ref":"img2.jpg"}]}`)); err != nil {
+ 		t.Fatalf("write dataset: %v", err)
+ 	}
+ 
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 6eb494cd28a9318b44487065d4a450b487fde9c2..6ef68ec416df1009d6bb2d08e7b1bc3dbd0083dc
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -326,6 +326,21 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsUnusedImages(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++		{field: "images", filename: "img1.png", contentType: "image/png", content: []byte("png")},
++	})
++	datasetFile := form.File["dataset"][0]
++	imageFiles := form.File["images"]
++	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
++		t.Fatalf("expected error for unused image")
++	} else if !strings.Contains(err.Error(), "not referenced") {
++		t.Fatalf("unexpected error: %v", err)
++	}
++}
++
+ func TestValidateDatasetJSON_RejectsWhitespaceImageRef(t *testing.T) {
+ 	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"   "}]}`
+ 	form := buildMultipartForm(t, []formFile{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 278f7461b702eeee501304117c53fc45260331f4..01ccc41d3ad3caab27647f1381ea5060dd73b8a7
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -137,6 +137,7 @@
+ 	for _, img := range imageFiles {
+ 		imageNames[img.Filename] = struct{}{}
+ 	}
++	seenRefs := make(map[string]struct{}, len(imageFiles))
+ 	for i, item := range ds.Items {
+ 		if item.ImageRef == "" {
+ 			continue
+@@ -144,6 +145,12 @@
+ 		if _, ok := imageNames[item.ImageRef]; !ok {
+ 			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
+ 		}
++		seenRefs[item.ImageRef] = struct{}{}
++	}
++	for name := range imageNames {
++		if _, ok := seenRefs[name]; !ok {
++			return fmt.Errorf("uploaded image %q is not referenced in dataset.items", name)
++		}
+ 	}
+ 	return nil
+ }
+
+
+thinking
+**Correcting image_ref handling**
+
+I'm reverting buildMultipartEvalRequest to exclude image_ref and updating buildMultipartEvalRequestWithImages to include image_ref properly, ensuring the right function handles images.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler_integration_test.go
+@@ -258,3 +258,3 @@
+ 	}
+-	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello","image_ref":"img1.png"},{"id":"2","text":"world","image_ref":"img2.jpg"}]}`)); err != nil {
++	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello"}]}`)); err != nil {
+ 		t.Fatalf("write dataset: %v", err)
+@@ -316,3 +316,3 @@
+ 	}
+-	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello"}]}`)); err != nil {
++	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello","image_ref":"img1.png"},{"id":"2","text":"world","image_ref":"img2.jpg"}]}`)); err != nil {
+ 		t.Fatalf("write dataset: %v", err)
+apply_patch(auto_approved=true) exited 0 in 45ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/handler_integration_test.go
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index 2e80c7b78f847a70882b7ff88d1f1ea49207653e..cae1af0dec362cf3c6ca78f3d925fb794b7683f8
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -314,7 +314,7 @@
+ 	if err != nil {
+ 		t.Fatalf("create dataset part: %v", err)
+ 	}
+-	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello"}]}`)); err != nil {
++	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello","image_ref":"img1.png"},{"id":"2","text":"world","image_ref":"img2.jpg"}]}`)); err != nil {
+ 		t.Fatalf("write dataset: %v", err)
+ 	}
+ 
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 6eb494cd28a9318b44487065d4a450b487fde9c2..6ef68ec416df1009d6bb2d08e7b1bc3dbd0083dc
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -326,6 +326,21 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsUnusedImages(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++		{field: "images", filename: "img1.png", contentType: "image/png", content: []byte("png")},
++	})
++	datasetFile := form.File["dataset"][0]
++	imageFiles := form.File["images"]
++	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
++		t.Fatalf("expected error for unused image")
++	} else if !strings.Contains(err.Error(), "not referenced") {
++		t.Fatalf("unexpected error: %v", err)
++	}
++}
++
+ func TestValidateDatasetJSON_RejectsWhitespaceImageRef(t *testing.T) {
+ 	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"   "}]}`
+ 	form := buildMultipartForm(t, []formFile{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 278f7461b702eeee501304117c53fc45260331f4..01ccc41d3ad3caab27647f1381ea5060dd73b8a7
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -137,6 +137,7 @@
+ 	for _, img := range imageFiles {
+ 		imageNames[img.Filename] = struct{}{}
+ 	}
++	seenRefs := make(map[string]struct{}, len(imageFiles))
+ 	for i, item := range ds.Items {
+ 		if item.ImageRef == "" {
+ 			continue
+@@ -144,6 +145,12 @@
+ 		if _, ok := imageNames[item.ImageRef]; !ok {
+ 			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
+ 		}
++		seenRefs[item.ImageRef] = struct{}{}
++	}
++	for name := range imageNames {
++		if _, ok := seenRefs[name]; !ok {
++			return fmt.Errorf("uploaded image %q is not referenced in dataset.items", name)
++		}
+ 	}
+ 	return nil
+ }
+
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index 2e80c7b78f847a70882b7ff88d1f1ea49207653e..cae1af0dec362cf3c6ca78f3d925fb794b7683f8
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -314,7 +314,7 @@
+ 	if err != nil {
+ 		t.Fatalf("create dataset part: %v", err)
+ 	}
+-	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello"}]}`)); err != nil {
++	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello","image_ref":"img1.png"},{"id":"2","text":"world","image_ref":"img2.jpg"}]}`)); err != nil {
+ 		t.Fatalf("write dataset: %v", err)
+ 	}
+ 
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 6eb494cd28a9318b44487065d4a450b487fde9c2..6ef68ec416df1009d6bb2d08e7b1bc3dbd0083dc
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -326,6 +326,21 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsUnusedImages(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++		{field: "images", filename: "img1.png", contentType: "image/png", content: []byte("png")},
++	})
++	datasetFile := form.File["dataset"][0]
++	imageFiles := form.File["images"]
++	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
++		t.Fatalf("expected error for unused image")
++	} else if !strings.Contains(err.Error(), "not referenced") {
++		t.Fatalf("unexpected error: %v", err)
++	}
++}
++
+ func TestValidateDatasetJSON_RejectsWhitespaceImageRef(t *testing.T) {
+ 	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"   "}]}`
+ 	form := buildMultipartForm(t, []formFile{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 278f7461b702eeee501304117c53fc45260331f4..01ccc41d3ad3caab27647f1381ea5060dd73b8a7
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -137,6 +137,7 @@
+ 	for _, img := range imageFiles {
+ 		imageNames[img.Filename] = struct{}{}
+ 	}
++	seenRefs := make(map[string]struct{}, len(imageFiles))
+ 	for i, item := range ds.Items {
+ 		if item.ImageRef == "" {
+ 			continue
+@@ -144,6 +145,12 @@
+ 		if _, ok := imageNames[item.ImageRef]; !ok {
+ 			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
+ 		}
++		seenRefs[item.ImageRef] = struct{}{}
++	}
++	for name := range imageNames {
++		if _, ok := seenRefs[name]; !ok {
++			return fmt.Errorf("uploaded image %q is not referenced in dataset.items", name)
++		}
+ 	}
+ 	return nil
+ }
+
+
+thinking
+**Running all Go tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 535ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+ok  	noema/internal/config	(cached)
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.106s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index 2e80c7b78f847a70882b7ff88d1f1ea49207653e..cae1af0dec362cf3c6ca78f3d925fb794b7683f8
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -314,7 +314,7 @@
+ 	if err != nil {
+ 		t.Fatalf("create dataset part: %v", err)
+ 	}
+-	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello"}]}`)); err != nil {
++	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello","image_ref":"img1.png"},{"id":"2","text":"world","image_ref":"img2.jpg"}]}`)); err != nil {
+ 		t.Fatalf("write dataset: %v", err)
+ 	}
+ 
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 6eb494cd28a9318b44487065d4a450b487fde9c2..6ef68ec416df1009d6bb2d08e7b1bc3dbd0083dc
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -326,6 +326,21 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsUnusedImages(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++		{field: "images", filename: "img1.png", contentType: "image/png", content: []byte("png")},
++	})
++	datasetFile := form.File["dataset"][0]
++	imageFiles := form.File["images"]
++	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
++		t.Fatalf("expected error for unused image")
++	} else if !strings.Contains(err.Error(), "not referenced") {
++		t.Fatalf("unexpected error: %v", err)
++	}
++}
++
+ func TestValidateDatasetJSON_RejectsWhitespaceImageRef(t *testing.T) {
+ 	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"   "}]}`
+ 	form := buildMultipartForm(t, []formFile{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 278f7461b702eeee501304117c53fc45260331f4..01ccc41d3ad3caab27647f1381ea5060dd73b8a7
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -137,6 +137,7 @@
+ 	for _, img := range imageFiles {
+ 		imageNames[img.Filename] = struct{}{}
+ 	}
++	seenRefs := make(map[string]struct{}, len(imageFiles))
+ 	for i, item := range ds.Items {
+ 		if item.ImageRef == "" {
+ 			continue
+@@ -144,6 +145,12 @@
+ 		if _, ok := imageNames[item.ImageRef]; !ok {
+ 			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
+ 		}
++		seenRefs[item.ImageRef] = struct{}{}
++	}
++	for name := range imageNames {
++		if _, ok := seenRefs[name]; !ok {
++			return fmt.Errorf("uploaded image %q is not referenced in dataset.items", name)
++		}
+ 	}
+ 	return nil
+ }
+
+
+thinking
+**Confirming tests passed**
+
+All tests passed successfully, including running `go test ./...`. Changes included updates to relevant files, ensuring functionality and coverage.
+codex
+What you changed (short)
+- Enforced that uploaded images must be referenced by `dataset.items[].image_ref` and added coverage for unused images in validation. (`internal/evaluate/parse.go`, `internal/evaluate/handler_test.go`)
+- Updated integration test image dataset to reference the uploaded files. (`internal/evaluate/handler_integration_test.go`)
+
+Tests run (must include go test ./...)
+- `go test ./...`
+file update:
+diff --git a/backend/internal/evaluate/handler_integration_test.go b/backend/internal/evaluate/handler_integration_test.go
+index 2e80c7b78f847a70882b7ff88d1f1ea49207653e..cae1af0dec362cf3c6ca78f3d925fb794b7683f8
+--- a/backend/internal/evaluate/handler_integration_test.go
++++ b/backend/internal/evaluate/handler_integration_test.go
+@@ -314,7 +314,7 @@
+ 	if err != nil {
+ 		t.Fatalf("create dataset part: %v", err)
+ 	}
+-	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello"}]}`)); err != nil {
++	if _, err := part.Write([]byte(`{"items":[{"id":"1","text":"hello","image_ref":"img1.png"},{"id":"2","text":"world","image_ref":"img2.jpg"}]}`)); err != nil {
+ 		t.Fatalf("write dataset: %v", err)
+ 	}
+ 
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 6eb494cd28a9318b44487065d4a450b487fde9c2..6ef68ec416df1009d6bb2d08e7b1bc3dbd0083dc
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -326,6 +326,21 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsUnusedImages(t *testing.T) {
++	dataset := `{"items":[{"id":"1","text":"hello"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++		{field: "images", filename: "img1.png", contentType: "image/png", content: []byte("png")},
++	})
++	datasetFile := form.File["dataset"][0]
++	imageFiles := form.File["images"]
++	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
++		t.Fatalf("expected error for unused image")
++	} else if !strings.Contains(err.Error(), "not referenced") {
++		t.Fatalf("unexpected error: %v", err)
++	}
++}
++
+ func TestValidateDatasetJSON_RejectsWhitespaceImageRef(t *testing.T) {
+ 	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"   "}]}`
+ 	form := buildMultipartForm(t, []formFile{
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 278f7461b702eeee501304117c53fc45260331f4..01ccc41d3ad3caab27647f1381ea5060dd73b8a7
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -137,6 +137,7 @@
+ 	for _, img := range imageFiles {
+ 		imageNames[img.Filename] = struct{}{}
+ 	}
++	seenRefs := make(map[string]struct{}, len(imageFiles))
+ 	for i, item := range ds.Items {
+ 		if item.ImageRef == "" {
+ 			continue
+@@ -144,6 +145,12 @@
+ 		if _, ok := imageNames[item.ImageRef]; !ok {
+ 			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
+ 		}
++		seenRefs[item.ImageRef] = struct{}{}
++	}
++	for name := range imageNames {
++		if _, ok := seenRefs[name]; !ok {
++			return fmt.Errorf("uploaded image %q is not referenced in dataset.items", name)
++		}
+ 	}
+ 	return nil
+ }
+
+tokens used
+49,990
+What you changed (short)
+- Enforced that uploaded images must be referenced by `dataset.items[].image_ref` and added coverage for unused images in validation. (`internal/evaluate/parse.go`, `internal/evaluate/handler_test.go`)
+- Updated integration test image dataset to reference the uploaded files. (`internal/evaluate/handler_integration_test.go`)
+
+Tests run (must include go test ./...)
+- `go test ./...`

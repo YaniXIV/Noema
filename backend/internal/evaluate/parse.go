@@ -137,12 +137,19 @@ func validateDatasetJSON(fh *multipart.FileHeader, imageFiles []*multipart.FileH
 	for _, img := range imageFiles {
 		imageNames[img.Filename] = struct{}{}
 	}
+	seenRefs := make(map[string]struct{}, len(imageFiles))
 	for i, item := range ds.Items {
 		if item.ImageRef == "" {
 			continue
 		}
 		if _, ok := imageNames[item.ImageRef]; !ok {
 			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
+		}
+		seenRefs[item.ImageRef] = struct{}{}
+	}
+	for name := range imageNames {
+		if _, ok := seenRefs[name]; !ok {
+			return fmt.Errorf("uploaded image %q is not referenced in dataset.items", name)
 		}
 	}
 	return nil
