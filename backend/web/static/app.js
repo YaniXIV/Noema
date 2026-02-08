@@ -59,12 +59,21 @@
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
       var runs = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(runs)) runs = [];
+      runs = runs.filter(function(r) { return r && r.run_id; });
       if (runs.length === 0) {
         listEl.innerHTML = '';
         listEl.appendChild(emptyEl);
         emptyEl.style.display = 'block';
         return;
       }
+      runs.sort(function(a, b) {
+        var aTime = new Date(a.ts || 0).getTime();
+        var bTime = new Date(b.ts || 0).getTime();
+        if (Number.isNaN(aTime)) aTime = 0;
+        if (Number.isNaN(bTime)) bTime = 0;
+        return bTime - aTime;
+      });
       emptyEl.style.display = 'none';
       listEl.innerHTML = '';
       runs.slice(0, 10).forEach(function(r) {

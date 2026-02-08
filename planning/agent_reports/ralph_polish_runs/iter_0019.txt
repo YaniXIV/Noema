@@ -7,7 +7,7 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3c8d-9ed1-7ff3-9601-c74886d3c0ce
+session id: 019c3ed5-b6fe-7090-bc6e-84cc29662ae4
 --------
 user
 You are an autonomous coding agent polishing the Noema repository.
@@ -18,8 +18,9 @@ Hard rules:
 - Keep changes small: max 3 files per iteration.
 - No cosmetic-only edits.
 - No new dependencies unless absolutely necessary.
+- keep all the same ui functionality, the end user should be able to do the same stuff but the experiance and design should be better.
 
-Goal: continuously improve production quality.
+Goal: continuously improve production quality. continuously improve front end quality and polish.
 
 Iteration:
 1) Run: cd backend && go test ./...
@@ -29,7 +30,7 @@ Iteration:
 Pick the highest-value improvement:
 A) Reliability/correctness: validation, error handling, run persistence, verify robustness
 B) Tests: add/strengthen tests for the change you made
-C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+C) upgrading the user interface so that it looks better.
 D) Maintainability: reduce duplication with tiny refactors
 E) UX: wizard/results/verify clarity (small, safe changes)
 F) Docs: README/DEPLOYMENT polish
@@ -41,336 +42,571 @@ Finish with:
 mcp startup: no servers
 
 thinking
-**Running Go tests**
+**Planning test execution**
+
+I'm preparing to run Go tests using exec_command without additional setup or skills required.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 167ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 189ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
 ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
 
 thinking
-**Targeting reliability improvements**
+**Planning targeted repo inspection**
 
-Tests are passing, so I'll focus on improving reliability in evaluation by searching for TODO comments to identify key areas for a meaningful fix within three files.
+Tests are passing, so I'll inspect the repo with ripgrep to identify up to three impactful files—preferably frontend-related—for meaningful improvements beyond just cosmetic changes.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME|BUG"' in /Users/yani/Noema/backend exited 1 in 52ms:
-
-
-thinking
-**Exploring evaluation and verification internals**
-
-I'm focusing on internal/evaluate to understand error handling and validation opportunities, especially for cases when eval_output is missing, to consider enhancing verify with better validation or gemini integration checks.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal' in /Users/yani/Noema/backend succeeded in 52ms:
-auth
-config
-crypto
-evaluate
-gemini
-session
-verify
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
+cmd
+data
+go.mod
+go.sum
+internal
+main
 web
-zk
 
 thinking
-**Inspecting input validation**
+**Locating frontend files**
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/evaluate.go" in /Users/yani/Noema/backend exited 1 in 52ms:
-sed: internal/evaluate/evaluate.go: No such file or directory
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web' in /Users/yani/Noema/backend succeeded in 52ms:
+static
+templates
 
 thinking
-**Planning file listing**
+**Reviewing templates**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg --files internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
-internal/evaluate/prompt.go
-internal/evaluate/parse.go
-internal/evaluate/output.go
-internal/evaluate/handler_test.go
-internal/evaluate/schema.go
-internal/evaluate/dataset.go
-internal/evaluate/storage.go
-internal/evaluate/images.go
-internal/evaluate/handler_integration_test.go
-internal/evaluate/cache.go
-internal/evaluate/commitment.go
-internal/evaluate/policy.go
-internal/evaluate/spec.go
-internal/evaluate/gemini_eval.go
-internal/evaluate/handler.go
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/templates' in /Users/yani/Noema/backend succeeded in 52ms:
+app.html
+app_new.html
+app_results.html
+index.html
+partial_header_app.html
+partial_header_public.html
+partial_header_upload.html
+partial_orb.html
+upload.html
+verify.html
+verify_results.html
 
 thinking
-**Planning nil eval output handling**
+**Reviewing UI-related CSS for improvements**
 
-I'm considering adding handling for cases where evaluation output is nil, starting by opening the relevant handler for this scenario.
+I'm exploring the CSS files under web/static to identify relevant styles, focusing on the app_new area as a potential place for UI improvements.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/static' in /Users/yani/Noema/backend succeeded in 51ms:
+app.js
+constraints.js
+results.js
+styles.css
+upload.js
+verify.js
+wizard.js
 
-import (
-	"encoding/json"
-	"log"
-	"mime/multipart"
-	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
-	"time"
+thinking
+**Considering UI style improvements**
 
-	"noema/internal/config"
-	"noema/internal/zk"
-
-	"github.com/gin-gonic/gin"
-)
-
-// EvaluateResponse is the JSON response for POST /api/evaluate.
+I'm planning small style enhancements focused on better UX without losing functionality, possibly adding a loading state and improving form accessibility. Next, I'll review the styles to identify specific refinements.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
-	if err != nil {
-		return EvalOutput{}, err
-	}
-	if err := validateEvalOutput(out, enabled); err != nil {
-		return EvalOutput{}, err
-	}
-	return out, nil
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap');
+
+:root {
+  --bg: #05060a;
+  --bg-card: rgba(9, 12, 18, 0.9);
+  --text: #f4f6fb;
+  --text-muted: #9aa3b2;
+  --accent: #45d4ff;
+  --accent-strong: #2c7bff;
+  --accent-glow: rgba(69, 212, 255, 0.35);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(69, 212, 255, 0.4);
+  --error: #f87171;
+  --success: #22c55e;
+  --warning: #fbbf24;
+  --shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
 }
 
-func stubEvalOutput(enabled map[string]ConstraintRule) EvalOutput {
-	out := EvalOutput{
-		SchemaVersion: 1,
-		Constraints:   make([]EvalConstraintResult, 0, len(enabled)),
-		MaxSeverity:   0,
-	}
-	for id := range enabled {
-		out.Constraints = append(out.Constraints, EvalConstraintResult{
-			ID:        id,
-			Severity:  0,
-			Rationale: "stub",
-
-thinking
-**Considering evaluation output handling**
-
-I'm reviewing parseEvalOutputOptional to see if it should handle cases where eval_output is present but enabled constraints are empty and will check resolveEvalOutput next for related logic.
+*,
+*::before,
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/gemini_eval.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"context"
-	"log"
-	"mime/multipart"
-	"time"
-
-	"noema/internal/config"
-	"noema/internal/gemini"
-)
-
-const geminiEvalTimeout = 45 * time.Second
-
-func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
-	if form != nil && len(form.Value["eval_output"]) > 0 && form.Value["eval_output"][0] != "" {
-		raw := form.Value["eval_output"][0]
-		out, err := parseEvalOutput(raw)
-		if err != nil {
-			return EvalOutput{}, err
-
-thinking
-**Evaluating redundancy and reliability**
-
-Noted that resolveEvalOutput duplicates parsing and validation done by parseEvalOutputOptional; considering if this could be consolidated for maintainability or reliability improvements. Planning to inspect sampleDataset usage to check limit handling and zero cases.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io"
-	"mime/multipart"
-)
-
-type Dataset struct {
-	Items []DatasetItem `json:"items"`
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '200,400p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent-glow);
+  animation: pulse 1.2s ease-in-out infinite;
 }
 
-type DatasetItem struct {
-	ID       string         `json:"id"`
-	Text     string         `json:"text"`
-	Metadata map[string]any `json:"metadata,omitempty"`
-	ImageRef string         `json:"image_ref,omitempty"`
+@keyframes pulse {
+  0% { transform: scale(0.7); opacity: 0.5; }
+  50% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(0.7); opacity: 0.5; }
 }
 
-thinking
-**Planning parseUploads improvement**
+.card-kicker {
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  letter-spacing: 0.2em;
+  color: rgba(255, 255, 255, 0.5);
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/images.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '400,800p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
 
-import (
-	"fmt"
-	"io"
-	"mime"
-	"mime/multipart"
-	"path/filepath"
-	"strings"
-)
+.recent-run-link {
+  color: var(--text);
+  text-decoration: none;
+}
+.recent-run-link:hover { color: var(--accent); }
 
-type ImageInfo struct {
-	Filename string
-	MIMEType string
-	Data     []byte
+.recent-run-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
 }
 
-func readImages(files []*multipart.FileHeader) ([]ImageInfo, error) {
-	out := make([]ImageInfo, 0, len(files))
-	for _, fh := range files {
+.recent-run-name {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.recent-run-meta {
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '800,1200p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+
+.switch input:checked + .switch-track::after {
+  transform: translateX(20px);
+}
+
+.wizard-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1.2rem;
+}
+
+.wizard-nav {
+  margin-top: 1.5rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.running-state {
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1200,1600p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+  background: rgba(0, 0, 0, 0.2);
+  box-shadow: inset 3px 0 0 transparent;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.2s ease;
+}
+
+.verify-row:hover:not([data-verify="ok"]):not([data-verify="fail"]):not([data-verify="pending"]) {
+  border-color: rgba(69, 212, 255, 0.3);
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.verify-row[data-verify="ok"] {
+  border-color: rgba(34, 197, 94, 0.45);
+  background: rgba(34, 197, 94, 0.06);
+  box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.7);
+}
+
+.verify-row[data-verify="fail"] {
+  border-color: rgba(248, 113, 113, 0.5);
+  background: rgba(248, 113, 113, 0.06);
+  box-shadow: inset 3px 0 0 rgba(248, 113, 113, 0.75);
 
 thinking
-**Fixing file descriptor leak by closing files promptly**
+**Reviewing UI improvement options**
 
-The readImages function defers closing files inside a loop, risking too many open files; I'll change it to explicitly close each file after reading, handling close errors properly without adding dependencies.
+I'm evaluating potential UI improvements like adding skip links, enhancing upload dragover feedback, sticky headers, or copy buttons for run IDs, and planning to check the results template for what’s already present.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/templates/app_results.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "app_results"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Results</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body data-run-id="{{.RunID}}">
+  {{template "header_app" .}}
+
+  <main class="main main-results">
+    {{template "orb" .}}
+    <div class="card results-card">
+      <div class="results-header">
+        <div>
+          <h1 class="card-title">Evaluation results</h1>
+          <div class="results-runline">
+            <p class="text-muted" id="results-run-id">Run ID: <span class="results-run-id">{{.RunID}}</span></p>
+
+thinking
+**Considering accessibility improvements**
+
+I'm evaluating adding aria-live for error messages and copy feedback in the results.js to enhance keyboard accessibility and user experience.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' web/static/results.js" in /Users/yani/Noema/backend succeeded in 52ms:
+(function() {
+  var runId = document.body.getAttribute('data-run-id') || document.getElementById('results-run-id').textContent.replace('Run ID: ', '').trim();
+  var key = 'noema_run_' + runId;
+  var data;
+  try {
+    var raw = localStorage.getItem(key);
+    data = raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    data = null;
+  }
+
+  function copyText(text, button) {
+    if (!text) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function() {
+        if (button) showCopied(button);
+      });
+    } else {
+      var temp = document.createElement('textarea');
+      temp.value = text;
+
+thinking
+**Reviewing UI improvement ideas**
+
+I'm considering adding inline "copy run ID" features or showing selected file info on the upload page and will check upload.js to see what's implemented already.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' web/static/upload.js" in /Users/yani/Noema/backend succeeded in 52ms:
+(function() {
+  var input = document.getElementById('file-input');
+  var zone = document.getElementById('drop-zone');
+  var zoneText = document.getElementById('zone-text');
+  var submitBtn = document.getElementById('submit-btn');
+  var details = document.getElementById('upload-details');
+  var fileName = document.getElementById('upload-file-name');
+  var fileSize = document.getElementById('upload-file-size');
+  var clearBtn = document.getElementById('clear-file');
+  var clientError = document.getElementById('upload-client-error');
+  var maxBytes = parseInt(input.dataset.maxBytes || '', 10);
+  var maxBytesLabel = input.dataset.maxBytesLabel || '';
+
+  function formatBytes(bytes) {
+    if (!bytes && bytes !== 0) return '';
+    if (bytes < 1024) return bytes + ' B';
+    var kb = bytes / 1024;
+    if (kb < 1024) return kb.toFixed(1) + ' KB';
+    var mb = kb / 1024;
+    if (mb < 1024) return mb.toFixed(1) + ' MB';
+
+thinking
+**Considering ARIA and submit improvements**
+
+I'm planning to add ARIA live regions to surface client errors dynamically and disable the submit button until the form is valid to improve UX. Also investigating adding a "copy run id" feature with clipboard support in the verify list for reliability and user convenience.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' web/static/verify.js" in /Users/yani/Noema/backend succeeded in 52ms:
+(function() {
+  var STORAGE_KEY = 'noema_recent_runs';
+  var MAX_RECENT = 20;
+  var listEl = document.getElementById('verify-list');
+  var emptyEl = document.getElementById('verify-empty');
+  var emptyTitleEl = emptyEl ? emptyEl.querySelector('.empty-state-title') : null;
+  var emptyTextEl = emptyEl ? emptyEl.querySelector('.empty-state-text') : null;
+  var emptyTitleDefault = emptyTitleEl ? emptyTitleEl.textContent : '';
+  var emptyTextDefault = emptyTextEl ? emptyTextEl.textContent : '';
+  var filterInput = document.getElementById('verify-filter');
+  var countEl = document.getElementById('verify-count');
+  var progressEl = document.getElementById('verify-progress');
+  var verifyAllBtn = document.getElementById('verify-all');
+  var clearBtn = document.getElementById('verify-clear');
+
+  function loadRecentRuns() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      var runs = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(runs)) return [];
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '240,480p' web/static/verify.js" in /Users/yani/Noema/backend succeeded in 52ms:
+
+  function render() {
+    var runs = loadRecentRuns();
+    var q = (filterInput.value || '').trim().toLowerCase();
+    var filtered = runs.filter(function(r) {
+      if (!q) return true;
+      var runId = (r.run_id || '').toLowerCase();
+      var runName = (r.name || '').toLowerCase();
+      return runId.indexOf(q) !== -1 || runName.indexOf(q) !== -1;
+    });
+
+    listEl.innerHTML = '';
+    if (filtered.length === 0) {
+      if (q && emptyTitleEl && emptyTextEl) {
+        emptyTitleEl.textContent = 'No matches';
+        emptyTextEl.textContent = 'Try a different search or clear the filter.';
+      } else if (emptyTitleEl && emptyTextEl) {
+        emptyTitleEl.textContent = emptyTitleDefault;
+        emptyTextEl.textContent = emptyTextDefault;
+      }
+
+thinking
+**Considering UI improvements**
+
+Thinking about adding a minimal "copy run id" button and reviewing app.js for potential enhancements next.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' web/static/app.js" in /Users/yani/Noema/backend succeeded in 52ms:
+(function() {
+  var STORAGE_KEY = 'noema_recent_runs';
+  var listEl = document.getElementById('recent-runs-list');
+  var emptyEl = document.getElementById('recent-runs-empty');
+
+  function statusClass(status) {
+    if (!status) return 'status-pill-unknown';
+    var normalized = String(status).toUpperCase();
+    if (normalized === 'PASS') return 'status-pill-pass';
+    if (normalized === 'FAIL') return 'status-pill-fail';
+    return 'status-pill-unknown';
+  }
+
+  function formatTimestamp(ts) {
+    if (!ts) return null;
+    var date = new Date(ts);
+    if (Number.isNaN(date.getTime())) return null;
+    var diffMs = Math.abs(Date.now() - date.getTime());
+    var minutes = Math.round(diffMs / 60000);
+    var label = '';
+
+thinking
+**Reviewing empty state design**
+
+I'm checking the template to see how the empty state is currently handled and considering improvements for better user experience.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/templates/app.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "app"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Dashboard</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_app" .}}
+
+  <main class="main main-dashboard">
+    {{template "orb" .}}
+    <div class="dashboard-content">
+      <section class="card dashboard-hero">
+        <div class="card-kicker">Dashboard</div>
+        <h1 class="card-title">Evaluations</h1>
+        <p class="card-text">Run policy evaluations on your datasets and publish verifiable results.</p>
+        <div class="form-actions">
+
+thinking
+**Identifying reliability and UX improvements**
+
+Noticed localStorage parsing in app.js and verify.js lacks handling for malformed entries, affecting reliability. Also, app.js doesn't sort runs by timestamp unlike verify.js, so adding sorting there would improve UX; will check run_id storage in wizard.js next.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' web/static/wizard.js" in /Users/yani/Noema/backend succeeded in 51ms:
+(function() {
+  var PRESET_CONSTRAINTS = window.NOEMA_PRESET_CONSTRAINTS || [];
+  var currentStep = 1;
+  var maxStep = 3;
+  var customConstraintCount = 0;
+  var maxCustomConstraints = 5;
+  var datasetSource = 'file';
+  var MAX_DATASET_BYTES = 50 * 1024 * 1024;
+  var MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+  var MAX_IMAGE_COUNT = 10;
+
+  function stepEl(n) { return document.querySelector('.stepper-step[data-step="' + n + '"]'); }
+  function paneEl(n) { return document.getElementById('pane-' + n); }
+
+  function titleCase(str) {
+    return str
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, function(m) { return m.toUpperCase(); });
+  }
+
+
+
+thinking
+**Improving recent runs sorting and robustness**
+
+Planning to enhance the dashboard by filtering out invalid recent run entries without run_id, sorting by timestamp descending, and showing a 'no recent runs' label when appropriate—all within app.js to keep the scope small and meaningful.
+thinking
+**Implementing recent runs filtering and sorting with date parsing**
+
+Planning to update app.js to parse recent runs safely, filter invalid entries, and sort by timestamp parsed as Dates for correctness, while handling missing or malformed data gracefully before rerunning tests.
 file update
-M /Users/yani/Noema/backend/internal/evaluate/images.go
-@@ -24,4 +24,4 @@
- 		}
--		defer src.Close()
- 		data, err := io.ReadAll(src)
-+		closeErr := src.Close()
- 		if err != nil {
-@@ -29,2 +29,5 @@
- 		}
-+		if closeErr != nil {
-+			return nil, fmt.Errorf("could not close image %q: %w", fh.Filename, closeErr)
-+		}
- 		mimeType := strings.TrimSpace(fh.Header.Get("Content-Type"))
-apply_patch(auto_approved=true) exited 0 in 31ms:
+M /Users/yani/Noema/backend/web/static/app.js
+@@ -61,2 +61,4 @@
+       var runs = raw ? JSON.parse(raw) : [];
++      if (!Array.isArray(runs)) runs = [];
++      runs = runs.filter(function(r) { return r && r.run_id; });
+       if (runs.length === 0) {
+@@ -67,2 +69,9 @@
+       }
++      runs.sort(function(a, b) {
++        var aTime = new Date(a.ts || 0).getTime();
++        var bTime = new Date(b.ts || 0).getTime();
++        if (Number.isNaN(aTime)) aTime = 0;
++        if (Number.isNaN(bTime)) bTime = 0;
++        return bTime - aTime;
++      });
+       emptyEl.style.display = 'none';
+apply_patch(auto_approved=true) exited 0 in 27ms:
 Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/images.go
+M /Users/yani/Noema/backend/web/static/app.js
 file update:
-diff --git a/backend/internal/evaluate/images.go b/backend/internal/evaluate/images.go
-index d8453a617581cf2e70eab701d6ea90370d9c0ade..1c9706fdebf109f60bf25c120327a0b407bba25b
---- a/backend/internal/evaluate/images.go
-+++ b/backend/internal/evaluate/images.go
-@@ -22,11 +22,14 @@
- 		if err != nil {
- 			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
- 		}
--		defer src.Close()
- 		data, err := io.ReadAll(src)
-+		closeErr := src.Close()
- 		if err != nil {
- 			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
- 		}
-+		if closeErr != nil {
-+			return nil, fmt.Errorf("could not close image %q: %w", fh.Filename, closeErr)
-+		}
- 		mimeType := strings.TrimSpace(fh.Header.Get("Content-Type"))
- 		if mimeType == "" {
- 			mimeType = mime.TypeByExtension(strings.ToLower(filepath.Ext(fh.Filename)))
+diff --git a/backend/web/static/app.js b/backend/web/static/app.js
+index 54c4821b737e476ab8e49c9f561e71612dddae1d..04f4b0323a44ada872b25fa46af2ce4effa65e2a
+--- a/backend/web/static/app.js
++++ b/backend/web/static/app.js
+@@ -59,12 +59,21 @@
+     try {
+       var raw = localStorage.getItem(STORAGE_KEY);
+       var runs = raw ? JSON.parse(raw) : [];
++      if (!Array.isArray(runs)) runs = [];
++      runs = runs.filter(function(r) { return r && r.run_id; });
+       if (runs.length === 0) {
+         listEl.innerHTML = '';
+         listEl.appendChild(emptyEl);
+         emptyEl.style.display = 'block';
+         return;
+       }
++      runs.sort(function(a, b) {
++        var aTime = new Date(a.ts || 0).getTime();
++        var bTime = new Date(b.ts || 0).getTime();
++        if (Number.isNaN(aTime)) aTime = 0;
++        if (Number.isNaN(bTime)) bTime = 0;
++        return bTime - aTime;
++      });
+       emptyEl.style.display = 'none';
+       listEl.innerHTML = '';
+       runs.slice(0, 10).forEach(function(r) {
 
 file update:
-diff --git a/backend/internal/evaluate/images.go b/backend/internal/evaluate/images.go
-index d8453a617581cf2e70eab701d6ea90370d9c0ade..1c9706fdebf109f60bf25c120327a0b407bba25b
---- a/backend/internal/evaluate/images.go
-+++ b/backend/internal/evaluate/images.go
-@@ -22,11 +22,14 @@
- 		if err != nil {
- 			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
- 		}
--		defer src.Close()
- 		data, err := io.ReadAll(src)
-+		closeErr := src.Close()
- 		if err != nil {
- 			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
- 		}
-+		if closeErr != nil {
-+			return nil, fmt.Errorf("could not close image %q: %w", fh.Filename, closeErr)
-+		}
- 		mimeType := strings.TrimSpace(fh.Header.Get("Content-Type"))
- 		if mimeType == "" {
- 			mimeType = mime.TypeByExtension(strings.ToLower(filepath.Ext(fh.Filename)))
+diff --git a/backend/web/static/app.js b/backend/web/static/app.js
+index 54c4821b737e476ab8e49c9f561e71612dddae1d..04f4b0323a44ada872b25fa46af2ce4effa65e2a
+--- a/backend/web/static/app.js
++++ b/backend/web/static/app.js
+@@ -59,12 +59,21 @@
+     try {
+       var raw = localStorage.getItem(STORAGE_KEY);
+       var runs = raw ? JSON.parse(raw) : [];
++      if (!Array.isArray(runs)) runs = [];
++      runs = runs.filter(function(r) { return r && r.run_id; });
+       if (runs.length === 0) {
+         listEl.innerHTML = '';
+         listEl.appendChild(emptyEl);
+         emptyEl.style.display = 'block';
+         return;
+       }
++      runs.sort(function(a, b) {
++        var aTime = new Date(a.ts || 0).getTime();
++        var bTime = new Date(b.ts || 0).getTime();
++        if (Number.isNaN(aTime)) aTime = 0;
++        if (Number.isNaN(bTime)) bTime = 0;
++        return bTime - aTime;
++      });
+       emptyEl.style.display = 'none';
+       listEl.innerHTML = '';
+       runs.slice(0, 10).forEach(function(r) {
 
 
 thinking
-**Running all Go tests**
+**Running comprehensive Go tests**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 866ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 276ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	0.027s
+ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
 file update:
-diff --git a/backend/internal/evaluate/images.go b/backend/internal/evaluate/images.go
-index d8453a617581cf2e70eab701d6ea90370d9c0ade..1c9706fdebf109f60bf25c120327a0b407bba25b
---- a/backend/internal/evaluate/images.go
-+++ b/backend/internal/evaluate/images.go
-@@ -22,11 +22,14 @@
- 		if err != nil {
- 			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
- 		}
--		defer src.Close()
- 		data, err := io.ReadAll(src)
-+		closeErr := src.Close()
- 		if err != nil {
- 			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
- 		}
-+		if closeErr != nil {
-+			return nil, fmt.Errorf("could not close image %q: %w", fh.Filename, closeErr)
-+		}
- 		mimeType := strings.TrimSpace(fh.Header.Get("Content-Type"))
- 		if mimeType == "" {
- 			mimeType = mime.TypeByExtension(strings.ToLower(filepath.Ext(fh.Filename)))
+diff --git a/backend/web/static/app.js b/backend/web/static/app.js
+index 54c4821b737e476ab8e49c9f561e71612dddae1d..04f4b0323a44ada872b25fa46af2ce4effa65e2a
+--- a/backend/web/static/app.js
++++ b/backend/web/static/app.js
+@@ -59,12 +59,21 @@
+     try {
+       var raw = localStorage.getItem(STORAGE_KEY);
+       var runs = raw ? JSON.parse(raw) : [];
++      if (!Array.isArray(runs)) runs = [];
++      runs = runs.filter(function(r) { return r && r.run_id; });
+       if (runs.length === 0) {
+         listEl.innerHTML = '';
+         listEl.appendChild(emptyEl);
+         emptyEl.style.display = 'block';
+         return;
+       }
++      runs.sort(function(a, b) {
++        var aTime = new Date(a.ts || 0).getTime();
++        var bTime = new Date(b.ts || 0).getTime();
++        if (Number.isNaN(aTime)) aTime = 0;
++        if (Number.isNaN(bTime)) bTime = 0;
++        return bTime - aTime;
++      });
+       emptyEl.style.display = 'none';
+       listEl.innerHTML = '';
+       runs.slice(0, 10).forEach(function(r) {
 
 codex
-What you changed (short)
-- Closed image file handles per file read to avoid fd buildup during `readImages`. `internal/evaluate/images.go`
+What I changed (short)
+- Sorted recent runs by timestamp (newest first) and filtered out malformed entries so the dashboard list is stable even with bad localStorage data. (`web/static/app.js`)
 
 Tests run
 - `go test ./...`
 
-If you want a next improvement, I can look for other small reliability wins or add a targeted test around image handling.
+If you want another iteration, tell me which improvement area to prioritize next (reliability/tests/UI/maintainability/UX/docs/perf).
 file update:
-diff --git a/backend/internal/evaluate/images.go b/backend/internal/evaluate/images.go
-index d8453a617581cf2e70eab701d6ea90370d9c0ade..1c9706fdebf109f60bf25c120327a0b407bba25b
---- a/backend/internal/evaluate/images.go
-+++ b/backend/internal/evaluate/images.go
-@@ -22,11 +22,14 @@
- 		if err != nil {
- 			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
- 		}
--		defer src.Close()
- 		data, err := io.ReadAll(src)
-+		closeErr := src.Close()
- 		if err != nil {
- 			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
- 		}
-+		if closeErr != nil {
-+			return nil, fmt.Errorf("could not close image %q: %w", fh.Filename, closeErr)
-+		}
- 		mimeType := strings.TrimSpace(fh.Header.Get("Content-Type"))
- 		if mimeType == "" {
- 			mimeType = mime.TypeByExtension(strings.ToLower(filepath.Ext(fh.Filename)))
+diff --git a/backend/web/static/app.js b/backend/web/static/app.js
+index 54c4821b737e476ab8e49c9f561e71612dddae1d..04f4b0323a44ada872b25fa46af2ce4effa65e2a
+--- a/backend/web/static/app.js
++++ b/backend/web/static/app.js
+@@ -59,12 +59,21 @@
+     try {
+       var raw = localStorage.getItem(STORAGE_KEY);
+       var runs = raw ? JSON.parse(raw) : [];
++      if (!Array.isArray(runs)) runs = [];
++      runs = runs.filter(function(r) { return r && r.run_id; });
+       if (runs.length === 0) {
+         listEl.innerHTML = '';
+         listEl.appendChild(emptyEl);
+         emptyEl.style.display = 'block';
+         return;
+       }
++      runs.sort(function(a, b) {
++        var aTime = new Date(a.ts || 0).getTime();
++        var bTime = new Date(b.ts || 0).getTime();
++        if (Number.isNaN(aTime)) aTime = 0;
++        if (Number.isNaN(bTime)) bTime = 0;
++        return bTime - aTime;
++      });
+       emptyEl.style.display = 'none';
+       listEl.innerHTML = '';
+       runs.slice(0, 10).forEach(function(r) {
 
 tokens used
-8,095
-What you changed (short)
-- Closed image file handles per file read to avoid fd buildup during `readImages`. `internal/evaluate/images.go`
+45,588
+What I changed (short)
+- Sorted recent runs by timestamp (newest first) and filtered out malformed entries so the dashboard list is stable even with bad localStorage data. (`web/static/app.js`)
 
 Tests run
 - `go test ./...`
 
-If you want a next improvement, I can look for other small reliability wins or add a targeted test around image handling.
+If you want another iteration, tell me which improvement area to prioritize next (reliability/tests/UI/maintainability/UX/docs/perf).
