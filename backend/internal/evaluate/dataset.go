@@ -55,8 +55,12 @@ func readDatasetFile(fh *multipart.FileHeader) ([]byte, Dataset, error) {
 	}
 	seenIDs := make(map[string]struct{}, len(ds.Items))
 	for i, item := range ds.Items {
-		if strings.TrimSpace(item.ID) == "" {
+		trimmedID := strings.TrimSpace(item.ID)
+		if trimmedID == "" {
 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
+		}
+		if trimmedID != item.ID {
+			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must not include leading/trailing whitespace", i)
 		}
 		if strings.TrimSpace(item.Text) == "" {
 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)

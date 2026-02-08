@@ -1,0 +1,789 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3ca4-3254-7623-84d1-494775861da6
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Confirming test strategy**
+
+Tests need to run using `go test` executed via command line rather than any skill or plugin integration.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 98ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Inspecting code for TODOs**
+
+I'm searching the repo for TODO or FIXME comments to identify meaningful improvements related to reliability or maintainability.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"TODO|FIXME|panic\\(\"" in /Users/yani/Noema/backend exited 1 in 52ms:
+
+
+thinking
+**Checking code evaluation package**
+
+I'm inspecting the evaluation package to see if adding validation in handlers can improve the current no-match issue from the search results.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
+cmd
+data
+go.mod
+go.sum
+internal
+main
+server
+web
+
+thinking
+**Exploring error handling in internal utilities**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"Errorf|Wrap|errors\\.\" internal" in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/parse.go:16:		return Spec{}, fmt.Errorf("missing field: spec")
+internal/evaluate/parse.go:19:		return Spec{}, fmt.Errorf("only one spec value allowed")
+internal/evaluate/parse.go:25:		return Spec{}, fmt.Errorf("invalid spec JSON")
+internal/evaluate/parse.go:28:		return Spec{}, fmt.Errorf("invalid spec JSON")
+internal/evaluate/parse.go:35:		return fmt.Errorf("unsupported schema_version")
+internal/evaluate/parse.go:41:			return fmt.Errorf("constraint id must be non-empty")
+internal/evaluate/parse.go:44:			return fmt.Errorf("constraint id must not include leading/trailing whitespace")
+internal/evaluate/parse.go:47:			return fmt.Errorf("duplicate constraint id: %s", id)
+internal/evaluate/parse.go:51:			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
+internal/evaluate/parse.go:57:			return fmt.Errorf("custom_constraint id must be non-empty")
+internal/evaluate/parse.go:60:			return fmt.Errorf("custom_constraint id must not include leading/trailing whitespace")
+internal/evaluate/parse.go:63:			return fmt.Errorf("duplicate constraint id: %s", id)
+internal/evaluate/parse.go:67:			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
+internal/evaluate/parse.go:76:		return nil, nil, fmt.Errorf("missing required file: dataset")
+internal/evaluate/parse.go:79:		return nil, nil, fmt.Errorf("only one dataset file allowed")
+internal/evaluate/parse.go:83:		return nil, nil, fmt.Errorf("dataset exceeds limit of %s", formatBytes(int64(config.MaxDatasetBytes)))
+internal/evaluate/parse.go:87:		return nil, nil, fmt.Errorf("maximum %d images allowed", config.MaxImages)
+internal/evaluate/parse.go:92:			return nil, nil, fmt.Errorf("image filenames must be unique")
+internal/evaluate/parse.go:96:			return nil, nil, fmt.Errorf("each image must be at most %s", formatBytes(int64(config.MaxImageBytes)))
+internal/evaluate/parse.go:113:				return fmt.Errorf("dataset.items[%d].image_ref provided but no images uploaded", i)
+
+thinking
+**Considering stricter validations**
+
+I'm reviewing adding stricter duplicate image name checks in evaluate/parse and checking if httputil's body detection enforces maxBytes for multipart uploads.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/httputil/body.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package httputil
+
+import (
+	"errors"
+	"net/http"
+	"strings"
+)
+
+// IsBodyTooLarge reports whether the error indicates the request body exceeded MaxBytesReader.
+func IsBodyTooLarge(err error) bool {
+	if err == nil {
+		return false
+	}
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "request body too large") ||
+		strings.Contains(msg, "multipart: message too large")
+
+thinking
+**Considering robustness improvements**
+
+I'm thinking about handling case variations in error messages like "http: request body too large" and ensuring reliability in evaluation and storage, possibly by adding an fsync on the directory after renaming.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math/big"
+	"mime/multipart"
+	"os"
+	"path/filepath"
+	"strconv"
+	"sync/atomic"
+	"time"
+)
+
+var runIDCounter uint64
+
+func genRunID() string {
+	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
+
+thinking
+**Considering error handling for directory sync**
+
+I'm weighing whether to add directory sync error reporting in the atomic write process but leaning to keep it best-effort to avoid breaking on certain filesystems; next I'll review evaluate/handler.go for related context.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '260,560p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+		return EvalOutput{}, false, nil
+	}
+	if len(form.Value["eval_output"]) > 1 {
+		return EvalOutput{}, true, fmt.Errorf("only one eval_output value allowed")
+	}
+	raw := strings.TrimSpace(form.Value["eval_output"][0])
+	if raw == "" {
+		return EvalOutput{}, false, nil
+	}
+	out, err := parseEvalOutput(raw)
+	if err != nil {
+		return EvalOutput{}, true, err
+	}
+	if err := validateEvalOutput(out, enabled); err != nil {
+		return EvalOutput{}, true, err
+	}
+	return out, true, nil
+}
+
+thinking
+**Planning validation and error handling**
+
+I'm considering adding validation for dataset size and error handling when MultipartForm is nil, starting by reviewing parse.go where parseSpec is used to confirm existing safeguards and determine necessary improvements.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"strings"
+
+	"noema/internal/config"
+)
+
+func parseSpec(form *multipart.Form) (Spec, error) {
+	specStrs := form.Value["spec"]
+	if len(specStrs) == 0 || specStrs[0] == "" {
+		return Spec{}, fmt.Errorf("missing field: spec")
+	}
+	if len(specStrs) > 1 {
+		return Spec{}, fmt.Errorf("only one spec value allowed")
+	}
+
+thinking
+**Considering parse and handler improvements**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/verify/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package verify
+
+import (
+	"encoding/base64"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+// VerifyRequest is the JSON body for POST /api/verify.
+type VerifyRequest struct {
+	RunID           string `json:"run_id"`
+	ProofB64        string `json:"proof_b64"`
+	PublicInputsB64 string `json:"public_inputs_b64"`
+
+thinking
+**Inspecting resolve evaluation output**
+
+I'm checking the resolve evaluation output to see if the body-too-large error handling can be improved or incorporated there more effectively.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/output.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+)
+
+type EvalConstraintResult struct {
+	ID        string `json:"id"`
+	Severity  int    `json:"severity"`
+	Rationale string `json:"rationale"`
+}
+
+type EvalOutput struct {
+	SchemaVersion int                    `json:"schema_version"`
+	Constraints   []EvalConstraintResult `json:"constraints"`
+	MaxSeverity   int                    `json:"max_severity"`
+	Confidence    *float64               `json:"confidence,omitempty"`
+
+thinking
+**Assessing error handling and constraint checks**
+
+Considering improving error detail specificity but deciding it's likely sufficient; also weighing if constraint sorting checks are needed but leaning against it. Planning to review the internal gemini integration for relevant details next.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/gemini/gemini.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package gemini
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"strings"
+
+	"google.golang.org/genai"
+)
+
+const defaultModel = "gemini-3-pro"
+
+type ImageInput struct {
+	MIMEType string
+	Data     []byte
+}
+
+type EvalRequest struct {
+
+thinking
+**Reviewing validation and test coverage**
+
+I'm considering adding validation to enforce at least one constraint in specs and exploring gaps in testing, possibly around pruning runs or byte formatting, while checking policy-related constraint handling.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/policy.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import "fmt"
+
+type ConstraintRule struct {
+	ID                 string
+	AllowedMaxSeverity int
+}
+
+func enabledConstraints(spec Spec) (map[string]ConstraintRule, error) {
+	out := make(map[string]ConstraintRule)
+	for _, c := range spec.Constraints {
+		if !c.Enabled {
+			continue
+		}
+		if _, exists := out[c.ID]; exists {
+			return nil, fmt.Errorf("duplicate constraint id: %s", c.ID)
+		}
+		out[c.ID] = ConstraintRule{ID: c.ID, AllowedMaxSeverity: c.AllowedMaxSeverity}
+	}
+
+thinking
+**Noting validation and error handling improvements**
+
+I observed that duplicate ID trimming aligns with spec validation, but raw IDs are used elsewhere, which is consistent due to prior whitespace checks. I’m considering enhancing error cleanup in evaluation handlers and adding detection for max bytes errors during multipart form processing. Also seeing potential edge cases in verification related to legacy tries and empty messages, with a need for tests around parsing evaluation output and validation to cover these.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
+cache.go
+commitment.go
+dataset.go
+gemini_eval.go
+handler.go
+handler_integration_test.go
+handler_test.go
+images.go
+output.go
+parse.go
+policy.go
+prompt.go
+schema.go
+spec.go
+storage.go
+
+thinking
+**Assessing multipart file handling**
+
+I'm checking multipart form limits and memory usage, noting the default 32MB limit might be fine but unsure about overlimit errors. I’m focusing on file reading in validateDatasetJSON and subsequent saveRunFiles steps to see if files are properly closed and to spot any inefficiencies or bugs.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"strings"
+)
+
+type Dataset struct {
+	Items []DatasetItem `json:"items"`
+}
+
+type DatasetItem struct {
+	ID       string         `json:"id"`
+	Text     string         `json:"text"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+	ImageRef string         `json:"image_ref,omitempty"`
+
+thinking
+**Identifying potential dataset validation improvements**
+
+Noticed trimming whitespace for ID uniqueness could improve correctness since current uniqueness check uses raw IDs, allowing near-duplicates with spaces. Also spotted metadata field handling allows unknown keys without errors, which seems intentional but worth confirming. Questioned normalization of image reference names against image filenames due to possible path inclusion but leaned against changing.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/config/config.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package config
+
+import (
+	"os"
+	"strconv"
+
+	"github.com/joho/godotenv"
+)
+
+const devCookieSecret = "dev-secret-change-in-production"
+
+// Load reads .env from the current directory and sets env vars.
+// Safe to call multiple times; existing env vars are not overwritten.
+func Load() error {
+	return godotenv.Load()
+}
+
+// JudgeKey returns the judge key used to gate protected routes.
+func JudgeKey() string {
+	return os.Getenv("JUDGE_KEY")
+
+
+thinking
+**Noticing ID whitespace bug**
+
+The dataset validation trims IDs to check emptiness but compares raw IDs for uniqueness, risking duplicates differing only by whitespace; enforcing trimmed and whitespace-free IDs for both dataset item IDs and image references will fix subtle bugs.
+thinking
+**Planning strict whitespace checks**
+
+I'll enforce no leading or trailing whitespace in dataset item IDs and image references by erroring if trimmed and raw differ, keeping text fields flexible. Next, I'll confirm and update tests to cover these new validations.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"dataset\\.items\\[\" internal/evaluate" in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/parse.go:113:				return fmt.Errorf("dataset.items[%d].image_ref provided but no images uploaded", i)
+internal/evaluate/parse.go:127:			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
+internal/evaluate/dataset.go:59:			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
+internal/evaluate/dataset.go:62:			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
+internal/evaluate/dataset.go:65:			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
+
+
+thinking
+**Planning dataset ID validation and tests**
+
+I'm preparing to add trimming and whitespace checks on dataset item IDs, enforcing required non-empty IDs without leading/trailing spaces, plus uniqueness on trimmed IDs. I'll also add a new test file to cover these validations as a meaningful improvement within the three-file limit.
+thinking
+**Adding image_ref whitespace check decision**
+
+I'm deciding to enforce image_ref whitespace validation in dataset.go only, relying on existing checks for mismatches with provided images, so I'll focus on trimming validation for IDs here and plan to add relevant tests that construct multipart file inputs as needed.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "multipart.FileHeader" internal/evaluate' in /Users/yani/Noema/backend succeeded in 51ms:
+internal/evaluate/parse.go:73:func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.FileHeader, error) {
+internal/evaluate/parse.go:105:func validateDatasetJSON(fh *multipart.FileHeader, imageFiles []*multipart.FileHeader) error {
+internal/evaluate/dataset.go:23:func readDatasetFile(fh *multipart.FileHeader) ([]byte, Dataset, error) {
+internal/evaluate/storage.go:32:func saveRunFiles(runPath string, dataset *multipart.FileHeader, images []*multipart.FileHeader) error {
+internal/evaluate/storage.go:49:func saveUpload(fh *multipart.FileHeader, dst string) error {
+internal/evaluate/images.go:18:func readImages(files []*multipart.FileHeader) ([]ImageInfo, error) {
+internal/evaluate/gemini_eval.go:15:func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
+internal/evaluate/gemini_eval.go:24:func evalWithGemini(ctx context.Context, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) EvalOutput {
+
+thinking
+**Checking handler tests for multipart writer use**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"mime/multipart"
+	"net/textproto"
+	"os"
+	"path/filepath"
+	"sort"
+	"testing"
+	"time"
+)
+
+type formFile struct {
+	field       string
+	filename    string
+	contentType string
+	content     []byte
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+		t.Fatalf("marshal eval_output: %v", err)
+	}
+
+	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw), string(raw)}}}
+	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
+		t.Fatalf("expected error for multiple eval_output values")
+	}
+}
+
+func TestParseEvalOutputOptional_IgnoresWhitespace(t *testing.T) {
+	spec := Spec{
+		SchemaVersion: 1,
+		Constraints: []Constraint{
+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+			{ID: "harm_enabling_content_risk", Enabled: true, AllowedMaxSeverity: 2},
+		},
+	}
+	enabled, err := enabledConstraints(spec)
+	if err != nil {
+		t.Fatalf("enabledConstraints error: %v", err)
+
+thinking
+**Planning whitespace ID validation**
+
+I'll enforce no leading/trailing whitespace in dataset item IDs by comparing trimmed IDs after TrimSpace in reading, returning an error if they differ, and add a focused test in handler_test.go to catch this case.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/dataset.go
+@@ -57,5 +57,9 @@
+ 	for i, item := range ds.Items {
+-		if strings.TrimSpace(item.ID) == "" {
++		trimmedID := strings.TrimSpace(item.ID)
++		if trimmedID == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
+ 		}
++		if trimmedID != item.ID {
++			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must not include leading/trailing whitespace", i)
++		}
+ 		if strings.TrimSpace(item.Text) == "" {
+apply_patch(auto_approved=true) exited 0 in 30ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/dataset.go
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 80a138ef30f3ff1025228691588fc561b88ecbb4..8c0754f0757bb53fee014845a10a1cdde371a6dc
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -55,9 +55,13 @@
+ 	}
+ 	seenIDs := make(map[string]struct{}, len(ds.Items))
+ 	for i, item := range ds.Items {
+-		if strings.TrimSpace(item.ID) == "" {
++		trimmedID := strings.TrimSpace(item.ID)
++		if trimmedID == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
+ 		}
++		if trimmedID != item.ID {
++			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must not include leading/trailing whitespace", i)
++		}
+ 		if strings.TrimSpace(item.Text) == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
+ 		}
+
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 80a138ef30f3ff1025228691588fc561b88ecbb4..8c0754f0757bb53fee014845a10a1cdde371a6dc
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -55,9 +55,13 @@
+ 	}
+ 	seenIDs := make(map[string]struct{}, len(ds.Items))
+ 	for i, item := range ds.Items {
+-		if strings.TrimSpace(item.ID) == "" {
++		trimmedID := strings.TrimSpace(item.ID)
++		if trimmedID == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
+ 		}
++		if trimmedID != item.ID {
++			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must not include leading/trailing whitespace", i)
++		}
+ 		if strings.TrimSpace(item.Text) == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
+ 		}
+
+
+thinking
+**Adding whitespace fields test**
+
+I'm updating handler_test.go by adding a new test after the existing one for whitespace fields, using a dataset with id " 1 " and text "hello" to expect a validation error with validateDatasetJSON.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
+@@ -336,2 +336,13 @@
+ 
++func TestValidateDatasetJSON_RejectsTrimmedIDs(t *testing.T) {
++	dataset := `{"items":[{"id":" 1 ","text":"hello"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++	})
++	datasetFile := form.File["dataset"][0]
++	if err := validateDatasetJSON(datasetFile, nil); err == nil {
++		t.Fatalf("expected error for trimmed dataset ids")
++	}
++}
++
+ func TestValidateDatasetJSON_RejectsEmptyFile(t *testing.T) {
+apply_patch(auto_approved=true) exited 0 in 35ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 80a138ef30f3ff1025228691588fc561b88ecbb4..8c0754f0757bb53fee014845a10a1cdde371a6dc
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -55,9 +55,13 @@
+ 	}
+ 	seenIDs := make(map[string]struct{}, len(ds.Items))
+ 	for i, item := range ds.Items {
+-		if strings.TrimSpace(item.ID) == "" {
++		trimmedID := strings.TrimSpace(item.ID)
++		if trimmedID == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
+ 		}
++		if trimmedID != item.ID {
++			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must not include leading/trailing whitespace", i)
++		}
+ 		if strings.TrimSpace(item.Text) == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
+ 		}
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index fa1c6d8c5b39702e86d3a90d7c103c6fd5947fc3..e1ebdf6eb56136a8a4119c5f742a32178fa46bc2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -334,6 +334,17 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsTrimmedIDs(t *testing.T) {
++	dataset := `{"items":[{"id":" 1 ","text":"hello"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++	})
++	datasetFile := form.File["dataset"][0]
++	if err := validateDatasetJSON(datasetFile, nil); err == nil {
++		t.Fatalf("expected error for trimmed dataset ids")
++	}
++}
++
+ func TestValidateDatasetJSON_RejectsEmptyFile(t *testing.T) {
+ 	form := buildMultipartForm(t, []formFile{
+ 		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte{}},
+
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 80a138ef30f3ff1025228691588fc561b88ecbb4..8c0754f0757bb53fee014845a10a1cdde371a6dc
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -55,9 +55,13 @@
+ 	}
+ 	seenIDs := make(map[string]struct{}, len(ds.Items))
+ 	for i, item := range ds.Items {
+-		if strings.TrimSpace(item.ID) == "" {
++		trimmedID := strings.TrimSpace(item.ID)
++		if trimmedID == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
+ 		}
++		if trimmedID != item.ID {
++			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must not include leading/trailing whitespace", i)
++		}
+ 		if strings.TrimSpace(item.Text) == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
+ 		}
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index fa1c6d8c5b39702e86d3a90d7c103c6fd5947fc3..e1ebdf6eb56136a8a4119c5f742a32178fa46bc2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -334,6 +334,17 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsTrimmedIDs(t *testing.T) {
++	dataset := `{"items":[{"id":" 1 ","text":"hello"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++	})
++	datasetFile := form.File["dataset"][0]
++	if err := validateDatasetJSON(datasetFile, nil); err == nil {
++		t.Fatalf("expected error for trimmed dataset ids")
++	}
++}
++
+ func TestValidateDatasetJSON_RejectsEmptyFile(t *testing.T) {
+ 	form := buildMultipartForm(t, []formFile{
+ 		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte{}},
+
+
+thinking
+**Running full Go tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 582ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.103s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 80a138ef30f3ff1025228691588fc561b88ecbb4..8c0754f0757bb53fee014845a10a1cdde371a6dc
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -55,9 +55,13 @@
+ 	}
+ 	seenIDs := make(map[string]struct{}, len(ds.Items))
+ 	for i, item := range ds.Items {
+-		if strings.TrimSpace(item.ID) == "" {
++		trimmedID := strings.TrimSpace(item.ID)
++		if trimmedID == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
+ 		}
++		if trimmedID != item.ID {
++			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must not include leading/trailing whitespace", i)
++		}
+ 		if strings.TrimSpace(item.Text) == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
+ 		}
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index fa1c6d8c5b39702e86d3a90d7c103c6fd5947fc3..e1ebdf6eb56136a8a4119c5f742a32178fa46bc2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -334,6 +334,17 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsTrimmedIDs(t *testing.T) {
++	dataset := `{"items":[{"id":" 1 ","text":"hello"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++	})
++	datasetFile := form.File["dataset"][0]
++	if err := validateDatasetJSON(datasetFile, nil); err == nil {
++		t.Fatalf("expected error for trimmed dataset ids")
++	}
++}
++
+ func TestValidateDatasetJSON_RejectsEmptyFile(t *testing.T) {
+ 	form := buildMultipartForm(t, []formFile{
+ 		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte{}},
+
+codex
+What you changed (short)
+- Enforced no leading/trailing whitespace for dataset item IDs and added a test to cover it. (`internal/evaluate/dataset.go`, `internal/evaluate/handler_test.go`)
+
+Tests run (must include go test ./...)
+- `go test ./...`
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 80a138ef30f3ff1025228691588fc561b88ecbb4..8c0754f0757bb53fee014845a10a1cdde371a6dc
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -55,9 +55,13 @@
+ 	}
+ 	seenIDs := make(map[string]struct{}, len(ds.Items))
+ 	for i, item := range ds.Items {
+-		if strings.TrimSpace(item.ID) == "" {
++		trimmedID := strings.TrimSpace(item.ID)
++		if trimmedID == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
+ 		}
++		if trimmedID != item.ID {
++			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must not include leading/trailing whitespace", i)
++		}
+ 		if strings.TrimSpace(item.Text) == "" {
+ 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
+ 		}
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index fa1c6d8c5b39702e86d3a90d7c103c6fd5947fc3..e1ebdf6eb56136a8a4119c5f742a32178fa46bc2
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -334,6 +334,17 @@
+ 	}
+ }
+ 
++func TestValidateDatasetJSON_RejectsTrimmedIDs(t *testing.T) {
++	dataset := `{"items":[{"id":" 1 ","text":"hello"}]}`
++	form := buildMultipartForm(t, []formFile{
++		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
++	})
++	datasetFile := form.File["dataset"][0]
++	if err := validateDatasetJSON(datasetFile, nil); err == nil {
++		t.Fatalf("expected error for trimmed dataset ids")
++	}
++}
++
+ func TestValidateDatasetJSON_RejectsEmptyFile(t *testing.T) {
+ 	form := buildMultipartForm(t, []formFile{
+ 		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte{}},
+
+tokens used
+35,989
+What you changed (short)
+- Enforced no leading/trailing whitespace for dataset item IDs and added a test to cover it. (`internal/evaluate/dataset.go`, `internal/evaluate/handler_test.go`)
+
+Tests run (must include go test ./...)
+- `go test ./...`
