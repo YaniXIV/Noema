@@ -26,7 +26,11 @@
       </div>
 
       <div class="verify-controls">
-        <input type="text" id="verify-filter" class="input" placeholder="Filter by run id">
+        <div class="form-group">
+          <label class="label" for="verify-filter">Filter runs</label>
+          <input type="text" id="verify-filter" class="input" placeholder="Filter by run id or name" aria-describedby="verify-filter-hint">
+          <p class="form-hint" id="verify-filter-hint">Matches run IDs or names saved in this browser.</p>
+        </div>
         <div class="verify-meta">
           <span class="verify-muted" id="verify-count"></span>
           <span class="verify-muted" id="verify-progress"></span>
@@ -34,7 +38,10 @@
       </div>
 
       <div class="verify-list" id="verify-list">
-        <p class="verify-muted" id="verify-empty">No proofs yet. Run an evaluation to generate a proof.</p>
+        <div class="empty-state" id="verify-empty">
+          <div class="empty-state-title">No proofs yet</div>
+          <p class="empty-state-text">Run an evaluation to generate a proof. This list only shows runs saved in this browser.</p>
+        </div>
       </div>
     </div>
   </main>

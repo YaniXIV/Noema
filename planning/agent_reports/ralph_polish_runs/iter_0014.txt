@@ -7,7 +7,7 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3c87-67db-7770-ba53-638e4d6cda30
+session id: 019c3ece-3c17-7c82-a227-c571b7f246ca
 --------
 user
 You are an autonomous coding agent polishing the Noema repository.
@@ -18,8 +18,9 @@ Hard rules:
 - Keep changes small: max 3 files per iteration.
 - No cosmetic-only edits.
 - No new dependencies unless absolutely necessary.
+- keep all the same ui functionality, the end user should be able to do the same stuff but the experiance and design should be better.
 
-Goal: continuously improve production quality.
+Goal: continuously improve production quality. continuously improve front end quality and polish.
 
 Iteration:
 1) Run: cd backend && go test ./...
@@ -29,7 +30,7 @@ Iteration:
 Pick the highest-value improvement:
 A) Reliability/correctness: validation, error handling, run persistence, verify robustness
 B) Tests: add/strengthen tests for the change you made
-C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+C) upgrading the user interface so that it looks better.
 D) Maintainability: reduce duplication with tiny refactors
 E) UX: wizard/results/verify clarity (small, safe changes)
 F) Docs: README/DEPLOYMENT polish
@@ -41,32 +42,25 @@ Finish with:
 mcp startup: no servers
 
 thinking
-**Adjusting test approach to use exec**
+**Running tests**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 185ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 190ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
 ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
 
 thinking
-**Choosing maintainability improvement**
+**Identifying frontend components**
 
-I'll inspect the code for TODOs or patterns affecting maintainability and apply one focused improvement across up to three files to keep the impact meaningful but contained.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "TODO|FIXME|BUG" -n .' in /Users/yani/Noema/backend exited 1 in 52ms:
-
-
-thinking
-**Noting no search matches**
-
-The search yielded no matches, so I'll check error handling paths in verify and evaluate and list files to identify where improvements are needed.
+I'm checking where frontend code lives to evaluate and improve it next. I'll list frontend-related directories or files to locate the relevant code.
 exec
 /bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
 cmd
@@ -75,207 +69,865 @@ go.mod
 go.sum
 internal
 main
-server
 web
 
 thinking
-**Planning session validation**
+**Identifying frontend technology**
 
-I'm inspecting the internal session logic to identify where to add validation or verification for improved robustness.
+I'm checking the project to confirm that the frontend is implemented as a web application.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"panic|TODO|len\\(|nil\" internal/session internal/verify internal/evaluate" in /Users/yani/Noema/backend succeeded in 52ms:
-internal/verify/handler_test.go:31:	if err != nil {
-internal/verify/handler_test.go:42:	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-internal/verify/handler_test.go:59:	if err != nil {
-internal/verify/handler_test.go:70:	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-internal/verify/handler_test.go:84:	if err != nil {
-internal/verify/handler_test.go:95:	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-internal/session/session_test.go:32:	last := signed[len(signed)-1]
-internal/session/session_test.go:37:	tampered := signed[:len(signed)-1] + string(replacement)
-internal/evaluate/commitment.go:8:	if len(hash) >= 16 {
-internal/evaluate/prompt.go:94:		if len(c.SeverityLevels) > 0 {
-internal/evaluate/prompt.go:102:	if len(images) > 0 {
-internal/evaluate/prompt.go:152:	keys := make([]string, 0, len(m))
-internal/session/session.go:19:	sig := hex.EncodeToString(mac.Sum(nil))
-internal/session/session.go:32:	if err != nil || len(sig) != sha256.Size {
-internal/session/session.go:36:	if err != nil {
-internal/session/session.go:42:	expected := mac.Sum(nil)
-internal/evaluate/output.go:26:	if err := dec.Decode(&out); err != nil {
-internal/evaluate/output.go:29:	if err := dec.Decode(&struct{}{}); err == nil {
-internal/evaluate/output.go:35:	if len(out.Constraints) == 0 {
-internal/evaluate/output.go:41:	if out.Confidence != nil {
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web' in /Users/yani/Noema/backend succeeded in 52ms:
+static
+templates
 
 thinking
-**Planning clearer error context**
+**Identifying candidate files**
 
-I'm focusing on enhancing errors in image reading by adding file name context in evaluate/images.go for better reliability without cosmetic changes.
+I'm looking for up to three files likely related to page rendering or templates that could list or display content, to focus the exploration efficiently.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,160p' internal/evaluate/images.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/templates' in /Users/yani/Noema/backend succeeded in 52ms:
+app.html
+app_new.html
+app_results.html
+index.html
+partial_header_app.html
+partial_header_public.html
+partial_header_upload.html
+partial_orb.html
+upload.html
+verify.html
+verify_results.html
 
-import (
-	"fmt"
-	"io"
-	"mime"
-	"mime/multipart"
-	"path/filepath"
-	"strings"
-)
+thinking
+**Listing CSS files**
 
-type ImageInfo struct {
-	Filename string
-	MIMEType string
-	Data     []byte
+I'm exploring the web/static directory to list CSS files for assessing styling on the index or app page.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/static' in /Users/yani/Noema/backend succeeded in 52ms:
+app.js
+constraints.js
+results.js
+styles.css
+upload.js
+verify.js
+wizard.js
+
+thinking
+**Planning functional UI improvements**
+
+I'm aiming to enhance the UI by updating styles.css and templates/index.html with better layout, clarity, and accessibility while avoiding purely cosmetic changes or new dependencies. Next, I'll review styles.css to identify key improvement areas.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap');
+
+:root {
+  --bg: #05060a;
+  --bg-card: rgba(9, 12, 18, 0.9);
+  --text: #f4f6fb;
+  --text-muted: #9aa3b2;
+  --accent: #45d4ff;
+  --accent-strong: #2c7bff;
+  --accent-glow: rgba(69, 212, 255, 0.35);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(69, 212, 255, 0.4);
+  --error: #f87171;
+  --success: #22c55e;
+  --warning: #fbbf24;
+  --shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
 }
 
-func readImages(files []*multipart.FileHeader) ([]ImageInfo, error) {
-	out := make([]ImageInfo, 0, len(files))
-	for _, fh := range files {
+*,
+*::before,
 
 thinking
-**Enhancing error context and resource handling**
+**Planning to review forms for focus and help improvements**
 
-Planning to wrap errors with filename information for better debugging and to defer closing the opened file to ensure reliable resource cleanup, while avoiding double closes. Next, I'll patch the single file and run full tests.
-file update
-M /Users/yani/Noema/backend/internal/evaluate/images.go
-@@ -22,8 +22,8 @@
- 		if err != nil {
--			return nil, fmt.Errorf("could not read image")
-+			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
- 		}
-+		defer src.Close()
- 		data, err := io.ReadAll(src)
--		src.Close()
- 		if err != nil {
--			return nil, fmt.Errorf("could not read image")
-+			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
- 		}
-apply_patch(auto_approved=true) exited 0 in 27ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/images.go
-file update:
-diff --git a/backend/internal/evaluate/images.go b/backend/internal/evaluate/images.go
-index 9b8c50208d2457b3963eea6ec5c16edf1da5bd9d..d8453a617581cf2e70eab701d6ea90370d9c0ade
---- a/backend/internal/evaluate/images.go
-+++ b/backend/internal/evaluate/images.go
-@@ -20,12 +20,12 @@
- 	for _, fh := range files {
- 		src, err := fh.Open()
- 		if err != nil {
--			return nil, fmt.Errorf("could not read image")
-+			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
- 		}
-+		defer src.Close()
- 		data, err := io.ReadAll(src)
--		src.Close()
- 		if err != nil {
--			return nil, fmt.Errorf("could not read image")
-+			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
- 		}
- 		mimeType := strings.TrimSpace(fh.Header.Get("Content-Type"))
- 		if mimeType == "" {
-
-file update:
-diff --git a/backend/internal/evaluate/images.go b/backend/internal/evaluate/images.go
-index 9b8c50208d2457b3963eea6ec5c16edf1da5bd9d..d8453a617581cf2e70eab701d6ea90370d9c0ade
---- a/backend/internal/evaluate/images.go
-+++ b/backend/internal/evaluate/images.go
-@@ -20,12 +20,12 @@
- 	for _, fh := range files {
- 		src, err := fh.Open()
- 		if err != nil {
--			return nil, fmt.Errorf("could not read image")
-+			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
- 		}
-+		defer src.Close()
- 		data, err := io.ReadAll(src)
--		src.Close()
- 		if err != nil {
--			return nil, fmt.Errorf("could not read image")
-+			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
- 		}
- 		mimeType := strings.TrimSpace(fh.Header.Get("Content-Type"))
- 		if mimeType == "" {
-
-
-thinking
-**Deciding on defer usage in loop**
-
-Deferred closes inside the loop could keep up to 10 files open, which is acceptable here, so I'll keep defer to simplify error handling and avoid introducing new error paths from immediate closes.
+I'll scroll more to find the form components and assess their focus states and input help for potential enhancements.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 909ms:
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+  margin-bottom: 0.75rem;
+}
+
+.text-muted { color: var(--text-muted); }
+
+.form { display: flex; flex-direction: column; gap: 1rem; }
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-bottom: 1.2rem;
+}
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '520,1040p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+  min-width: 0;
+}
+
+.upload-file-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-file-size {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.upload-hint {
+  margin-top: 0.65rem;
+}
+
+/* ===== Wizard ===== */
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1040,1320p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 720px) {
+  .card {
+    padding: 2rem 1.6rem;
+  }
+
+  .stepper {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .stepper-sep {
+    width: 100%;
+  }
+
+  .constraint-row {
+
+thinking
+**Planning UX improvements**
+
+I'm focusing on meaningful UI enhancements like adding helpful empty states or improving readability without introducing new dependencies, starting by inspecting templates such as index.html and verify for suitable spots.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' web/templates/index.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "index"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_public" .}}
+
+  <main class="main">
+    {{template "orb" .}}
+    <div class="card">
+      <div class="card-kicker">Secure access</div>
+      <h1 class="card-title">Judge Key</h1>
+      <p class="card-text">Evaluation and uploads are gated. Public verification is always open.</p>
+      <form action="/auth" method="post" class="form">
+        <input type="password" name="judge_key" id="judge_key" class="input" placeholder="Enter judge key" autocomplete="off" value="{{.JudgeKeyVal}}" autofocus>
+
+thinking
+**Planning accessibility improvements**
+
+Considering adding labels, hints, and `role="alert"` attributes in forms to improve accessibility without cosmetic-only edits; focusing on updating markup in a few key HTML files while reusing existing CSS classes.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' web/templates/verify.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "verify"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Verify</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_public" .}}
+
+  <main class="main main-verify">
+    {{template "orb" .}}
+    <div class="card verify-card">
+      <div class="verify-header">
+        <div>
+          <div class="card-kicker">Public</div>
+          <h1 class="card-title">Public verification</h1>
+          <p class="card-text">Verify recent proofs without revealing datasets. Recent runs are loaded from this browser.</p>
+
+
+thinking
+**Planning meaningful verify page improvements**
+
+I'm focusing on improving the verify page's UX by adding a structured empty state with the existing `.empty-state` class and enhancing the filter input with a label and hint for clarity. This will be one meaningful update without cosmetic-only changes or new CSS.
+thinking
+**Adding label, hint, and structured empty state with CSS update**
+
+I'm planning to update verify.html to wrap the filter input in a `.form-group` with label and hint, add a structured `.empty-state` for no proofs, and adjust `.verify-controls` CSS to align items flex-start for better layout. This involves two files: HTML and CSS. Next, I'll verify JS compatibility with the new empty state markup.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' web/static/verify.js" in /Users/yani/Noema/backend succeeded in 51ms:
+(function() {
+  var STORAGE_KEY = 'noema_recent_runs';
+  var MAX_RECENT = 20;
+  var listEl = document.getElementById('verify-list');
+  var emptyEl = document.getElementById('verify-empty');
+  var filterInput = document.getElementById('verify-filter');
+  var countEl = document.getElementById('verify-count');
+  var progressEl = document.getElementById('verify-progress');
+  var verifyAllBtn = document.getElementById('verify-all');
+  var clearBtn = document.getElementById('verify-clear');
+
+  function loadRecentRuns() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      var runs = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(runs)) return [];
+      return runs.slice().sort(function(a, b) {
+        return (b.ts || 0) - (a.ts || 0);
+      });
+    } catch (e) {
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '260,520p' web/static/verify.js" in /Users/yani/Noema/backend succeeded in 52ms:
+    if (verifyAllBtn) verifyAllBtn.disabled = filtered.length === 0;
+    if (clearBtn) clearBtn.disabled = runs.length === 0;
+  }
+
+  function verifyAllVisible() {
+    var rows = Array.prototype.slice.call(listEl.querySelectorAll('.verify-row'));
+    if (rows.length === 0) return;
+
+    verifyAllBtn.disabled = true;
+    var total = rows.length;
+    var done = 0;
+
+    function updateProgress() {
+      progressEl.textContent = 'Verifying ' + done + '/' + total + '…';
+    }
+
+    updateProgress();
+
+    var chain = Promise.resolve();
+    rows.forEach(function(row) {
+
+
+thinking
+**Planning filter enhancement**
+
+I'm planning to extend the filter to match runs by name as well as run_id, updating verify.js, verify.html, and styles.css accordingly for a meaningful UX and functionality improvement. I'll also adjust empty states to mention local storage and tweak styling for better layout and readability.
+thinking
+**Updating filter logic and accessibility**
+
+I'm enhancing the filter to match both run ID and name with case-insensitive checks, adding an accessible label with aria-describedby pointing to a hint, and confirming the empty state element stays inside the list container for consistent behavior.
+file update
+M /Users/yani/Noema/backend/web/templates/verify.html
+@@ -28,3 +28,7 @@
+       <div class="verify-controls">
+-        <input type="text" id="verify-filter" class="input" placeholder="Filter by run id">
++        <div class="form-group">
++          <label class="label" for="verify-filter">Filter runs</label>
++          <input type="text" id="verify-filter" class="input" placeholder="Filter by run id" aria-describedby="verify-filter-hint">
++          <p class="form-hint" id="verify-filter-hint">Matches run IDs saved in this browser.</p>
++        </div>
+         <div class="verify-meta">
+@@ -36,3 +40,6 @@
+       <div class="verify-list" id="verify-list">
+-        <p class="verify-muted" id="verify-empty">No proofs yet. Run an evaluation to generate a proof.</p>
++        <div class="empty-state" id="verify-empty">
++          <div class="empty-state-title">No proofs yet</div>
++          <p class="empty-state-text">Run an evaluation to generate a proof. This list only shows runs saved in this browser.</p>
++        </div>
+       </div>
+apply_patch(auto_approved=true) exited 0 in 28ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/web/templates/verify.html
+file update:
+diff --git a/backend/web/templates/verify.html b/backend/web/templates/verify.html
+index 1e715eca9f5c546595f88e2e7acd18fc1e82862d..75bddd7ffa03e97b698527881a1b94fbfd5253a5
+--- a/backend/web/templates/verify.html
++++ b/backend/web/templates/verify.html
+@@ -26,7 +26,11 @@
+       </div>
+ 
+       <div class="verify-controls">
+-        <input type="text" id="verify-filter" class="input" placeholder="Filter by run id">
++        <div class="form-group">
++          <label class="label" for="verify-filter">Filter runs</label>
++          <input type="text" id="verify-filter" class="input" placeholder="Filter by run id" aria-describedby="verify-filter-hint">
++          <p class="form-hint" id="verify-filter-hint">Matches run IDs saved in this browser.</p>
++        </div>
+         <div class="verify-meta">
+           <span class="verify-muted" id="verify-count"></span>
+           <span class="verify-muted" id="verify-progress"></span>
+@@ -34,7 +38,10 @@
+       </div>
+ 
+       <div class="verify-list" id="verify-list">
+-        <p class="verify-muted" id="verify-empty">No proofs yet. Run an evaluation to generate a proof.</p>
++        <div class="empty-state" id="verify-empty">
++          <div class="empty-state-title">No proofs yet</div>
++          <p class="empty-state-text">Run an evaluation to generate a proof. This list only shows runs saved in this browser.</p>
++        </div>
+       </div>
+     </div>
+   </main>
+
+file update:
+diff --git a/backend/web/templates/verify.html b/backend/web/templates/verify.html
+index 1e715eca9f5c546595f88e2e7acd18fc1e82862d..75bddd7ffa03e97b698527881a1b94fbfd5253a5
+--- a/backend/web/templates/verify.html
++++ b/backend/web/templates/verify.html
+@@ -26,7 +26,11 @@
+       </div>
+ 
+       <div class="verify-controls">
+-        <input type="text" id="verify-filter" class="input" placeholder="Filter by run id">
++        <div class="form-group">
++          <label class="label" for="verify-filter">Filter runs</label>
++          <input type="text" id="verify-filter" class="input" placeholder="Filter by run id" aria-describedby="verify-filter-hint">
++          <p class="form-hint" id="verify-filter-hint">Matches run IDs saved in this browser.</p>
++        </div>
+         <div class="verify-meta">
+           <span class="verify-muted" id="verify-count"></span>
+           <span class="verify-muted" id="verify-progress"></span>
+@@ -34,7 +38,10 @@
+       </div>
+ 
+       <div class="verify-list" id="verify-list">
+-        <p class="verify-muted" id="verify-empty">No proofs yet. Run an evaluation to generate a proof.</p>
++        <div class="empty-state" id="verify-empty">
++          <div class="empty-state-title">No proofs yet</div>
++          <p class="empty-state-text">Run an evaluation to generate a proof. This list only shows runs saved in this browser.</p>
++        </div>
+       </div>
+     </div>
+   </main>
+
+
+thinking
+**Updating filter hint text**
+
+The hint text will change to "run IDs or names" to reflect filtering by name, and the placeholder will be updated accordingly. I'll check that run names are stored locally or accessible in recent runs before patching verify.html.
+file update
+M /Users/yani/Noema/backend/web/templates/verify.html
+@@ -30,4 +30,4 @@
+           <label class="label" for="verify-filter">Filter runs</label>
+-          <input type="text" id="verify-filter" class="input" placeholder="Filter by run id" aria-describedby="verify-filter-hint">
+-          <p class="form-hint" id="verify-filter-hint">Matches run IDs saved in this browser.</p>
++          <input type="text" id="verify-filter" class="input" placeholder="Filter by run id or name" aria-describedby="verify-filter-hint">
++          <p class="form-hint" id="verify-filter-hint">Matches run IDs or names saved in this browser.</p>
+         </div>
+apply_patch(auto_approved=true) exited 0 in 39ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/web/templates/verify.html
+file update:
+diff --git a/backend/web/templates/verify.html b/backend/web/templates/verify.html
+index 1e715eca9f5c546595f88e2e7acd18fc1e82862d..d61ad03eba94842f341a66920529f5f6219c0b09
+--- a/backend/web/templates/verify.html
++++ b/backend/web/templates/verify.html
+@@ -26,7 +26,11 @@
+       </div>
+ 
+       <div class="verify-controls">
+-        <input type="text" id="verify-filter" class="input" placeholder="Filter by run id">
++        <div class="form-group">
++          <label class="label" for="verify-filter">Filter runs</label>
++          <input type="text" id="verify-filter" class="input" placeholder="Filter by run id or name" aria-describedby="verify-filter-hint">
++          <p class="form-hint" id="verify-filter-hint">Matches run IDs or names saved in this browser.</p>
++        </div>
+         <div class="verify-meta">
+           <span class="verify-muted" id="verify-count"></span>
+           <span class="verify-muted" id="verify-progress"></span>
+@@ -34,7 +38,10 @@
+       </div>
+ 
+       <div class="verify-list" id="verify-list">
+-        <p class="verify-muted" id="verify-empty">No proofs yet. Run an evaluation to generate a proof.</p>
++        <div class="empty-state" id="verify-empty">
++          <div class="empty-state-title">No proofs yet</div>
++          <p class="empty-state-text">Run an evaluation to generate a proof. This list only shows runs saved in this browser.</p>
++        </div>
+       </div>
+     </div>
+   </main>
+
+file update:
+diff --git a/backend/web/templates/verify.html b/backend/web/templates/verify.html
+index 1e715eca9f5c546595f88e2e7acd18fc1e82862d..d61ad03eba94842f341a66920529f5f6219c0b09
+--- a/backend/web/templates/verify.html
++++ b/backend/web/templates/verify.html
+@@ -26,7 +26,11 @@
+       </div>
+ 
+       <div class="verify-controls">
+-        <input type="text" id="verify-filter" class="input" placeholder="Filter by run id">
++        <div class="form-group">
++          <label class="label" for="verify-filter">Filter runs</label>
++          <input type="text" id="verify-filter" class="input" placeholder="Filter by run id or name" aria-describedby="verify-filter-hint">
++          <p class="form-hint" id="verify-filter-hint">Matches run IDs or names saved in this browser.</p>
++        </div>
+         <div class="verify-meta">
+           <span class="verify-muted" id="verify-count"></span>
+           <span class="verify-muted" id="verify-progress"></span>
+@@ -34,7 +38,10 @@
+       </div>
+ 
+       <div class="verify-list" id="verify-list">
+-        <p class="verify-muted" id="verify-empty">No proofs yet. Run an evaluation to generate a proof.</p>
++        <div class="empty-state" id="verify-empty">
++          <div class="empty-state-title">No proofs yet</div>
++          <p class="empty-state-text">Run an evaluation to generate a proof. This list only shows runs saved in this browser.</p>
++        </div>
+       </div>
+     </div>
+   </main>
+
+
+
+thinking
+**Adjusting CSS flex alignment**
+
+I'm updating `.verify-controls` to use `align-items: flex-start` with `.verify-meta` getting a top margin to better align with input fields, balancing cosmetic improvement and responsiveness.
+thinking
+**Refining CSS spacing with minimal changes**
+
+I'm opting to keep `.verify-controls` aligned center and add `.verify-controls .form-group` with `flex: 1` and `margin-bottom: 0` to tighten layout while accepting that `.verify-meta` remains vertically centered relative to the group for simplicity.
+file update
+M /Users/yani/Noema/backend/web/static/styles.css
+@@ -1119,2 +1119,8 @@
+ 
++.verify-controls .form-group {
++  flex: 1;
++  min-width: 240px;
++  margin-bottom: 0;
++}
++
+ .verify-controls .input {
+apply_patch(auto_approved=true) exited 0 in 38ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/web/static/styles.css
+file update:
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index dc8f3c9acfe5d85820d2bab4503941f7f52db1d8..a617332ab3bfd84a62c185d75806b800d1c993cf
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -1117,6 +1117,12 @@
+   flex-wrap: wrap;
+ }
+ 
++.verify-controls .form-group {
++  flex: 1;
++  min-width: 240px;
++  margin-bottom: 0;
++}
++
+ .verify-controls .input {
+   min-width: 240px;
+   flex: 1;
+diff --git a/backend/web/templates/verify.html b/backend/web/templates/verify.html
+index 1e715eca9f5c546595f88e2e7acd18fc1e82862d..d61ad03eba94842f341a66920529f5f6219c0b09
+--- a/backend/web/templates/verify.html
++++ b/backend/web/templates/verify.html
+@@ -26,7 +26,11 @@
+       </div>
+ 
+       <div class="verify-controls">
+-        <input type="text" id="verify-filter" class="input" placeholder="Filter by run id">
++        <div class="form-group">
++          <label class="label" for="verify-filter">Filter runs</label>
++          <input type="text" id="verify-filter" class="input" placeholder="Filter by run id or name" aria-describedby="verify-filter-hint">
++          <p class="form-hint" id="verify-filter-hint">Matches run IDs or names saved in this browser.</p>
++        </div>
+         <div class="verify-meta">
+           <span class="verify-muted" id="verify-count"></span>
+           <span class="verify-muted" id="verify-progress"></span>
+@@ -34,7 +38,10 @@
+       </div>
+ 
+       <div class="verify-list" id="verify-list">
+-        <p class="verify-muted" id="verify-empty">No proofs yet. Run an evaluation to generate a proof.</p>
++        <div class="empty-state" id="verify-empty">
++          <div class="empty-state-title">No proofs yet</div>
++          <p class="empty-state-text">Run an evaluation to generate a proof. This list only shows runs saved in this browser.</p>
++        </div>
+       </div>
+     </div>
+   </main>
+
+file update:
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index dc8f3c9acfe5d85820d2bab4503941f7f52db1d8..a617332ab3bfd84a62c185d75806b800d1c993cf
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -1117,6 +1117,12 @@
+   flex-wrap: wrap;
+ }
+ 
++.verify-controls .form-group {
++  flex: 1;
++  min-width: 240px;
++  margin-bottom: 0;
++}
++
+ .verify-controls .input {
+   min-width: 240px;
+   flex: 1;
+diff --git a/backend/web/templates/verify.html b/backend/web/templates/verify.html
+index 1e715eca9f5c546595f88e2e7acd18fc1e82862d..d61ad03eba94842f341a66920529f5f6219c0b09
+--- a/backend/web/templates/verify.html
++++ b/backend/web/templates/verify.html
+@@ -26,7 +26,11 @@
+       </div>
+ 
+       <div class="verify-controls">
+-        <input type="text" id="verify-filter" class="input" placeholder="Filter by run id">
++        <div class="form-group">
++          <label class="label" for="verify-filter">Filter runs</label>
++          <input type="text" id="verify-filter" class="input" placeholder="Filter by run id or name" aria-describedby="verify-filter-hint">
++          <p class="form-hint" id="verify-filter-hint">Matches run IDs or names saved in this browser.</p>
++        </div>
+         <div class="verify-meta">
+           <span class="verify-muted" id="verify-count"></span>
+           <span class="verify-muted" id="verify-progress"></span>
+@@ -34,7 +38,10 @@
+       </div>
+ 
+       <div class="verify-list" id="verify-list">
+-        <p class="verify-muted" id="verify-empty">No proofs yet. Run an evaluation to generate a proof.</p>
++        <div class="empty-state" id="verify-empty">
++          <div class="empty-state-title">No proofs yet</div>
++          <p class="empty-state-text">Run an evaluation to generate a proof. This list only shows runs saved in this browser.</p>
++        </div>
+       </div>
+     </div>
+   </main>
+
+
+thinking
+**Adjusting filter logic in verify.js**
+
+Planning to update the filter logic in verify.js next and will patch afterward; considering if the .input min-width in verify-controls is now redundant but acceptable.
+file update
+M /Users/yani/Noema/backend/web/static/verify.js
+@@ -240,3 +240,6 @@
+     var filtered = runs.filter(function(r) {
+-      return !q || (r.run_id && r.run_id.toLowerCase().indexOf(q) !== -1);
++      if (!q) return true;
++      var runId = (r.run_id || '').toLowerCase();
++      var runName = (r.name || '').toLowerCase();
++      return runId.indexOf(q) !== -1 || runName.indexOf(q) !== -1;
+     });
+apply_patch(auto_approved=true) exited 0 in 46ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/web/static/verify.js
+file update:
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index dc8f3c9acfe5d85820d2bab4503941f7f52db1d8..a617332ab3bfd84a62c185d75806b800d1c993cf
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -1117,6 +1117,12 @@
+   flex-wrap: wrap;
+ }
+ 
++.verify-controls .form-group {
++  flex: 1;
++  min-width: 240px;
++  margin-bottom: 0;
++}
++
+ .verify-controls .input {
+   min-width: 240px;
+   flex: 1;
+diff --git a/backend/web/static/verify.js b/backend/web/static/verify.js
+index d4560b3e966d6aeb8bc2dfdae4d54d622b8779e2..763e2c223cb7cf01373aa4de600125d8f5cef2eb
+--- a/backend/web/static/verify.js
++++ b/backend/web/static/verify.js
+@@ -238,7 +238,10 @@
+     var runs = loadRecentRuns();
+     var q = (filterInput.value || '').trim().toLowerCase();
+     var filtered = runs.filter(function(r) {
+-      return !q || (r.run_id && r.run_id.toLowerCase().indexOf(q) !== -1);
++      if (!q) return true;
++      var runId = (r.run_id || '').toLowerCase();
++      var runName = (r.name || '').toLowerCase();
++      return runId.indexOf(q) !== -1 || runName.indexOf(q) !== -1;
+     });
+ 
+     listEl.innerHTML = '';
+diff --git a/backend/web/templates/verify.html b/backend/web/templates/verify.html
+index 1e715eca9f5c546595f88e2e7acd18fc1e82862d..d61ad03eba94842f341a66920529f5f6219c0b09
+--- a/backend/web/templates/verify.html
++++ b/backend/web/templates/verify.html
+@@ -26,7 +26,11 @@
+       </div>
+ 
+       <div class="verify-controls">
+-        <input type="text" id="verify-filter" class="input" placeholder="Filter by run id">
++        <div class="form-group">
++          <label class="label" for="verify-filter">Filter runs</label>
++          <input type="text" id="verify-filter" class="input" placeholder="Filter by run id or name" aria-describedby="verify-filter-hint">
++          <p class="form-hint" id="verify-filter-hint">Matches run IDs or names saved in this browser.</p>
++        </div>
+         <div class="verify-meta">
+           <span class="verify-muted" id="verify-count"></span>
+           <span class="verify-muted" id="verify-progress"></span>
+@@ -34,7 +38,10 @@
+       </div>
+ 
+       <div class="verify-list" id="verify-list">
+-        <p class="verify-muted" id="verify-empty">No proofs yet. Run an evaluation to generate a proof.</p>
++        <div class="empty-state" id="verify-empty">
++          <div class="empty-state-title">No proofs yet</div>
++          <p class="empty-state-text">Run an evaluation to generate a proof. This list only shows runs saved in this browser.</p>
++        </div>
+       </div>
+     </div>
+   </main>
+
+file update:
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index dc8f3c9acfe5d85820d2bab4503941f7f52db1d8..a617332ab3bfd84a62c185d75806b800d1c993cf
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -1117,6 +1117,12 @@
+   flex-wrap: wrap;
+ }
+ 
++.verify-controls .form-group {
++  flex: 1;
++  min-width: 240px;
++  margin-bottom: 0;
++}
++
+ .verify-controls .input {
+   min-width: 240px;
+   flex: 1;
+diff --git a/backend/web/static/verify.js b/backend/web/static/verify.js
+index d4560b3e966d6aeb8bc2dfdae4d54d622b8779e2..763e2c223cb7cf01373aa4de600125d8f5cef2eb
+--- a/backend/web/static/verify.js
++++ b/backend/web/static/verify.js
+@@ -238,7 +238,10 @@
+     var runs = loadRecentRuns();
+     var q = (filterInput.value || '').trim().toLowerCase();
+     var filtered = runs.filter(function(r) {
+-      return !q || (r.run_id && r.run_id.toLowerCase().indexOf(q) !== -1);
++      if (!q) return true;
++      var runId = (r.run_id || '').toLowerCase();
++      var runName = (r.name || '').toLowerCase();
++      return runId.indexOf(q) !== -1 || runName.indexOf(q) !== -1;
+     });
+ 
+     listEl.innerHTML = '';
+diff --git a/backend/web/templates/verify.html b/backend/web/templates/verify.html
+index 1e715eca9f5c546595f88e2e7acd18fc1e82862d..d61ad03eba94842f341a66920529f5f6219c0b09
+--- a/backend/web/templates/verify.html
++++ b/backend/web/templates/verify.html
+@@ -26,7 +26,11 @@
+       </div>
+ 
+       <div class="verify-controls">
+-        <input type="text" id="verify-filter" class="input" placeholder="Filter by run id">
++        <div class="form-group">
++          <label class="label" for="verify-filter">Filter runs</label>
++          <input type="text" id="verify-filter" class="input" placeholder="Filter by run id or name" aria-describedby="verify-filter-hint">
++          <p class="form-hint" id="verify-filter-hint">Matches run IDs or names saved in this browser.</p>
++        </div>
+         <div class="verify-meta">
+           <span class="verify-muted" id="verify-count"></span>
+           <span class="verify-muted" id="verify-progress"></span>
+@@ -34,7 +38,10 @@
+       </div>
+ 
+       <div class="verify-list" id="verify-list">
+-        <p class="verify-muted" id="verify-empty">No proofs yet. Run an evaluation to generate a proof.</p>
++        <div class="empty-state" id="verify-empty">
++          <div class="empty-state-title">No proofs yet</div>
++          <p class="empty-state-text">Run an evaluation to generate a proof. This list only shows runs saved in this browser.</p>
++        </div>
+       </div>
+     </div>
+   </main>
+
+
+thinking
+**Clarifying hint text**
+
+I'll update the hint to specify whether it refers to IDs or names, then run all tests with `go test ./...` to verify.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 248ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	0.031s
+ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
 file update:
-diff --git a/backend/internal/evaluate/images.go b/backend/internal/evaluate/images.go
-index 9b8c50208d2457b3963eea6ec5c16edf1da5bd9d..d8453a617581cf2e70eab701d6ea90370d9c0ade
---- a/backend/internal/evaluate/images.go
-+++ b/backend/internal/evaluate/images.go
-@@ -20,12 +20,12 @@
- 	for _, fh := range files {
- 		src, err := fh.Open()
- 		if err != nil {
--			return nil, fmt.Errorf("could not read image")
-+			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
- 		}
-+		defer src.Close()
- 		data, err := io.ReadAll(src)
--		src.Close()
- 		if err != nil {
--			return nil, fmt.Errorf("could not read image")
-+			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
- 		}
- 		mimeType := strings.TrimSpace(fh.Header.Get("Content-Type"))
- 		if mimeType == "" {
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index dc8f3c9acfe5d85820d2bab4503941f7f52db1d8..a617332ab3bfd84a62c185d75806b800d1c993cf
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -1117,6 +1117,12 @@
+   flex-wrap: wrap;
+ }
+ 
++.verify-controls .form-group {
++  flex: 1;
++  min-width: 240px;
++  margin-bottom: 0;
++}
++
+ .verify-controls .input {
+   min-width: 240px;
+   flex: 1;
+diff --git a/backend/web/static/verify.js b/backend/web/static/verify.js
+index d4560b3e966d6aeb8bc2dfdae4d54d622b8779e2..763e2c223cb7cf01373aa4de600125d8f5cef2eb
+--- a/backend/web/static/verify.js
++++ b/backend/web/static/verify.js
+@@ -238,7 +238,10 @@
+     var runs = loadRecentRuns();
+     var q = (filterInput.value || '').trim().toLowerCase();
+     var filtered = runs.filter(function(r) {
+-      return !q || (r.run_id && r.run_id.toLowerCase().indexOf(q) !== -1);
++      if (!q) return true;
++      var runId = (r.run_id || '').toLowerCase();
++      var runName = (r.name || '').toLowerCase();
++      return runId.indexOf(q) !== -1 || runName.indexOf(q) !== -1;
+     });
+ 
+     listEl.innerHTML = '';
+diff --git a/backend/web/templates/verify.html b/backend/web/templates/verify.html
+index 1e715eca9f5c546595f88e2e7acd18fc1e82862d..d61ad03eba94842f341a66920529f5f6219c0b09
+--- a/backend/web/templates/verify.html
++++ b/backend/web/templates/verify.html
+@@ -26,7 +26,11 @@
+       </div>
+ 
+       <div class="verify-controls">
+-        <input type="text" id="verify-filter" class="input" placeholder="Filter by run id">
++        <div class="form-group">
++          <label class="label" for="verify-filter">Filter runs</label>
++          <input type="text" id="verify-filter" class="input" placeholder="Filter by run id or name" aria-describedby="verify-filter-hint">
++          <p class="form-hint" id="verify-filter-hint">Matches run IDs or names saved in this browser.</p>
++        </div>
+         <div class="verify-meta">
+           <span class="verify-muted" id="verify-count"></span>
+           <span class="verify-muted" id="verify-progress"></span>
+@@ -34,7 +38,10 @@
+       </div>
+ 
+       <div class="verify-list" id="verify-list">
+-        <p class="verify-muted" id="verify-empty">No proofs yet. Run an evaluation to generate a proof.</p>
++        <div class="empty-state" id="verify-empty">
++          <div class="empty-state-title">No proofs yet</div>
++          <p class="empty-state-text">Run an evaluation to generate a proof. This list only shows runs saved in this browser.</p>
++        </div>
+       </div>
+     </div>
+   </main>
 
 codex
 What you changed (short)
-- Added filename + underlying error context when reading uploaded images to improve debugging (`internal/evaluate/images.go`).
+- Improved the verify page UX with labeled filtering, clearer empty-state messaging, and filter-by-name support for recent runs.
+- Tightened layout for the new filter block in the verify controls.
+
+Files touched (max 3)
+- `web/templates/verify.html`
+- `web/static/styles.css`
+- `web/static/verify.js`
 
 Tests run
 - `go test ./...`
 
-Next steps if you want
-1. Add a small test to assert error messages include the filename on image read failures.
-2. Tighten image MIME validation if you want stricter content checks.
+If you want another iteration, tell me which area to target next (e.g., upload flow, results page clarity, wizard readability).
 file update:
-diff --git a/backend/internal/evaluate/images.go b/backend/internal/evaluate/images.go
-index 9b8c50208d2457b3963eea6ec5c16edf1da5bd9d..d8453a617581cf2e70eab701d6ea90370d9c0ade
---- a/backend/internal/evaluate/images.go
-+++ b/backend/internal/evaluate/images.go
-@@ -20,12 +20,12 @@
- 	for _, fh := range files {
- 		src, err := fh.Open()
- 		if err != nil {
--			return nil, fmt.Errorf("could not read image")
-+			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
- 		}
-+		defer src.Close()
- 		data, err := io.ReadAll(src)
--		src.Close()
- 		if err != nil {
--			return nil, fmt.Errorf("could not read image")
-+			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
- 		}
- 		mimeType := strings.TrimSpace(fh.Header.Get("Content-Type"))
- 		if mimeType == "" {
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index dc8f3c9acfe5d85820d2bab4503941f7f52db1d8..a617332ab3bfd84a62c185d75806b800d1c993cf
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -1117,6 +1117,12 @@
+   flex-wrap: wrap;
+ }
+ 
++.verify-controls .form-group {
++  flex: 1;
++  min-width: 240px;
++  margin-bottom: 0;
++}
++
+ .verify-controls .input {
+   min-width: 240px;
+   flex: 1;
+diff --git a/backend/web/static/verify.js b/backend/web/static/verify.js
+index d4560b3e966d6aeb8bc2dfdae4d54d622b8779e2..763e2c223cb7cf01373aa4de600125d8f5cef2eb
+--- a/backend/web/static/verify.js
++++ b/backend/web/static/verify.js
+@@ -238,7 +238,10 @@
+     var runs = loadRecentRuns();
+     var q = (filterInput.value || '').trim().toLowerCase();
+     var filtered = runs.filter(function(r) {
+-      return !q || (r.run_id && r.run_id.toLowerCase().indexOf(q) !== -1);
++      if (!q) return true;
++      var runId = (r.run_id || '').toLowerCase();
++      var runName = (r.name || '').toLowerCase();
++      return runId.indexOf(q) !== -1 || runName.indexOf(q) !== -1;
+     });
+ 
+     listEl.innerHTML = '';
+diff --git a/backend/web/templates/verify.html b/backend/web/templates/verify.html
+index 1e715eca9f5c546595f88e2e7acd18fc1e82862d..d61ad03eba94842f341a66920529f5f6219c0b09
+--- a/backend/web/templates/verify.html
++++ b/backend/web/templates/verify.html
+@@ -26,7 +26,11 @@
+       </div>
+ 
+       <div class="verify-controls">
+-        <input type="text" id="verify-filter" class="input" placeholder="Filter by run id">
++        <div class="form-group">
++          <label class="label" for="verify-filter">Filter runs</label>
++          <input type="text" id="verify-filter" class="input" placeholder="Filter by run id or name" aria-describedby="verify-filter-hint">
++          <p class="form-hint" id="verify-filter-hint">Matches run IDs or names saved in this browser.</p>
++        </div>
+         <div class="verify-meta">
+           <span class="verify-muted" id="verify-count"></span>
+           <span class="verify-muted" id="verify-progress"></span>
+@@ -34,7 +38,10 @@
+       </div>
+ 
+       <div class="verify-list" id="verify-list">
+-        <p class="verify-muted" id="verify-empty">No proofs yet. Run an evaluation to generate a proof.</p>
++        <div class="empty-state" id="verify-empty">
++          <div class="empty-state-title">No proofs yet</div>
++          <p class="empty-state-text">Run an evaluation to generate a proof. This list only shows runs saved in this browser.</p>
++        </div>
+       </div>
+     </div>
+   </main>
 
 tokens used
-9,477
+24,249
 What you changed (short)
-- Added filename + underlying error context when reading uploaded images to improve debugging (`internal/evaluate/images.go`).
+- Improved the verify page UX with labeled filtering, clearer empty-state messaging, and filter-by-name support for recent runs.
+- Tightened layout for the new filter block in the verify controls.
+
+Files touched (max 3)
+- `web/templates/verify.html`
+- `web/static/styles.css`
+- `web/static/verify.js`
 
 Tests run
 - `go test ./...`
 
-Next steps if you want
-1. Add a small test to assert error messages include the filename on image read failures.
-2. Tighten image MIME validation if you want stricter content checks.
+If you want another iteration, tell me which area to target next (e.g., upload flow, results page clarity, wizard readability).

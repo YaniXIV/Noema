@@ -1117,6 +1117,12 @@ pre,
   flex-wrap: wrap;
 }
 
+.verify-controls .form-group {
+  flex: 1;
+  min-width: 240px;
+  margin-bottom: 0;
+}
+
 .verify-controls .input {
   min-width: 240px;
   flex: 1;

@@ -238,7 +238,10 @@
     var runs = loadRecentRuns();
     var q = (filterInput.value || '').trim().toLowerCase();
     var filtered = runs.filter(function(r) {
-      return !q || (r.run_id && r.run_id.toLowerCase().indexOf(q) !== -1);
+      if (!q) return true;
+      var runId = (r.run_id || '').toLowerCase();
+      var runName = (r.name || '').toLowerCase();
+      return runId.indexOf(q) !== -1 || runName.indexOf(q) !== -1;
     });
 
     listEl.innerHTML = '';
