@@ -61,13 +61,5 @@ func saveCache(runsDir, key string, out CachedGeminiOutput) error {
 	if out.CachedAt == "" {
 		out.CachedAt = time.Now().UTC().Format(time.RFC3339)
 	}
-	b, err := json.MarshalIndent(out, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return saveJSON(path, out)
 }
