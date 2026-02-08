@@ -1,0 +1,37 @@
+{{define "upload"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Upload</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_upload" .}}
+
+  <main class="main">
+    {{template "orb" .}}
+    <div class="card">
+      <h1 class="card-title">Upload</h1>
+      <form id="upload-form" action="/upload" method="post" enctype="multipart/form-data">
+        <label class="upload-zone" for="file-input" id="drop-zone">
+          <input type="file" name="file" id="file-input" accept="*">
+          <span id="zone-text">Drag and drop a file here, or click to choose</span>
+        </label>
+        <button type="submit" class="btn" id="submit-btn" style="margin-top: 1rem;" disabled>Upload</button>
+      </form>
+      {{if .Error}}
+      <p class="error upload-error">{{.Error}}</p>
+      {{end}}
+      {{if .Success}}
+      <div class="upload-result success">
+        Uploaded: {{.FileName}} ({{.FileSize}})
+      </div>
+      {{end}}
+    </div>
+  </main>
+  <script src="/static/upload.js"></script>
+</body>
+</html>
+{{end}}

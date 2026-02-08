@@ -1,0 +1,8 @@
+What you changed
+- Updated `/api/evaluate` to write a run entry to `data/runs/index.json` (via `updateRunsIndex`) after a successful evaluation, with timestamp and evaluation name: `internal/evaluate/handler.go`.
+
+Tests you ran
+- `go test ./...`
+
+Follow-up (optional)
+1. Add a small integration test to assert `index.json` is written and capped by `NOEMA_RUNS_INDEX_LIMIT`.

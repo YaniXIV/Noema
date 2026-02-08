@@ -1,0 +1,33 @@
+{{define "index"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_public" .}}
+
+  <main class="main">
+    {{template "orb" .}}
+    <div class="card">
+      <div class="card-kicker">Secure access</div>
+      <h1 class="card-title">Judge Key</h1>
+      <p class="card-text">Evaluation and uploads are gated. Public verification is always open.</p>
+      <form action="/auth" method="post" class="form">
+        <input type="password" name="judge_key" id="judge_key" class="input" placeholder="Enter judge key" autocomplete="off" value="{{.JudgeKeyVal}}" autofocus>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Enter</button>
+          <a href="/verify" class="btn btn-ghost">Go to Verify</a>
+        </div>
+      </form>
+      {{if .Error}}
+      <p class="error">{{.Error}}</p>
+      {{end}}
+    </div>
+  </main>
+</body>
+</html>
+{{end}}

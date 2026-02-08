@@ -1,1 +1,4 @@
 .env
+auth-server
+backend/data/
+backend/main

@@ -1,0 +1,64 @@
+{{define "verify_results"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Verify Results</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body data-run-id="{{.RunID}}">
+  {{template "header_public" .}}
+
+  <main class="main main-results">
+    {{template "orb" .}}
+    <div class="card results-card">
+      <div class="results-header">
+        <div>
+          <h1 class="card-title">Public results</h1>
+          <p class="verify-muted" id="results-run-id">Run ID: {{.RunID}}</p>
+        </div>
+        <div class="results-actions">
+          <a href="/verify" class="btn btn-ghost">Back to Verify</a>
+        </div>
+      </div>
+      <div id="results-content">
+        <p class="verify-muted" id="results-loading">Loading…</p>
+        <div id="results-body" style="display:none;">
+          <div class="results-summary">
+            <div id="results-status" class="results-status"></div>
+            <div class="results-summary-meta" id="results-summary-meta"></div>
+          </div>
+          <section class="results-section" id="results-constraints">
+            <div class="results-section-header">
+              <h2 class="results-section-title">Constraint summary</h2>
+            </div>
+            <div class="results-constraints-list" id="results-constraints-list"></div>
+          </section>
+          <section class="results-section" id="results-public-output">
+            <div class="results-section-header">
+              <h2 class="results-section-title">Public output</h2>
+              <button type="button" class="btn btn-ghost btn-sm" id="copy-public-output">Copy</button>
+            </div>
+            <pre id="results-public-output-json" class="results-pre"></pre>
+          </section>
+          <section class="results-section" id="results-proof">
+            <div class="results-section-header">
+              <h2 class="results-section-title">Proof</h2>
+              <div class="results-section-actions">
+                <button type="button" class="btn btn-ghost btn-sm" id="copy-proof">Copy proof</button>
+                <button type="button" class="btn btn-ghost btn-sm" id="copy-public-inputs">Copy public inputs</button>
+              </div>
+            </div>
+            <div class="results-proof-meta" id="results-proof-meta"></div>
+            <pre id="results-proof-json" class="results-pre"></pre>
+          </section>
+        </div>
+        <p class="error" id="results-not-found" style="display:none;">Run not found or expired. Verify from the list or generate a new evaluation.</p>
+      </div>
+    </div>
+  </main>
+  <script src="/static/results.js"></script>
+</body>
+</html>
+{{end}}

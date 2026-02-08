@@ -1,0 +1,49 @@
+{{define "app"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Dashboard</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_app" .}}
+
+  <main class="main main-dashboard">
+    {{template "orb" .}}
+    <div class="dashboard-content">
+      <section class="card dashboard-hero">
+        <div class="card-kicker">Dashboard</div>
+        <h1 class="card-title">Evaluations</h1>
+        <p class="card-text">Run policy evaluations on your datasets and publish verifiable results.</p>
+        <div class="form-actions">
+          <a href="/app/new" class="btn btn-primary">New Evaluation</a>
+          <a href="/verify" class="btn btn-ghost">Verify proof</a>
+        </div>
+      </section>
+
+      <div class="dashboard-grid">
+        <section class="card recent-runs-card">
+          <h2 class="card-title card-title-sm">Recent runs</h2>
+          <div id="recent-runs-list" class="recent-runs-list">
+            <p class="text-muted" id="recent-runs-empty">No runs yet. Start a new evaluation.</p>
+          </div>
+        </section>
+
+        <section class="card demos-card">
+          <h2 class="card-title card-title-sm">Canned demos</h2>
+          <p class="card-text text-muted">Client-only demos (no server round-trip).</p>
+          <div class="demos-list" id="canned-demos">
+            <button type="button" class="btn btn-ghost demo-btn" data-demo="pii">PII exposure risk</button>
+            <button type="button" class="btn btn-ghost demo-btn" data-demo="safety">Safety-critical advisory</button>
+            <button type="button" class="btn btn-ghost demo-btn" data-demo="harm">Harm-enabling content</button>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
+{{end}}

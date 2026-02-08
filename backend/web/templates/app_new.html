@@ -1,0 +1,108 @@
+{{define "app_new"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — New Evaluation</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_app" .}}
+
+  <main class="main main-wizard">
+    {{template "orb" .}}
+    <div class="wizard-card card">
+      <h1 class="card-title">New Evaluation</h1>
+      <div class="stepper" role="tablist">
+        <button type="button" class="stepper-step active" data-step="1" aria-selected="true">Dataset</button>
+        <span class="stepper-sep"></span>
+        <button type="button" class="stepper-step" data-step="2">Policy</button>
+        <span class="stepper-sep"></span>
+        <button type="button" class="stepper-step" data-step="3">Review & Run</button>
+      </div>
+
+      <form id="eval-form" class="wizard-form">
+        <!-- Step 1: Dataset -->
+        <div class="wizard-pane active" id="pane-1" role="tabpanel">
+          <h2 class="pane-title">Dataset</h2>
+          <p class="text-muted">Choose a JSON file or paste JSON directly (max 50MB).</p>
+          <div class="dataset-source-toggle" role="tablist" aria-label="Dataset source">
+            <button type="button" class="segmented-btn active" data-source="file" aria-selected="true">Upload file</button>
+            <button type="button" class="segmented-btn" data-source="paste" aria-selected="false">Paste JSON</button>
+          </div>
+          <div class="dataset-source-pane active" data-source="file">
+            <div class="form-group">
+              <label class="label">Dataset file</label>
+              <input type="file" id="dataset-file" name="dataset_file" accept=".json,application/json" class="input">
+              <p class="form-hint">Use a file when you want to keep datasets in versioned artifacts.</p>
+            </div>
+          </div>
+          <div class="dataset-source-pane" data-source="paste" hidden>
+            <div class="form-group">
+              <label class="label">Paste JSON</label>
+              <textarea id="dataset-paste" class="input textarea" rows="8" placeholder='{"items": [...]}'></textarea>
+              <p class="form-hint">We validate the JSON before you continue.</p>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="label">Images (optional, max 10, 5MB each)</label>
+            <input type="file" id="images-file" name="images" accept="image/*" multiple class="input">
+          </div>
+          <div class="dataset-status" id="dataset-status">No dataset selected.</div>
+          <pre class="dataset-preview" id="dataset-preview" hidden></pre>
+        </div>
+
+        <!-- Step 2: Policy -->
+        <div class="wizard-pane" id="pane-2" role="tabpanel" hidden>
+          <h2 class="pane-title">Policy</h2>
+          <div class="form-group">
+            <label class="label">Evaluation name (optional)</label>
+            <input type="text" id="evaluation-name" class="input" placeholder="My evaluation">
+          </div>
+          <div class="form-group">
+            <fieldset class="policy-reveal">
+              <legend class="label">Reveal options</legend>
+              <label class="checkbox-label"><input type="checkbox" id="reveal-max-severity" name="reveal_max_severity"> Max severity</label>
+              <label class="checkbox-label"><input type="checkbox" id="reveal-commitment" name="reveal_commitment" checked> Commitment</label>
+            </fieldset>
+          </div>
+          <div class="form-group">
+            <label class="label">Constraints</label>
+            <p class="text-muted">Enable constraints and set the allowed max severity (Limited, Moderate, Severe).</p>
+            <div class="constraints-toolbar">
+              <span class="constraints-count" id="constraints-count">0 enabled</span>
+            </div>
+            <div id="constraints-list" class="constraints-list"></div>
+          </div>
+          <div class="form-group">
+            <label class="label">Custom constraints (up to 5)</label>
+            <div id="custom-constraints-list"></div>
+            <button type="button" id="add-custom-constraint" class="btn btn-ghost btn-sm">+ Add custom constraint</button>
+            <p class="form-hint" id="custom-constraints-hint">Add up to five custom constraints.</p>
+          </div>
+        </div>
+
+        <!-- Step 3: Review & Run -->
+        <div class="wizard-pane" id="pane-3" role="tabpanel" hidden>
+          <h2 class="pane-title">Review & Run</h2>
+          <div id="review-summary" class="review-summary"></div>
+          <p class="text-muted">Next: we’ll run the evaluation, generate a proof, and open your results.</p>
+          <div id="submit-error" class="error" style="display:none;"></div>
+          <div id="running-state" class="running-state" style="display:none;">
+            <p class="text-muted">Running evaluation…</p>
+          </div>
+        </div>
+      </form>
+
+      <div class="wizard-nav">
+        <button type="button" class="btn btn-ghost" id="wizard-prev" disabled>Previous</button>
+        <button type="button" class="btn btn-primary" id="wizard-next">Next</button>
+      </div>
+    </div>
+  </main>
+  <script src="/static/constraints.js"></script>
+  <script src="/static/wizard.js"></script>
+</body>
+</html>
+{{end}}

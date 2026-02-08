@@ -1,0 +1,41 @@
+{{define "verify"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Verify</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_public" .}}
+
+  <main class="main main-verify">
+    {{template "orb" .}}
+    <div class="card verify-card">
+      <div class="verify-header">
+        <div>
+          <div class="card-kicker">Public</div>
+          <h1 class="card-title">Public verification</h1>
+          <p class="card-text">Verify recent proofs without revealing datasets. Recent runs are loaded from this browser.</p>
+        </div>
+        <button type="button" class="btn btn-primary btn-sm" id="verify-all">Verify all recent</button>
+      </div>
+
+      <div class="verify-controls">
+        <input type="text" id="verify-filter" class="input" placeholder="Filter by run id">
+        <div class="verify-meta">
+          <span class="verify-muted" id="verify-count"></span>
+          <span class="verify-muted" id="verify-progress"></span>
+        </div>
+      </div>
+
+      <div class="verify-list" id="verify-list">
+        <p class="verify-muted" id="verify-empty">No proofs yet. Run an evaluation to generate a proof.</p>
+      </div>
+    </div>
+  </main>
+  <script src="/static/verify.js"></script>
+</body>
+</html>
+{{end}}
