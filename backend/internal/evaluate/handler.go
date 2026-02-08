@@ -146,6 +146,12 @@ func Handler(runsDir string, maxRuns int) gin.HandlerFunc {
 			return
 		}
 
+		if err := saveRunMetadata(runPath, spec, evalOut); err != nil {
+			log.Printf("save run metadata: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist run metadata"})
+			return
+		}
+
 		cleanupRun = false
 		if err := updateRunsIndex(runsDir, config.RunsIndexLimit(), RunIndexEntry{
 			RunID:          runID,

@@ -1,0 +1,1133 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3cb5-0f97-75c0-9887-99da0aeb246d
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Preparing to run commands**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 272ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+ok  	noema/internal/config	(cached)
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Planning targeted improvements**
+
+Tests are passing, so I'll inspect the repo for meaningful TODOs or areas needing enhancement to identify a focused improvement affecting at most three files.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "TODO|FIXME|BUG" -n' in /Users/yani/Noema/backend exited 1 in 51ms:
+
+
+thinking
+**Searching for error handling and validation**
+
+I'm checking for panic handling or validation in internal packages like httputil or evaluate to find relevant recent code for improvements.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
+cmd
+data
+go.mod
+go.sum
+internal
+main
+server
+web
+
+thinking
+**Searching for uncontrolled body reads**
+
+I'm searching for usage of reading request bodies without limits to identify spots needing context cancel handling or body size constraints.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "ReadAll|ReadFrom" internal cmd server -n' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/dataset.go:32:	raw, err := io.ReadAll(io.LimitReader(src, int64(config.MaxDatasetBytes)+1))
+internal/evaluate/images.go:27:		data, err := io.ReadAll(io.LimitReader(src, int64(config.MaxImageBytes)+1))
+
+thinking
+**Searching for HTTP body size limits**
+
+I'll look for uses of http.MaxBytesReader to understand how the app currently limits HTTP body sizes and consider adding or adjusting such limits.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "MaxBytesReader|LimitReader|Max.*Bytes" internal cmd server -n' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/verify/handler_test.go:157:	largeRunID := strings.Repeat("a", config.MaxVerifyBytes)
+internal/verify/handler.go:33:		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxVerifyBytes)
+internal/evaluate/parse.go:90:	if datasetFile.Size > config.MaxDatasetBytes {
+internal/evaluate/parse.go:91:		return nil, nil, fmt.Errorf("dataset exceeds limit of %s", formatBytes(int64(config.MaxDatasetBytes)))
+internal/evaluate/parse.go:113:		if f.Size > config.MaxImageBytes {
+internal/evaluate/parse.go:114:			return nil, nil, fmt.Errorf("each image must be at most %s", formatBytes(int64(config.MaxImageBytes)))
+internal/httputil/body_test.go:16:		{name: "max bytes error", err: &http.MaxBytesError{Limit: 1}, want: true},
+internal/evaluate/dataset.go:32:	raw, err := io.ReadAll(io.LimitReader(src, int64(config.MaxDatasetBytes)+1))
+internal/evaluate/dataset.go:36:	if len(raw) > config.MaxDatasetBytes {
+internal/evaluate/dataset.go:37:		return nil, Dataset{}, fmt.Errorf("dataset exceeds limit of %s", formatBytes(int64(config.MaxDatasetBytes)))
+internal/evaluate/handler.go:49:		maxBody := int64(config.MaxDatasetBytes) + int64(config.MaxImages*config.MaxImageBytes) + multipartOverhead
+internal/evaluate/handler.go:50:		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBody)
+internal/httputil/body.go:9:// IsBodyTooLarge reports whether the error indicates the request body exceeded MaxBytesReader.
+internal/httputil/body.go:14:	var maxBytesErr *http.MaxBytesError
+internal/evaluate/images.go:27:		data, err := io.ReadAll(io.LimitReader(src, int64(config.MaxImageBytes)+1))
+internal/evaluate/images.go:32:		if len(data) > config.MaxImageBytes {
+internal/evaluate/images.go:33:			return nil, fmt.Errorf("image %q exceeds limit of %s", fh.Filename, formatBytes(int64(config.MaxImageBytes)))
+internal/web/upload.go:34:	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
+internal/web/upload.go:55:	if file.Size > config.MaxUploadBytes {
+internal/config/limits.go:4:	MaxDatasetBytes    = 50 * 1024 * 1024 // 50MB
+
+thinking
+**Checking config types for overflow risks**
+
+I'll review config and limits.go to verify if config values are ints and if maxBody's int64 calculation could overflow, aiming to identify possible overflow issues in the evaluate/handler logic.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,120p' internal/config/limits.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package config
+
+const (
+	MaxDatasetBytes    = 50 * 1024 * 1024 // 50MB
+	MaxImageBytes      = 5 * 1024 * 1024  // 5MB
+	MaxImages          = 10
+	MaxUploadBytes     = 50 * 1024 * 1024 // 50MB
+	MaxVerifyBytes     = 5 * 1024 * 1024  // 5MB
+	MaxMultipartMemory = 100 << 20        // 100MB for evaluate (dataset + images)
+)
+
+thinking
+**Reviewing upload handler details**
+
+I'm checking the maxBody size calculation and considering adding validation against negative sizes. Next, I'll inspect internal/web/upload.go for potential missing content-type handling.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/web/upload.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package web
+
+import (
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+
+	"github.com/gin-gonic/gin"
+)
+
+// UploadData is passed to the upload template.
+type UploadData struct {
+	Error    string
+
+thinking
+**Considering file handling improvements**
+
+I'm reviewing file size limits, content-type validation, and file permission settings, noting potential tweaks like stricter modes and handling unknown source sizes; next, I'll inspect the verify/handler.go for related logic.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/verify/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package verify
+
+import (
+	"encoding/base64"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+// VerifyRequest is the JSON body for POST /api/verify.
+type VerifyRequest struct {
+	RunID           string `json:"run_id"`
+	ProofB64        string `json:"proof_b64"`
+	PublicInputsB64 string `json:"public_inputs_b64"`
+
+thinking
+**Inspecting evaluation parsing code**
+
+I'm checking the evaluate/parse.go file to see how data is handled and whether validation for base64 size or dataset format is appropriate here.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"path/filepath"
+	"strings"
+
+	"noema/internal/config"
+)
+
+func parseSpec(form *multipart.Form) (Spec, error) {
+	specStrs := form.Value["spec"]
+	if len(specStrs) == 0 || specStrs[0] == "" {
+		return Spec{}, fmt.Errorf("missing field: spec")
+	}
+	if len(specStrs) > 1 {
+		return Spec{}, fmt.Errorf("only one spec value allowed")
+
+thinking
+**Identifying potential parseSpec improvements**
+
+Considering enhancing parseSpec's error messages to include decode errors; also noticing internal/httputil/body.go as another area to review next.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/httputil/body.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package httputil
+
+import (
+	"errors"
+	"net/http"
+	"strings"
+)
+
+// IsBodyTooLarge reports whether the error indicates the request body exceeded MaxBytesReader.
+func IsBodyTooLarge(err error) bool {
+	if err == nil {
+		return false
+	}
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "request body too large") ||
+		strings.Contains(msg, "multipart: message too large")
+
+thinking
+**Planning error handling review**
+
+I'm targeting internal/evaluate/handler.go to check for potential correctness issues and improve error handling around non-EOF decoding.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
+	}
+
+	sort.Slice(runs, func(i, j int) bool {
+		return runs[i].modTime.After(runs[j].modTime)
+	})
+
+	for i := maxRuns; i < len(runs); i++ {
+		if err := os.RemoveAll(runs[i].path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func parseEvalOutputOptional(form *multipart.Form, enabled map[string]ConstraintRule) (EvalOutput, error) {
+	out, provided, err := parseEvalOutputProvided(form, enabled)
+	if err != nil {
+		return EvalOutput{}, err
+	}
+	if !provided {
+
+thinking
+**Reviewing dataset file parsing**
+
+I'm checking the dataset.go file to verify how dataset files are read and whether JSON decoding errors are properly handled, aiming to improve robustness in data parsing and validation.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"strings"
+
+	"noema/internal/config"
+)
+
+type Dataset struct {
+	Items []DatasetItem `json:"items"`
+}
+
+type DatasetItem struct {
+	ID       string         `json:"id"`
+	Text     string         `json:"text"`
+
+thinking
+**Reviewing dataset item text trimming**
+
+Noticed that dataset item text trims whitespace and checks for emptiness but doesn't explicitly forbid leading/trailing whitespace; this might be acceptable. Also considering checking metadata size constraints next.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/images.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"fmt"
+	"io"
+	"mime"
+	"mime/multipart"
+	"path/filepath"
+	"strings"
+
+	"noema/internal/config"
+)
+
+type ImageInfo struct {
+	Filename string
+	MIMEType string
+	Data     []byte
+}
+
+func readImages(files []*multipart.FileHeader) ([]ImageInfo, error) {
+
+thinking
+**Considering validation and error handling improvements**
+
+I'm spotting potential improvements like adding base64 size checks in verification, enhancing upload error messages, enforcing ASCII and trimming on run IDs, validating unknown fields in dataset JSON, and handling evaluation output errors with cleanup after failures. Next, I'll prioritize the highest-impact fixes and review related tests for coverage gaps.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/resolve.go" in /Users/yani/Noema/backend exited 1 in 51ms:
+sed: internal/evaluate/resolve.go: No such file or directory
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "resolveEvalOutput" -n' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/gemini_eval.go:16:func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
+internal/evaluate/handler.go:104:		evalOut, err := resolveEvalOutput(c.Request.Context(), form, enabled, runsDir, spec, datasetFile, imageFiles)
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/gemini_eval.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"context"
+	"log"
+	"mime/multipart"
+	"os"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/gemini"
+)
+
+const geminiEvalTimeout = 45 * time.Second
+
+func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
+	if out, provided, err := parseEvalOutputProvided(form, enabled); err != nil {
+		return EvalOutput{}, err
+	} else if provided {
+		return out, nil
+
+thinking
+**Considering eval_output fallback improvements**
+
+I'm evaluating adding a deterministic fallback for gemini integration when eval_output and API key are missing, possibly with input size limits or base64 validation earlier to avoid costly decodes and clearer errors. Next, I'll review internal/zk/verify.go for current error handling.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/zk/verify.go" in /Users/yani/Noema/backend exited 1 in 51ms:
+sed: internal/zk/verify.go: No such file or directory
+
+thinking
+**Listing internal directories**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/zk' in /Users/yani/Noema/backend succeeded in 51ms:
+FORMAT.md
+zk.go
+zk_test.go
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package zk
+
+import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+const (
+	ProofSystem = "groth16"
+	ProofCurve  = "bn254"
+
+	publicInputsPrefix = "noema_public_inputs_v1|"
+	proofPrefix        = "noema_stub_proof_v1|"
+)
+
+// PublicInputs define the public inputs for policy aggregation.
+
+thinking
+**Inspecting cache files for issues**
+
+I'm checking gemini cache files to verify if caching handles large proof data efficiently and to identify any possible bugs in the cache key.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/cache.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+type CachedGeminiOutput struct {
+	Model         string       `json:"model"`
+	PromptVersion string       `json:"prompt_version"`
+	Output        EvalOutput   `json:"output"`
+	RawText       string       `json:"raw_text"`
+	Usage         *GeminiUsage `json:"usage,omitempty"`
+	CachedAt      string       `json:"cached_at"`
+}
+
+thinking
+**Considering JSON error handling**
+
+I'm checking whether the parseEvalOutputProvided function properly handles invalid JSON to improve robustness.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/output.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+)
+
+type EvalConstraintResult struct {
+	ID        string `json:"id"`
+	Severity  int    `json:"severity"`
+	Rationale string `json:"rationale"`
+}
+
+type EvalOutput struct {
+	SchemaVersion int                    `json:"schema_version"`
+	Constraints   []EvalConstraintResult `json:"constraints"`
+	MaxSeverity   int                    `json:"max_severity"`
+	Confidence    *float64               `json:"confidence,omitempty"`
+
+
+thinking
+**Noting minor error handling and size check improvements**
+
+Considering refining error messages to clarify when user-provided eval_output causes JSON issues, and verifying multipart upload size checks handle zero or unknown sizes safely given existing byte limits.
+thinking
+**Checking persistence after saving run files**
+
+Noticing saveRunFiles may not persist spec or eval data; planning to verify what exactly it saves for completeness.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "saveRunFiles" -n internal/evaluate' in /Users/yani/Noema/backend succeeded in 51ms:
+internal/evaluate/storage.go:32:func saveRunFiles(runPath string, dataset *multipart.FileHeader, images []*multipart.FileHeader) error {
+internal/evaluate/handler.go:93:		if err := saveRunFiles(runPath, datasetFile, imageFiles); err != nil {
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math/big"
+	"mime/multipart"
+	"os"
+	"path/filepath"
+	"strconv"
+	"sync/atomic"
+	"time"
+)
+
+var runIDCounter uint64
+
+func genRunID() string {
+	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
+
+
+thinking
+**Reviewing upload sanitization and size checks**
+
+Noticed that filepath.Base is used to clean filenames, removing path separators but the safe sanitizer removes dots which might alter names unexpectedly; also confirmed upload respects MaxBytesReader limits, but size verification after copying could be tightened to catch mismatches. Next, testing updateRunsIndex and better handling of empty or whitespace-only eval outputs may help catch minor bugs.
+thinking
+**Considering edge cases for size checks and request limits**
+
+Noted that zero file size with data written isn't flagged, but MaxBytesReader should prevent oversize uploads; also thinking to limit runID length in handlers to avoid memory issues and add tests covering multipart message size errors.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/httputil/body_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package httputil
+
+import (
+	"errors"
+	"net/http"
+	"testing"
+)
+
+func TestIsBodyTooLarge(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{name: "max bytes error", err: &http.MaxBytesError{Limit: 1}, want: true},
+		{name: "http too large string", err: errors.New("http: request body too large"), want: true},
+		{name: "multipart too large string", err: errors.New("multipart: message too large"), want: true},
+		{name: "other error", err: errors.New("boom"), want: false},
+	}
+
+thinking
+**Reviewing potential improvements in upload and parsing**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/session' in /Users/yani/Noema/backend succeeded in 52ms:
+session.go
+session_test.go
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/session/session.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package session
+
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"strings"
+)
+
+const CookieName = "noema_judge"
+
+// Sign produces a signed cookie value for the given payload (e.g. judge key).
+// Format: base64(payload) + "." + hex(HMAC-SHA256(secret, payload)).
+func Sign(secret, payload string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(payload))
+	sig := hex.EncodeToString(mac.Sum(nil))
+	encoded := base64.StdEncoding.EncodeToString([]byte(payload))
+
+thinking
+**Reviewing potential improvements in file upload and evaluation handlers**
+
+I'm considering adding file size validation for user uploads, especially if Content-Length is missing, and improving error details in spec parsing. Also checking cleanup logic reliability after evaluation and verifying atomic write fsync correctness. Next, I'll inspect server command code for further insights.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' cmd/server/main.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package main
+
+import (
+	"context"
+	"log"
+	"os"
+	"strings"
+
+	"noema/internal/auth"
+	"noema/internal/config"
+	"noema/internal/evaluate"
+	"noema/internal/gemini"
+	"noema/internal/verify"
+	"noema/internal/web"
+
+	"github.com/gin-gonic/gin"
+)
+
+func main() {
+	if err := config.Load(); err != nil {
+
+
+thinking
+**Evaluating request size and error handling**
+
+Considering adding stricter size checks by validating io.Copy bytes against max limits and enhancing multipart error detection for body-too-large cases not caught by default. Also planning to limit runID length in verify handler to prevent excessive memory use despite existing body size limits.
+thinking
+**Improving error messages and input validation**
+
+Planning to enhance JSON parse error details for clearer user feedback and considering checks for duplicate image references across dataset items. Also reviewing multipart memory limits to prevent excessive in-memory resource use during form parsing.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/config/config.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package config
+
+import (
+	"os"
+	"strconv"
+
+	"github.com/joho/godotenv"
+)
+
+const devCookieSecret = "dev-secret-change-in-production"
+
+// Load reads .env from the current directory and sets env vars.
+// Safe to call multiple times; existing env vars are not overwritten.
+func Load() error {
+	return godotenv.Load()
+}
+
+// JudgeKey returns the judge key used to gate protected routes.
+func JudgeKey() string {
+	return os.Getenv("JUDGE_KEY")
+
+thinking
+**Reviewing prompt building for improvements**
+
+I'm inspecting the evaluate/prompt module to see if the prompt construction can be improved, especially regarding dataset validation or trimming whitespace in dataset items.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/prompt.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
+)
+
+const promptVersion = "noema-eval-v1"
+
+type PromptConstraint struct {
+	ID                 string
+	Description        string
+	SeverityLevels     map[string]string
+	AllowedMaxSeverity int
+}
+
+var presetConstraints = map[string]PromptConstraint{
+
+thinking
+**Reviewing constraint assignment and usage**
+
+I found that preset constraints are assigned from a map and then modified locally, which is correct since it changes only the local copy. Next, I'll check how enabled constraints work and whether parsing occurs when constraints are disabled by examining the constraints evaluation code.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/constraints.go" in /Users/yani/Noema/backend exited 1 in 52ms:
+sed: internal/evaluate/constraints.go: No such file or directory
+
+thinking
+**Locating enabledConstraints**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "enabledConstraints" -n internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/handler_test.go:66:	enabled, err := enabledConstraints(spec)
+internal/evaluate/handler_test.go:68:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:133:	enabled, err := enabledConstraints(spec)
+internal/evaluate/handler_test.go:135:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:171:	enabled, err := enabledConstraints(spec)
+internal/evaluate/handler_test.go:173:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:201:	enabled, err := enabledConstraints(spec)
+internal/evaluate/handler_test.go:203:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:231:	enabled, err := enabledConstraints(spec)
+internal/evaluate/handler_test.go:233:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:262:	enabled, err := enabledConstraints(spec)
+internal/evaluate/handler_test.go:264:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/policy.go:10:func enabledConstraints(spec Spec) (map[string]ConstraintRule, error) {
+internal/evaluate/handler.go:98:		enabled, err := enabledConstraints(spec)
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/policy.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import "fmt"
+
+type ConstraintRule struct {
+	ID                 string
+	AllowedMaxSeverity int
+}
+
+func enabledConstraints(spec Spec) (map[string]ConstraintRule, error) {
+	out := make(map[string]ConstraintRule)
+	for _, c := range spec.Constraints {
+		if !c.Enabled {
+			continue
+		}
+		if _, exists := out[c.ID]; exists {
+			return nil, fmt.Errorf("duplicate constraint id: %s", c.ID)
+		}
+		out[c.ID] = ConstraintRule{ID: c.ID, AllowedMaxSeverity: c.AllowedMaxSeverity}
+	}
+
+
+thinking
+**Considering reliability improvements**
+
+I'm exploring small enhancements like adding stricter JSON decoding with DisallowUnknownFields after initial parsing to catch schema mismatches and ensuring dataset size limits by reading with a capped buffer to catch oversized inputs early. Next, I'll focus on integrating these checks in dataset file processing and consider adding relevant tests.
+thinking
+**Planning run artifact persistence**
+
+I'm considering adding saving of spec and eval output JSON files to the run directory after evaluation to improve observability and debugging, treating failures in saving as fatal to ensure run completeness. Next, I'll review handler tests to prepare for this small but meaningful change and ensure proper error and cleanup handling.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"mime/multipart"
+	"net/textproto"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"testing"
+	"time"
+)
+
+type formFile struct {
+	field       string
+	filename    string
+	contentType string
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+		t.Fatalf("expected error for trailing garbage")
+	}
+}
+
+func TestParseEvalOutputOptional_RejectsMultipleValues(t *testing.T) {
+	spec := Spec{
+		SchemaVersion: 1,
+		Constraints: []Constraint{
+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+		},
+	}
+	enabled, err := enabledConstraints(spec)
+	if err != nil {
+		t.Fatalf("enabledConstraints error: %v", err)
+	}
+
+	payload := EvalOutput{
+		SchemaVersion: 1,
+		Constraints: []EvalConstraintResult{
+			{ID: "pii_exposure_risk", Severity: 0, Rationale: "ok"},
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '520,1040p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+		},
+	}
+	if err := validateSpec(spec); err == nil {
+		t.Fatalf("expected error for whitespace in evaluation_name")
+	}
+}
+
+func TestParseSpec_RejectsUnknownFields(t *testing.T) {
+	form := &multipart.Form{
+		Value: map[string][]string{
+			"spec": {`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[],"extra":true}`},
+		},
+	}
+	if _, err := parseSpec(form); err == nil {
+		t.Fatalf("expected error for unknown spec fields")
+	}
+}
+
+func TestParseSpec_RejectsMultipleValues(t *testing.T) {
+	form := &multipart.Form{
+
+
+thinking
+**Noting potential UX and test improvements**
+
+Considering adding clearer error messages for eval output parsing errors to improve user experience and debating whether to introduce tests for new saving functionality; current caching logic seems safe as versioning is included in keys.
+thinking
+**Refining error handling and sanitization**
+
+Planning to make eval output error messages more generic and safer by sanitizing details to avoid leaking decoding errors to users; also considering stricter spec validation and minor handler improvements around proof error handling.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/spec.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+// Spec is the parsed evaluation spec (schema_version 1).
+type Spec struct {
+	SchemaVersion     int                `json:"schema_version"`
+	EvaluationName    string             `json:"evaluation_name"`
+	Policy            Policy             `json:"policy"`
+	Constraints       []Constraint       `json:"constraints"`
+	CustomConstraints []CustomConstraint `json:"custom_constraints"`
+}
+
+type Policy struct {
+	Reveal RevealPolicy `json:"reveal"`
+}
+
+type RevealPolicy struct {
+	MaxSeverity bool `json:"max_severity"`
+	Commitment  bool `json:"commitment"`
+}
+
+
+
+thinking
+**Reviewing validation and error handling improvements**
+
+The policy fields aren't currently validated, and some fields like reveal max severity may be optional; defaults seem acceptable but completeness is questionable. The evaluate handler returns 500 if verification fails and 400 for parsing errors, with saved runs cleaned up properly. Upload lacks explicit content-type checks but errors correctly on invalid multipart. Next actionable task is improving parse evaluation output error messages for better user clarity, balancing impact against cosmetic-only changes.
+thinking
+**Refining eval output errors and multipart limits**
+
+I'm planning to improve eval output parsing by returning clearer typed errors to reduce confusion, renaming error constants for precision. Multipart upload limits slightly exceed in-memory max size but gin handles overflow with temp files, so no risk. Considering small validation tweaks like trimming dataset text seems risky, so I'll skip it. Next, I'll focus on enhancing error clarity and consider adding a test for oversized request body detection.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/auth/cookie.go" in /Users/yani/Noema/backend exited 1 in 52ms:
+sed: internal/auth/cookie.go: No such file or directory
+
+thinking
+**Listing authentication internals**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/auth' in /Users/yani/Noema/backend succeeded in 51ms:
+middleware.go
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/auth/middleware.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package auth
+
+import (
+	"crypto/subtle"
+	"net/http"
+	"net/url"
+	"strings"
+
+	"noema/internal/config"
+	"noema/internal/session"
+
+	"github.com/gin-gonic/gin"
+)
+
+// JudgeKey checks the request for a valid judge key (header or query).
+// Use for API routes only. Expects X-Judge-Key header or judge_key query param to match JUDGE_KEY in .env.
+func JudgeKey() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		expect := config.JudgeKey()
+		if expect == "" {
+
+
+thinking
+**Noticing redundant dataset file reads**
+
+There's redundant reading of the dataset file both in validation and evaluation because raw bytes are needed later for caching; passing raw data earlier isn't used now but could be considered as a small optimization.
+thinking
+**Designing run metadata persistence**
+
+I'm planning to add a helper to save spec and evaluation output JSON files to the run directory after proof verification, before marking the run for cleanup, to enable better debugging and run persistence with minimal impact.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/storage.go
+@@ -48,2 +48,12 @@
+ 
++func saveRunMetadata(runPath string, spec Spec, evalOut EvalOutput) error {
++	if err := saveJSON(filepath.Join(runPath, "spec.json"), spec); err != nil {
++		return fmt.Errorf("failed to save spec: %w", err)
++	}
++	if err := saveJSON(filepath.Join(runPath, "eval_output.json"), evalOut); err != nil {
++		return fmt.Errorf("failed to save evaluation output: %w", err)
++	}
++	return nil
++}
++
+ func saveUpload(fh *multipart.FileHeader, dst string) error {
+apply_patch(auto_approved=true) exited 0 in 31ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/storage.go
+file update:
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 6335cc50f563461022b0797c177d28c3c0ee19b6..886de4b4bb5677d3ee150f88269ec719f9050c70
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -46,6 +46,16 @@
+ 	return nil
+ }
+ 
++func saveRunMetadata(runPath string, spec Spec, evalOut EvalOutput) error {
++	if err := saveJSON(filepath.Join(runPath, "spec.json"), spec); err != nil {
++		return fmt.Errorf("failed to save spec: %w", err)
++	}
++	if err := saveJSON(filepath.Join(runPath, "eval_output.json"), evalOut); err != nil {
++		return fmt.Errorf("failed to save evaluation output: %w", err)
++	}
++	return nil
++}
++
+ func saveUpload(fh *multipart.FileHeader, dst string) error {
+ 	src, err := fh.Open()
+ 	if err != nil {
+
+file update:
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 6335cc50f563461022b0797c177d28c3c0ee19b6..886de4b4bb5677d3ee150f88269ec719f9050c70
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -46,6 +46,16 @@
+ 	return nil
+ }
+ 
++func saveRunMetadata(runPath string, spec Spec, evalOut EvalOutput) error {
++	if err := saveJSON(filepath.Join(runPath, "spec.json"), spec); err != nil {
++		return fmt.Errorf("failed to save spec: %w", err)
++	}
++	if err := saveJSON(filepath.Join(runPath, "eval_output.json"), evalOut); err != nil {
++		return fmt.Errorf("failed to save evaluation output: %w", err)
++	}
++	return nil
++}
++
+ func saveUpload(fh *multipart.FileHeader, dst string) error {
+ 	src, err := fh.Open()
+ 	if err != nil {
+
+
+thinking
+**Adding metadata save step**
+
+I'm updating the handler to save run metadata right after proof verification and before disabling cleanupRun, ensuring metadata is recorded in the correct sequence.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler.go
+@@ -148,2 +148,8 @@
+ 
++		if err := saveRunMetadata(runPath, spec, evalOut); err != nil {
++			log.Printf("save run metadata: %v", err)
++			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist run metadata"})
++			return
++		}
++
+ 		cleanupRun = false
+apply_patch(auto_approved=true) exited 0 in 35ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/handler.go
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index f2b309e8d060d9a5c2c1704ea1624f889812bb14..69b7d313c284e6c470579c40efd8410e2ab09148
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -146,6 +146,12 @@
+ 			return
+ 		}
+ 
++		if err := saveRunMetadata(runPath, spec, evalOut); err != nil {
++			log.Printf("save run metadata: %v", err)
++			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist run metadata"})
++			return
++		}
++
+ 		cleanupRun = false
+ 		if err := updateRunsIndex(runsDir, config.RunsIndexLimit(), RunIndexEntry{
+ 			RunID:          runID,
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 6335cc50f563461022b0797c177d28c3c0ee19b6..886de4b4bb5677d3ee150f88269ec719f9050c70
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -46,6 +46,16 @@
+ 	return nil
+ }
+ 
++func saveRunMetadata(runPath string, spec Spec, evalOut EvalOutput) error {
++	if err := saveJSON(filepath.Join(runPath, "spec.json"), spec); err != nil {
++		return fmt.Errorf("failed to save spec: %w", err)
++	}
++	if err := saveJSON(filepath.Join(runPath, "eval_output.json"), evalOut); err != nil {
++		return fmt.Errorf("failed to save evaluation output: %w", err)
++	}
++	return nil
++}
++
+ func saveUpload(fh *multipart.FileHeader, dst string) error {
+ 	src, err := fh.Open()
+ 	if err != nil {
+
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index f2b309e8d060d9a5c2c1704ea1624f889812bb14..69b7d313c284e6c470579c40efd8410e2ab09148
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -146,6 +146,12 @@
+ 			return
+ 		}
+ 
++		if err := saveRunMetadata(runPath, spec, evalOut); err != nil {
++			log.Printf("save run metadata: %v", err)
++			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist run metadata"})
++			return
++		}
++
+ 		cleanupRun = false
+ 		if err := updateRunsIndex(runsDir, config.RunsIndexLimit(), RunIndexEntry{
+ 			RunID:          runID,
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 6335cc50f563461022b0797c177d28c3c0ee19b6..886de4b4bb5677d3ee150f88269ec719f9050c70
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -46,6 +46,16 @@
+ 	return nil
+ }
+ 
++func saveRunMetadata(runPath string, spec Spec, evalOut EvalOutput) error {
++	if err := saveJSON(filepath.Join(runPath, "spec.json"), spec); err != nil {
++		return fmt.Errorf("failed to save spec: %w", err)
++	}
++	if err := saveJSON(filepath.Join(runPath, "eval_output.json"), evalOut); err != nil {
++		return fmt.Errorf("failed to save evaluation output: %w", err)
++	}
++	return nil
++}
++
+ func saveUpload(fh *multipart.FileHeader, dst string) error {
+ 	src, err := fh.Open()
+ 	if err != nil {
+
+
+thinking
+**Planning test execution**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 721ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+ok  	noema/internal/config	(cached)
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.159s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index f2b309e8d060d9a5c2c1704ea1624f889812bb14..69b7d313c284e6c470579c40efd8410e2ab09148
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -146,6 +146,12 @@
+ 			return
+ 		}
+ 
++		if err := saveRunMetadata(runPath, spec, evalOut); err != nil {
++			log.Printf("save run metadata: %v", err)
++			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist run metadata"})
++			return
++		}
++
+ 		cleanupRun = false
+ 		if err := updateRunsIndex(runsDir, config.RunsIndexLimit(), RunIndexEntry{
+ 			RunID:          runID,
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 6335cc50f563461022b0797c177d28c3c0ee19b6..886de4b4bb5677d3ee150f88269ec719f9050c70
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -46,6 +46,16 @@
+ 	return nil
+ }
+ 
++func saveRunMetadata(runPath string, spec Spec, evalOut EvalOutput) error {
++	if err := saveJSON(filepath.Join(runPath, "spec.json"), spec); err != nil {
++		return fmt.Errorf("failed to save spec: %w", err)
++	}
++	if err := saveJSON(filepath.Join(runPath, "eval_output.json"), evalOut); err != nil {
++		return fmt.Errorf("failed to save evaluation output: %w", err)
++	}
++	return nil
++}
++
+ func saveUpload(fh *multipart.FileHeader, dst string) error {
+ 	src, err := fh.Open()
+ 	if err != nil {
+
+codex
+What you changed (short)
+- Persist evaluation run metadata by saving `spec.json` and `eval_output.json` into each successful run directory, with error handling if persistence fails.
+
+Tests run
+- `go test ./...`
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index f2b309e8d060d9a5c2c1704ea1624f889812bb14..69b7d313c284e6c470579c40efd8410e2ab09148
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -146,6 +146,12 @@
+ 			return
+ 		}
+ 
++		if err := saveRunMetadata(runPath, spec, evalOut); err != nil {
++			log.Printf("save run metadata: %v", err)
++			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist run metadata"})
++			return
++		}
++
+ 		cleanupRun = false
+ 		if err := updateRunsIndex(runsDir, config.RunsIndexLimit(), RunIndexEntry{
+ 			RunID:          runID,
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 6335cc50f563461022b0797c177d28c3c0ee19b6..886de4b4bb5677d3ee150f88269ec719f9050c70
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -46,6 +46,16 @@
+ 	return nil
+ }
+ 
++func saveRunMetadata(runPath string, spec Spec, evalOut EvalOutput) error {
++	if err := saveJSON(filepath.Join(runPath, "spec.json"), spec); err != nil {
++		return fmt.Errorf("failed to save spec: %w", err)
++	}
++	if err := saveJSON(filepath.Join(runPath, "eval_output.json"), evalOut); err != nil {
++		return fmt.Errorf("failed to save evaluation output: %w", err)
++	}
++	return nil
++}
++
+ func saveUpload(fh *multipart.FileHeader, dst string) error {
+ 	src, err := fh.Open()
+ 	if err != nil {
+
+tokens used
+79,393
+What you changed (short)
+- Persist evaluation run metadata by saving `spec.json` and `eval_output.json` into each successful run directory, with error handling if persistence fails.
+
+Tests run
+- `go test ./...`

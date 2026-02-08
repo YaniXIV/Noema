@@ -46,6 +46,16 @@ func saveRunFiles(runPath string, dataset *multipart.FileHeader, images []*multi
 	return nil
 }
 
+func saveRunMetadata(runPath string, spec Spec, evalOut EvalOutput) error {
+	if err := saveJSON(filepath.Join(runPath, "spec.json"), spec); err != nil {
+		return fmt.Errorf("failed to save spec: %w", err)
+	}
+	if err := saveJSON(filepath.Join(runPath, "eval_output.json"), evalOut); err != nil {
+		return fmt.Errorf("failed to save evaluation output: %w", err)
+	}
+	return nil
+}
+
 func saveUpload(fh *multipart.FileHeader, dst string) error {
 	src, err := fh.Open()
 	if err != nil {
