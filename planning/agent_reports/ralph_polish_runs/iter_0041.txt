@@ -1,0 +1,491 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3ca5-ddaf-7e11-bd0b-12746e5bb8ff
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Running Go tests**
+
+I'm preparing to run `go test` using exec, with no additional skills or setup needed.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 101ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Planning targeted improvement**
+
+Tests pass but the focus is on identifying a small, impactful improvement—likely around error handling—by inspecting code and searching for TODO comments to limit the change to a maximum of three files.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"TODO|FIXME|BUG|panic\\(\" internal" in /Users/yani/Noema/backend exited 1 in 52ms:
+
+
+thinking
+**Planning reliability improvements**
+
+No matches were found for the error scan, so next I'll check config validation and consider scanning internal/web for weak errors to improve reliability.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "error" internal | head -n 200' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/prompt.go:160:func marshalSampledDataset(ds Dataset) ([]byte, error) {
+internal/evaluate/parse.go:13:func parseSpec(form *multipart.Form) (Spec, error) {
+internal/evaluate/parse.go:33:func validateSpec(spec Spec) error {
+internal/evaluate/parse.go:73:func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.FileHeader, error) {
+internal/evaluate/parse.go:105:func validateDatasetJSON(fh *multipart.FileHeader, imageFiles []*multipart.FileHeader) error {
+internal/evaluate/output.go:23:func parseEvalOutput(raw string) (EvalOutput, error) {
+internal/evaluate/output.go:50:func validateEvalOutput(out EvalOutput, enabled map[string]ConstraintRule) error {
+internal/evaluate/handler_test.go:67:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:73:		t.Fatalf("parseEvalOutputOptional error: %v", err)
+internal/evaluate/handler_test.go:110:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:129:		t.Fatalf("parseEvalOutputOptional error: %v", err)
+internal/evaluate/handler_test.go:148:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:165:		t.Fatalf("expected validation error for unknown constraint")
+internal/evaluate/handler_test.go:178:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:195:		t.Fatalf("expected error for trailing garbage")
+internal/evaluate/handler_test.go:208:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:225:		t.Fatalf("expected error for multiple eval_output values")
+internal/evaluate/handler_test.go:239:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:245:		t.Fatalf("parseEvalOutputOptional error: %v", err)
+internal/evaluate/handler_test.go:287:		t.Fatalf("expected error for image_ref without images")
+
+thinking
+**Considering atomic write permissions**
+
+Planning to explore the atomic write method to improve storage write permissions and reliability.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math/big"
+	"mime/multipart"
+	"os"
+	"path/filepath"
+	"strconv"
+	"sync/atomic"
+	"time"
+)
+
+var runIDCounter uint64
+
+func genRunID() string {
+	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
+
+thinking
+**Reviewing file save reliability and security**
+
+I'm confirming that fsync on the directory happens after rename but need to handle temp file close errors on write failure and ensure cleanup removes temp files. Also considering tightening path traversal protections by checking filename handling in upload saving and evaluating parseEvalOutputOptional for related issues.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '200,330p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+			continue
+		}
+		runs = append(runs, runEntry{
+			path:    filepath.Join(runsDir, entry.Name()),
+			modTime: info.ModTime(),
+		})
+	}
+
+	if len(runs) <= maxRuns {
+		return nil
+	}
+
+	sort.Slice(runs, func(i, j int) bool {
+		return runs[i].modTime.After(runs[j].modTime)
+	})
+
+	for i := maxRuns; i < len(runs); i++ {
+		if err := os.RemoveAll(runs[i].path); err != nil {
+			return err
+		}
+
+thinking
+**Noticing potential eval output handling issue**
+
+Observed that the eval output presence check returns false if the output is empty, which may warrant an error response; next, I'll check related tests in handler_test to confirm expected behavior.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '200,280p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+	spec := Spec{
+		SchemaVersion: 1,
+		Constraints: []Constraint{
+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+		},
+	}
+	enabled, err := enabledConstraints(spec)
+	if err != nil {
+		t.Fatalf("enabledConstraints error: %v", err)
+	}
+
+	payload := EvalOutput{
+		SchemaVersion: 1,
+		Constraints: []EvalConstraintResult{
+			{ID: "pii_exposure_risk", Severity: 0, Rationale: "ok"},
+		},
+		MaxSeverity: 0,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+
+thinking
+**Noticing test tolerance for whitespace and considering caching**
+
+Tests ignore whitespace issues but improvements could come from adding caching, so I'll check evaluate/cache.go for relevant logic.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,160p' internal/evaluate/cache.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+type CachedGeminiOutput struct {
+	Model         string       `json:"model"`
+	PromptVersion string       `json:"prompt_version"`
+	Output        EvalOutput   `json:"output"`
+	RawText       string       `json:"raw_text"`
+	Usage         *GeminiUsage `json:"usage,omitempty"`
+	CachedAt      string       `json:"cached_at"`
+}
+
+thinking
+**Considering loadCache error handling**
+
+I'm planning to adjust loadCache to return nil instead of an error when the cache file is missing and will check gemini_eval.go to see how loadCache is used.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/gemini_eval.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"context"
+	"log"
+	"mime/multipart"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/gemini"
+)
+
+const geminiEvalTimeout = 45 * time.Second
+
+func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
+	if out, provided, err := parseEvalOutputProvided(form, enabled); err != nil {
+		return EvalOutput{}, err
+	} else if provided {
+		return out, nil
+	}
+
+thinking
+**Planning cache error and invalidation improvements**
+
+Noticed loadCache silently ignores errors except missing files and doesn’t delete corrupted cache, risking repeated parse attempts; planning to delete invalid cached outputs to prevent this and consider adding selective logging on read errors while respecting non-cosmetic edit rules.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,160p' internal/verify/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package verify
+
+import (
+	"encoding/base64"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+// VerifyRequest is the JSON body for POST /api/verify.
+type VerifyRequest struct {
+	RunID           string `json:"run_id"`
+	ProofB64        string `json:"proof_b64"`
+	PublicInputsB64 string `json:"public_inputs_b64"`
+
+thinking
+**Considering improvements in error handling**
+
+I'm reviewing evaluation and parsing logic to check if ensuring dataset files aren’t empty or enhancing error messages would be beneficial, planning to examine evaluate/parse.go for details next.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"strings"
+
+	"noema/internal/config"
+)
+
+func parseSpec(form *multipart.Form) (Spec, error) {
+	specStrs := form.Value["spec"]
+	if len(specStrs) == 0 || specStrs[0] == "" {
+		return Spec{}, fmt.Errorf("missing field: spec")
+	}
+	if len(specStrs) > 1 {
+		return Spec{}, fmt.Errorf("only one spec value allowed")
+	}
+
+thinking
+**Identifying minor improvements and error handling tweaks**
+
+Noting potential enhancements like validating file sizes from headers, logging unexpected cache read errors without failing, adjusting file mode setting timing, and refining multipart form error checks while weighing behavioral impact.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,120p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+thinking
+**Noting potential overflow and dataset validation**
+
+I observed a possible integer overflow risk when multiplying max images by max image bytes, though impact seems minor. Next, I'll consider adding validation to ensure dataset files are proper JSON and handle empty files by checking the dataset reading logic.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"strings"
+)
+
+type Dataset struct {
+	Items []DatasetItem `json:"items"`
+}
+
+type DatasetItem struct {
+	ID       string         `json:"id"`
+	Text     string         `json:"text"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+	ImageRef string         `json:"image_ref,omitempty"`
+
+
+thinking
+**Identifying cache invalidation improvement**
+
+Noticed the cache file can persist when invalid, causing repeated invalid reads; cleaning up invalid cache files on detection would improve reliability.
+thinking
+**Planning cache invalidation cleanup**
+
+Deciding to remove invalid cache files on detection within gemini_eval to prevent repeated invalid reads and logs, while adding necessary imports and minimal code changes; also considering but deferring extensive error handling or tests.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/gemini_eval.go
+@@ -6,2 +6,3 @@
+ 	"mime/multipart"
++	"os"
+ 	"time"
+@@ -46,2 +47,5 @@
+ 		}
++		_ = os.Remove(cachePath(runsDir, key))
++	} else if !os.IsNotExist(err) {
++		_ = os.Remove(cachePath(runsDir, key))
+ 	}
+apply_patch(auto_approved=true) exited 0 in 32ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/gemini_eval.go
+file update:
+diff --git a/backend/internal/evaluate/gemini_eval.go b/backend/internal/evaluate/gemini_eval.go
+index f0d96de23750e2fe965b8099573e084b3eba9356..a488cd9cc18fa09ed3058a4a51b66b11731e951b
+--- a/backend/internal/evaluate/gemini_eval.go
++++ b/backend/internal/evaluate/gemini_eval.go
+@@ -4,6 +4,7 @@
+ 	"context"
+ 	"log"
+ 	"mime/multipart"
++	"os"
+ 	"time"
+ 
+ 	"noema/internal/config"
+@@ -44,6 +45,9 @@
+ 		if err := validateEvalOutput(cached.Output, enabled); err == nil {
+ 			return cached.Output
+ 		}
++		_ = os.Remove(cachePath(runsDir, key))
++	} else if !os.IsNotExist(err) {
++		_ = os.Remove(cachePath(runsDir, key))
+ 	}
+ 
+ 	sampled := sampleDataset(ds, sampleLimit)
+
+file update:
+diff --git a/backend/internal/evaluate/gemini_eval.go b/backend/internal/evaluate/gemini_eval.go
+index f0d96de23750e2fe965b8099573e084b3eba9356..a488cd9cc18fa09ed3058a4a51b66b11731e951b
+--- a/backend/internal/evaluate/gemini_eval.go
++++ b/backend/internal/evaluate/gemini_eval.go
+@@ -4,6 +4,7 @@
+ 	"context"
+ 	"log"
+ 	"mime/multipart"
++	"os"
+ 	"time"
+ 
+ 	"noema/internal/config"
+@@ -44,6 +45,9 @@
+ 		if err := validateEvalOutput(cached.Output, enabled); err == nil {
+ 			return cached.Output
+ 		}
++		_ = os.Remove(cachePath(runsDir, key))
++	} else if !os.IsNotExist(err) {
++		_ = os.Remove(cachePath(runsDir, key))
+ 	}
+ 
+ 	sampled := sampleDataset(ds, sampleLimit)
+
+
+thinking
+**Running Go tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 591ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.106s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/evaluate/gemini_eval.go b/backend/internal/evaluate/gemini_eval.go
+index f0d96de23750e2fe965b8099573e084b3eba9356..a488cd9cc18fa09ed3058a4a51b66b11731e951b
+--- a/backend/internal/evaluate/gemini_eval.go
++++ b/backend/internal/evaluate/gemini_eval.go
+@@ -4,6 +4,7 @@
+ 	"context"
+ 	"log"
+ 	"mime/multipart"
++	"os"
+ 	"time"
+ 
+ 	"noema/internal/config"
+@@ -44,6 +45,9 @@
+ 		if err := validateEvalOutput(cached.Output, enabled); err == nil {
+ 			return cached.Output
+ 		}
++		_ = os.Remove(cachePath(runsDir, key))
++	} else if !os.IsNotExist(err) {
++		_ = os.Remove(cachePath(runsDir, key))
+ 	}
+ 
+ 	sampled := sampleDataset(ds, sampleLimit)
+
+codex
+What I changed (short)
+- Purged invalid or corrupted Gemini cache entries so a bad cache can’t repeatedly short-circuit evaluation. (`internal/evaluate/gemini_eval.go`)
+
+Tests run
+- `go test ./...`
+
+If you want, I can add a small unit test around cache invalidation behavior next.
+file update:
+diff --git a/backend/internal/evaluate/gemini_eval.go b/backend/internal/evaluate/gemini_eval.go
+index f0d96de23750e2fe965b8099573e084b3eba9356..a488cd9cc18fa09ed3058a4a51b66b11731e951b
+--- a/backend/internal/evaluate/gemini_eval.go
++++ b/backend/internal/evaluate/gemini_eval.go
+@@ -4,6 +4,7 @@
+ 	"context"
+ 	"log"
+ 	"mime/multipart"
++	"os"
+ 	"time"
+ 
+ 	"noema/internal/config"
+@@ -44,6 +45,9 @@
+ 		if err := validateEvalOutput(cached.Output, enabled); err == nil {
+ 			return cached.Output
+ 		}
++		_ = os.Remove(cachePath(runsDir, key))
++	} else if !os.IsNotExist(err) {
++		_ = os.Remove(cachePath(runsDir, key))
+ 	}
+ 
+ 	sampled := sampleDataset(ds, sampleLimit)
+
+tokens used
+17,963
+What I changed (short)
+- Purged invalid or corrupted Gemini cache entries so a bad cache can’t repeatedly short-circuit evaluation. (`internal/evaluate/gemini_eval.go`)
+
+Tests run
+- `go test ./...`
+
+If you want, I can add a small unit test around cache invalidation behavior next.

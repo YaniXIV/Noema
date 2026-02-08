@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"mime/multipart"
+	"os"
 	"time"
 
 	"noema/internal/config"
@@ -44,6 +45,9 @@ func evalWithGemini(ctx context.Context, enabled map[string]ConstraintRule, runs
 		if err := validateEvalOutput(cached.Output, enabled); err == nil {
 			return cached.Output
 		}
+		_ = os.Remove(cachePath(runsDir, key))
+	} else if !os.IsNotExist(err) {
+		_ = os.Remove(cachePath(runsDir, key))
 	}
 
 	sampled := sampleDataset(ds, sampleLimit)
