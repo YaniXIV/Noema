@@ -127,6 +127,31 @@ func TestVerifyHandlerMissingRunIDReturns400(t *testing.T) {
 	}
 }
 
+func TestVerifyHandlerWhitespaceRunIDReturns400(t *testing.T) {
+	r := setupRouter()
+	body := `{"run_id":"   ","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}`
+
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", w.Code)
+	}
+
+	var resp errorResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Error != "missing run_id" {
+		t.Fatalf("expected missing run_id, got %q", resp.Error)
+	}
+}
+
 func TestVerifyHandlerBodyTooLargeReturns413(t *testing.T) {
 	r := setupRouter()
 	largeRunID := strings.Repeat("a", config.MaxVerifyBytes)

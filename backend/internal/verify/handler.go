@@ -41,36 +41,40 @@ func Handler() gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
 			return
 		}
-		if req.RunID == "" {
+		runID := strings.TrimSpace(req.RunID)
+		proofB64 := strings.TrimSpace(req.ProofB64)
+		publicInputsB64 := strings.TrimSpace(req.PublicInputsB64)
+
+		if runID == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing run_id"})
 			return
 		}
-		if req.ProofB64 == "" || req.PublicInputsB64 == "" {
+		if proofB64 == "" || publicInputsB64 == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing proof or public inputs"})
 			return
 		}
 
-		verified, msg, err := zk.VerifyProof(req.ProofB64, req.PublicInputsB64)
+		verified, msg, err := zk.VerifyProof(proofB64, publicInputsB64)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 			return
 		}
 		if verified || !shouldTryLegacy(msg) {
 			c.JSON(http.StatusOK, VerifyResponse{
-				RunID:    req.RunID,
+				RunID:    runID,
 				Verified: verified,
 				Message:  msg,
 			})
 			return
 		}
 
-		verified, msg, err = verifyLegacyStub(req.RunID, req.ProofB64, req.PublicInputsB64)
+		verified, msg, err = verifyLegacyStub(runID, proofB64, publicInputsB64)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 			return
 		}
 		c.JSON(http.StatusOK, VerifyResponse{
-			RunID:    req.RunID,
+			RunID:    runID,
 			Verified: verified,
 			Message:  msg,
 		})
