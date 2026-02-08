@@ -171,6 +171,9 @@ func pruneRuns(runsDir string, maxRuns int) error {
 	}
 	entries, err := os.ReadDir(runsDir)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return err
 	}
 

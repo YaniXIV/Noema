@@ -314,3 +314,10 @@ func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
 		t.Fatalf("expected misc dir to remain, got err: %v", err)
 	}
 }
+
+func TestPruneRuns_MissingDirNoError(t *testing.T) {
+	base := filepath.Join(t.TempDir(), "missing")
+	if err := pruneRuns(base, 1); err != nil {
+		t.Fatalf("expected no error for missing dir, got %v", err)
+	}
+}
