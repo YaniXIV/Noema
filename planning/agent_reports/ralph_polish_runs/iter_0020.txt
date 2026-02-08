@@ -7,7 +7,7 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3c8e-2da9-7c43-b4b8-36c543426ab4
+session id: 019c3ed6-e09b-7142-beed-56ee08ea1dbd
 --------
 user
 You are an autonomous coding agent polishing the Noema repository.
@@ -18,8 +18,9 @@ Hard rules:
 - Keep changes small: max 3 files per iteration.
 - No cosmetic-only edits.
 - No new dependencies unless absolutely necessary.
+- keep all the same ui functionality, the end user should be able to do the same stuff but the experiance and design should be better.
 
-Goal: continuously improve production quality.
+Goal: continuously improve production quality. continuously improve front end quality and polish.
 
 Iteration:
 1) Run: cd backend && go test ./...
@@ -29,7 +30,7 @@ Iteration:
 Pick the highest-value improvement:
 A) Reliability/correctness: validation, error handling, run persistence, verify robustness
 B) Tests: add/strengthen tests for the change you made
-C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+C) upgrading the user interface so that it looks better.
 D) Maintainability: reduce duplication with tiny refactors
 E) UX: wizard/results/verify clarity (small, safe changes)
 F) Docs: README/DEPLOYMENT polish
@@ -41,489 +42,426 @@ Finish with:
 mcp startup: no servers
 
 thinking
-**Confirming test execution plan**
+**Running Go tests**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 197ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 204ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
 ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
 
 thinking
-**Planning reliability improvement**
+**Planning focused UI improvement**
 
-Tests are passing, so now I'll inspect the repo with a focus on a small reliability fix affecting at most three files, using ripgrep to locate potential issues.
+Tests have passed; next, I'll inspect the frontend codebase using searches to identify a UI-focused improvement limited to three files.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME|panic" internal' in /Users/yani/Noema/backend exited 1 in 52ms:
-
+/bin/zsh -lc "cd /Users/yani/Noema/backend && rg --files -g '*.{html,css,js,ts,tsx,jsx,go}'" in /Users/yani/Noema/backend succeeded in 52ms:
+internal/session/session_test.go
+internal/session/session.go
+internal/evaluate/prompt.go
+internal/evaluate/parse.go
+internal/evaluate/output.go
+internal/evaluate/handler_test.go
+internal/evaluate/schema.go
+internal/evaluate/dataset.go
+internal/evaluate/storage.go
+internal/evaluate/storage_test.go
+internal/evaluate/images.go
+internal/evaluate/handler_integration_test.go
+internal/evaluate/cache.go
+internal/evaluate/commitment.go
+internal/evaluate/policy.go
+internal/evaluate/spec.go
+internal/evaluate/gemini_eval.go
+internal/evaluate/handler.go
+internal/web/auth.go
+internal/web/upload.go
 
 thinking
-**Considering improvements to pick error handling**
-
-No matches found on searching for errors related to pick; planning to check internal/web, internal/session, and verify directories for relevant code to improve validation or error handling.
+**Reviewing CSS for UI improvement**
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"log\\.Printf|fmt\\.Printf\" internal" in /Users/yani/Noema/backend succeeded in 52ms:
-internal/evaluate/gemini_eval.go:37:		log.Printf("gemini read dataset: %v", err)
-internal/evaluate/gemini_eval.go:45:		log.Printf("gemini marshal spec: %v", err)
-internal/evaluate/gemini_eval.go:58:		log.Printf("gemini marshal dataset: %v", err)
-internal/evaluate/gemini_eval.go:64:		log.Printf("gemini read images: %v", err)
-internal/evaluate/gemini_eval.go:82:		log.Printf("gemini evaluate: %v", err)
-internal/evaluate/gemini_eval.go:88:		log.Printf("gemini parse output: %v", err)
-internal/evaluate/gemini_eval.go:92:		log.Printf("gemini validate output: %v", err)
-internal/evaluate/gemini_eval.go:104:		log.Printf("gemini cache save: %v", err)
-internal/evaluate/handler.go:136:			log.Printf("runs index update: %v", err)
-internal/evaluate/handler.go:140:			log.Printf("prune runs: %v", err)
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap');
 
-thinking
-**Opening evaluation file**
-
-I'm opening gemini_eval.go to assess how the Gemini output is evaluated and understand the evaluation logic.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/gemini_eval.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"context"
-	"log"
-	"mime/multipart"
-	"time"
-
-	"noema/internal/config"
-	"noema/internal/gemini"
-)
-
-const geminiEvalTimeout = 45 * time.Second
-
-func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
-	if form != nil && len(form.Value["eval_output"]) > 0 && form.Value["eval_output"][0] != "" {
-		raw := form.Value["eval_output"][0]
-		out, err := parseEvalOutput(raw)
-		if err != nil {
-			return EvalOutput{}, err
-
-thinking
-**Verifying dataset file nil handling**
-
-Planning to inspect readDatasetFile to confirm that a nil datasetFile leads to a stub, ensuring resolveEvalOutput correctly falls back to re-evaluation when cached output is invalid.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io"
-	"mime/multipart"
-)
-
-type Dataset struct {
-	Items []DatasetItem `json:"items"`
+:root {
+  --bg: #05060a;
+  --bg-card: rgba(9, 12, 18, 0.9);
+  --text: #f4f6fb;
+  --text-muted: #9aa3b2;
+  --accent: #45d4ff;
+  --accent-strong: #2c7bff;
+  --accent-glow: rgba(69, 212, 255, 0.35);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(69, 212, 255, 0.4);
+  --error: #f87171;
+  --success: #22c55e;
+  --warning: #fbbf24;
+  --shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
 }
 
-type DatasetItem struct {
-	ID       string         `json:"id"`
-	Text     string         `json:"text"`
-	Metadata map[string]any `json:"metadata,omitempty"`
-	ImageRef string         `json:"image_ref,omitempty"`
+*,
+*::before,
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 51ms:
+  margin-bottom: 0.75rem;
 }
 
-thinking
-**Checking dataset file presence**
+.text-muted { color: var(--text-muted); }
 
-I'm verifying whether the handler guarantees the dataset file exists to avoid potential panics when opening it if nil during evaluation.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package evaluate
+.form { display: flex; flex-direction: column; gap: 1rem; }
 
-import (
-	"encoding/json"
-	"log"
-	"mime/multipart"
-	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
-	"time"
-
-	"noema/internal/config"
-	"noema/internal/zk"
-
-	"github.com/gin-gonic/gin"
-)
-
-// EvaluateResponse is the JSON response for POST /api/evaluate.
-
-thinking
-**Checking optional eval output usage**
-
-I'm verifying whether the optional eval output parser is used anywhere else in the code to determine if it can be safely removed.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
-	if err != nil {
-		return EvalOutput{}, err
-	}
-	if err := validateEvalOutput(out, enabled); err != nil {
-		return EvalOutput{}, err
-	}
-	return out, nil
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
 }
 
-func stubEvalOutput(enabled map[string]ConstraintRule) EvalOutput {
-	out := EvalOutput{
-		SchemaVersion: 1,
-		Constraints:   make([]EvalConstraintResult, 0, len(enabled)),
-		MaxSeverity:   0,
-	}
-	for id := range enabled {
-		out.Constraints = append(out.Constraints, EvalConstraintResult{
-			ID:        id,
-			Severity:  0,
-			Rationale: "stub",
-
-thinking
-**Checking error handling in file parsing**
-
-I'm verifying whether file handle nil checks in readDatasetFile are safely guarded by parseUploads to prevent panics, aiming to improve robustness without unnecessary cosmetic removals.
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-bottom: 1.2rem;
+}
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/upload.go" in /Users/yani/Noema/backend exited 1 in 52ms:
-sed: internal/evaluate/upload.go: No such file or directory
-
-thinking
-**Locating parseUploads function**
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "parseUploads" -S internal' in /Users/yani/Noema/backend succeeded in 51ms:
-internal/evaluate/parse.go:53:func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.FileHeader, error) {
-internal/evaluate/handler_test.go:246:	if _, _, err := parseUploads(form); err == nil {
-internal/evaluate/handler_test.go:258:	if _, _, err := parseUploads(form); err == nil {
-internal/evaluate/handler.go:64:		datasetFile, imageFiles, err := parseUploads(form)
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"encoding/json"
-	"fmt"
-	"io"
-	"mime/multipart"
-	"strings"
-
-	"noema/internal/config"
-)
-
-func parseSpec(form *multipart.Form) (Spec, error) {
-	specStrs := form.Value["spec"]
-	if len(specStrs) == 0 || specStrs[0] == "" {
-		return Spec{}, fmt.Errorf("missing field: spec")
-	}
-	var spec Spec
-	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
-	dec.DisallowUnknownFields()
-
-
-thinking
-**Identifying correctness improvements in dataset parsing**
-
-Noticed `readDatasetFile` lacks trimming for IDs and text and doesn't reject whitespace-only entries, risking incorrect data; planning to add `strings.TrimSpace` checks and reject empty trimmed strings to improve correctness while considering duplicate detection based on trimmed values.
-thinking
-**Refining dataset validation and error handling**
-
-Planning to enforce no leading/trailing spaces on IDs while allowing text to keep user formatting; also aiming to improve error messages in dataset reading by explicitly rejecting empty files to clarify issues and considering adding tests for empty dataset files and whitespace-only IDs to cover these cases.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package evaluate
-
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"mime/multipart"
-	"net/textproto"
-	"os"
-	"path/filepath"
-	"sort"
-	"testing"
-	"time"
-)
-
-type formFile struct {
-	field       string
-	filename    string
-	contentType string
-	content     []byte
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
-	form := buildMultipartForm(t, []formFile{
-		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-	})
-	datasetFile := form.File["dataset"][0]
-	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-		t.Fatalf("expected error for duplicate dataset ids")
-	}
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '520,1040p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.3);
 }
 
-func TestValidateDatasetJSON_RejectsUnknownFields(t *testing.T) {
-	dataset := `{"items":[{"id":"1","text":"hello","extra":"nope"}]}`
-	form := buildMultipartForm(t, []formFile{
-		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-	})
-	datasetFile := form.File["dataset"][0]
-	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-		t.Fatalf("expected error for unknown dataset fields")
-	}
+.upload-file {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
 }
+
+.upload-file-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-file-size {
+  font-size: 0.82rem;
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1040,1560p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.results-pre {
+  margin-top: 0.9rem;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  max-height: 320px;
+  overflow: auto;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+/* ===== Responsive ===== */
+@media (max-width: 900px) {
+  .header {
 
 
 thinking
-**Adding empty dataset file validation and tests**
+**Planning focused CSS improvements**
 
-I'm implementing a check in the dataset file reader to error on empty files and adding a corresponding test in the validation suite to ensure the error triggers as expected.
+I'm identifying visual hierarchy enhancements mainly in results/wizard areas, targeting hover effects on cards, distinct primary button styling with subtle glow, layered card backgrounds with gradients and borders, and better spacing on results summaries—all via CSS updates limited to three files. Next, I'll pinpoint exact files and verify appropriate class usage before implementing.
+thinking
+**Refining card visuals and hover feedback**
+
+I'm enhancing `.card` backgrounds with subtle gradient overlays, visible borders, and a gentle top highlight using pseudo-elements while adding hover transitions to results constraint cards for clearer interactivity. Next, I'll verify color contrasts and existing styles before applying these focused CSS refinements.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/templates/app.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "app"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Dashboard</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_app" .}}
+
+  <main class="main main-dashboard">
+    {{template "orb" .}}
+    <div class="dashboard-content">
+      <section class="card dashboard-hero">
+        <div class="card-kicker">Dashboard</div>
+        <h1 class="card-title">Evaluations</h1>
+        <p class="card-text">Run policy evaluations on your datasets and publish verifiable results.</p>
+        <div class="form-actions">
+
+thinking
+**Considering UI improvements**
+
+I'm reviewing the dashboard-hero for potential CSS enhancements like adding a background accent, and checking the wizard and results templates for relevant class names to style consistently.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/templates/app_results.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "app_results"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Results</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body data-run-id="{{.RunID}}">
+  {{template "header_app" .}}
+
+  <main class="main main-results">
+    {{template "orb" .}}
+    <div class="card results-card">
+      <div class="results-header">
+        <div>
+          <h1 class="card-title">Evaluation results</h1>
+          <div class="results-runline">
+            <p class="text-muted" id="results-run-id">Run ID: <span class="results-run-id">{{.RunID}}</span></p>
+
+
+thinking
+**Improving results section styling**
+
+Planning to enhance `.results-summary` with a pill-style background and padding for clarity, add subtle hover transitions to constraint cards for better scanning, and cautiously adjust `.results-section` styling to improve visual separation without disrupting layout.
+thinking
+**Refining results CSS with subtle shadows and layout tweaks**
+
+I'm adding a subtle inset shadow to `.results-pre` for clarity and enhancing `.results-summary` with background, border, padding, and border-radius while keeping its flex layout intact; I'll also add transitions and hover effects to `.results-constraint-card` for improved interaction.
 file update
-M /Users/yani/Noema/backend/internal/evaluate/dataset.go
-@@ -32,2 +32,5 @@
- 	}
-+	if len(raw) == 0 {
-+		return nil, Dataset{}, fmt.Errorf("dataset file is empty")
-+	}
- 
-apply_patch(auto_approved=true) exited 0 in 30ms:
-Success. Updated the following files:
-M internal/evaluate/dataset.go
-file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 3c407a6426f3acc932c81e6750b6089793597e8d..ffa11acc0e60bcfe54d98f69de9195986df56f76
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -30,6 +30,9 @@
- 	if err != nil {
- 		return nil, Dataset{}, fmt.Errorf("could not read dataset")
- 	}
-+	if len(raw) == 0 {
-+		return nil, Dataset{}, fmt.Errorf("dataset file is empty")
-+	}
- 
- 	dec := json.NewDecoder(bytes.NewReader(raw))
- 	var v any
-
-file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 3c407a6426f3acc932c81e6750b6089793597e8d..ffa11acc0e60bcfe54d98f69de9195986df56f76
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -30,6 +30,9 @@
- 	if err != nil {
- 		return nil, Dataset{}, fmt.Errorf("could not read dataset")
- 	}
-+	if len(raw) == 0 {
-+		return nil, Dataset{}, fmt.Errorf("dataset file is empty")
-+	}
- 
- 	dec := json.NewDecoder(bytes.NewReader(raw))
- 	var v any
-
-
-thinking
-**Switching to apply_patch tool**
-
-The file was already edited via exec_command despite the initial warning, so now I'll add tests and switch to using the apply_patch tool properly.
-file update
-M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
-@@ -239,2 +239,12 @@
- 
-+func TestValidateDatasetJSON_RejectsEmptyFile(t *testing.T) {
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte{}},
-+	})
-+	datasetFile := form.File["dataset"][0]
-+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-+		t.Fatalf("expected error for empty dataset file")
-+	}
+M /Users/yani/Noema/backend/web/static/styles.css
+@@ -884,2 +884,7 @@
+   flex-wrap: wrap;
++  padding: 0.9rem 1.1rem;
++  border-radius: 14px;
++  border: 1px solid var(--border);
++  background: rgba(0, 0, 0, 0.35);
++  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+ }
+@@ -972,3 +977,9 @@
+   background: rgba(0, 0, 0, 0.3);
++  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+ }
++.results-constraint-card:hover {
++  border-color: rgba(255, 255, 255, 0.16);
++  background: rgba(0, 0, 0, 0.38);
++  transform: translateY(-2px);
 +}
-+
- func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
-apply_patch(auto_approved=true) exited 0 in 40ms:
-Success. Updated the following files:
-M internal/evaluate/handler_test.go
-file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 3c407a6426f3acc932c81e6750b6089793597e8d..ffa11acc0e60bcfe54d98f69de9195986df56f76
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -30,6 +30,9 @@
- 	if err != nil {
- 		return nil, Dataset{}, fmt.Errorf("could not read dataset")
- 	}
-+	if len(raw) == 0 {
-+		return nil, Dataset{}, fmt.Errorf("dataset file is empty")
-+	}
  
- 	dec := json.NewDecoder(bytes.NewReader(raw))
- 	var v any
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index fa17d3d6c8a1a5e7e04b55620d7e537c9af5cb1f..79e3111bbacf0a897b1339dfe48b04c10b372075
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -237,6 +237,16 @@
- 	}
+@@ -1050,2 +1061,3 @@
+   border: 1px solid rgba(255, 255, 255, 0.08);
++  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+   max-height: 320px;
+apply_patch(auto_approved=true) exited 0 in 28ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/web/static/styles.css
+file update:
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index f4cb955898db5fabea5cce00ae8bf75c00653f3d..9fc4cf353bdd0e233dad4ec25f4fb2dfb8be5e7f
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -882,6 +882,11 @@
+   gap: 1rem;
+   margin-bottom: 1.5rem;
+   flex-wrap: wrap;
++  padding: 0.9rem 1.1rem;
++  border-radius: 14px;
++  border: 1px solid var(--border);
++  background: rgba(0, 0, 0, 0.35);
++  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
  }
  
-+func TestValidateDatasetJSON_RejectsEmptyFile(t *testing.T) {
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte{}},
-+	})
-+	datasetFile := form.File["dataset"][0]
-+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-+		t.Fatalf("expected error for empty dataset file")
-+	}
+ .results-runline {
+@@ -970,7 +975,13 @@
+   border-radius: 12px;
+   padding: 0.8rem 1rem;
+   background: rgba(0, 0, 0, 0.3);
++  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+ }
++.results-constraint-card:hover {
++  border-color: rgba(255, 255, 255, 0.16);
++  background: rgba(0, 0, 0, 0.38);
++  transform: translateY(-2px);
 +}
-+
- func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
- 	dataset := `{"items":[{"id":"1","text":"hello"}]}`
- 	form := buildMultipartForm(t, []formFile{
+ 
+ .results-constraint-card[data-verdict="pass"] {
+   border-color: rgba(34, 197, 94, 0.4);
+@@ -1048,6 +1059,7 @@
+   background: rgba(0, 0, 0, 0.45);
+   border-radius: 12px;
+   border: 1px solid rgba(255, 255, 255, 0.08);
++  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+   max-height: 320px;
+   overflow: auto;
+   font-size: 0.85rem;
 
 file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 3c407a6426f3acc932c81e6750b6089793597e8d..ffa11acc0e60bcfe54d98f69de9195986df56f76
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -30,6 +30,9 @@
- 	if err != nil {
- 		return nil, Dataset{}, fmt.Errorf("could not read dataset")
- 	}
-+	if len(raw) == 0 {
-+		return nil, Dataset{}, fmt.Errorf("dataset file is empty")
-+	}
- 
- 	dec := json.NewDecoder(bytes.NewReader(raw))
- 	var v any
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index fa17d3d6c8a1a5e7e04b55620d7e537c9af5cb1f..79e3111bbacf0a897b1339dfe48b04c10b372075
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -237,6 +237,16 @@
- 	}
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index f4cb955898db5fabea5cce00ae8bf75c00653f3d..9fc4cf353bdd0e233dad4ec25f4fb2dfb8be5e7f
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -882,6 +882,11 @@
+   gap: 1rem;
+   margin-bottom: 1.5rem;
+   flex-wrap: wrap;
++  padding: 0.9rem 1.1rem;
++  border-radius: 14px;
++  border: 1px solid var(--border);
++  background: rgba(0, 0, 0, 0.35);
++  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
  }
  
-+func TestValidateDatasetJSON_RejectsEmptyFile(t *testing.T) {
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte{}},
-+	})
-+	datasetFile := form.File["dataset"][0]
-+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-+		t.Fatalf("expected error for empty dataset file")
-+	}
+ .results-runline {
+@@ -970,7 +975,13 @@
+   border-radius: 12px;
+   padding: 0.8rem 1rem;
+   background: rgba(0, 0, 0, 0.3);
++  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+ }
++.results-constraint-card:hover {
++  border-color: rgba(255, 255, 255, 0.16);
++  background: rgba(0, 0, 0, 0.38);
++  transform: translateY(-2px);
 +}
-+
- func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
- 	dataset := `{"items":[{"id":"1","text":"hello"}]}`
- 	form := buildMultipartForm(t, []formFile{
+ 
+ .results-constraint-card[data-verdict="pass"] {
+   border-color: rgba(34, 197, 94, 0.4);
+@@ -1048,6 +1059,7 @@
+   background: rgba(0, 0, 0, 0.45);
+   border-radius: 12px;
+   border: 1px solid rgba(255, 255, 255, 0.08);
++  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+   max-height: 320px;
+   overflow: auto;
+   font-size: 0.85rem;
 
 
 thinking
-**Running tests after patch**
+**Verifying hover effect impact**
+
+Checked that the hover transform will shift layout only on hover, which is acceptable, and proceeded to run the full test suite again.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 456ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 317ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	0.013s
+ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
 file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 3c407a6426f3acc932c81e6750b6089793597e8d..ffa11acc0e60bcfe54d98f69de9195986df56f76
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -30,6 +30,9 @@
- 	if err != nil {
- 		return nil, Dataset{}, fmt.Errorf("could not read dataset")
- 	}
-+	if len(raw) == 0 {
-+		return nil, Dataset{}, fmt.Errorf("dataset file is empty")
-+	}
- 
- 	dec := json.NewDecoder(bytes.NewReader(raw))
- 	var v any
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index fa17d3d6c8a1a5e7e04b55620d7e537c9af5cb1f..79e3111bbacf0a897b1339dfe48b04c10b372075
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -237,6 +237,16 @@
- 	}
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index f4cb955898db5fabea5cce00ae8bf75c00653f3d..9fc4cf353bdd0e233dad4ec25f4fb2dfb8be5e7f
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -882,6 +882,11 @@
+   gap: 1rem;
+   margin-bottom: 1.5rem;
+   flex-wrap: wrap;
++  padding: 0.9rem 1.1rem;
++  border-radius: 14px;
++  border: 1px solid var(--border);
++  background: rgba(0, 0, 0, 0.35);
++  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
  }
  
-+func TestValidateDatasetJSON_RejectsEmptyFile(t *testing.T) {
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte{}},
-+	})
-+	datasetFile := form.File["dataset"][0]
-+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-+		t.Fatalf("expected error for empty dataset file")
-+	}
+ .results-runline {
+@@ -970,7 +975,13 @@
+   border-radius: 12px;
+   padding: 0.8rem 1rem;
+   background: rgba(0, 0, 0, 0.3);
++  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+ }
++.results-constraint-card:hover {
++  border-color: rgba(255, 255, 255, 0.16);
++  background: rgba(0, 0, 0, 0.38);
++  transform: translateY(-2px);
 +}
-+
- func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
- 	dataset := `{"items":[{"id":"1","text":"hello"}]}`
- 	form := buildMultipartForm(t, []formFile{
+ 
+ .results-constraint-card[data-verdict="pass"] {
+   border-color: rgba(34, 197, 94, 0.4);
+@@ -1048,6 +1059,7 @@
+   background: rgba(0, 0, 0, 0.45);
+   border-radius: 12px;
+   border: 1px solid rgba(255, 255, 255, 0.08);
++  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+   max-height: 320px;
+   overflow: auto;
+   font-size: 0.85rem;
 
 codex
-What you changed (short)
-- Reject empty dataset files early in `readDatasetFile` and added a test covering the empty-file case.
+What I changed (short)
+- Improved results page readability by styling the summary block, adding subtle hover elevation on constraint cards, and enhancing code block depth in `web/static/styles.css`.
 
 Tests run
 - `go test ./...`
+
+If you want another iteration, tell me which area to focus on next.
 file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 3c407a6426f3acc932c81e6750b6089793597e8d..ffa11acc0e60bcfe54d98f69de9195986df56f76
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -30,6 +30,9 @@
- 	if err != nil {
- 		return nil, Dataset{}, fmt.Errorf("could not read dataset")
- 	}
-+	if len(raw) == 0 {
-+		return nil, Dataset{}, fmt.Errorf("dataset file is empty")
-+	}
- 
- 	dec := json.NewDecoder(bytes.NewReader(raw))
- 	var v any
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index fa17d3d6c8a1a5e7e04b55620d7e537c9af5cb1f..79e3111bbacf0a897b1339dfe48b04c10b372075
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -237,6 +237,16 @@
- 	}
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index f4cb955898db5fabea5cce00ae8bf75c00653f3d..9fc4cf353bdd0e233dad4ec25f4fb2dfb8be5e7f
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -882,6 +882,11 @@
+   gap: 1rem;
+   margin-bottom: 1.5rem;
+   flex-wrap: wrap;
++  padding: 0.9rem 1.1rem;
++  border-radius: 14px;
++  border: 1px solid var(--border);
++  background: rgba(0, 0, 0, 0.35);
++  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
  }
  
-+func TestValidateDatasetJSON_RejectsEmptyFile(t *testing.T) {
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte{}},
-+	})
-+	datasetFile := form.File["dataset"][0]
-+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-+		t.Fatalf("expected error for empty dataset file")
-+	}
+ .results-runline {
+@@ -970,7 +975,13 @@
+   border-radius: 12px;
+   padding: 0.8rem 1rem;
+   background: rgba(0, 0, 0, 0.3);
++  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+ }
++.results-constraint-card:hover {
++  border-color: rgba(255, 255, 255, 0.16);
++  background: rgba(0, 0, 0, 0.38);
++  transform: translateY(-2px);
 +}
-+
- func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
- 	dataset := `{"items":[{"id":"1","text":"hello"}]}`
- 	form := buildMultipartForm(t, []formFile{
+ 
+ .results-constraint-card[data-verdict="pass"] {
+   border-color: rgba(34, 197, 94, 0.4);
+@@ -1048,6 +1059,7 @@
+   background: rgba(0, 0, 0, 0.45);
+   border-radius: 12px;
+   border: 1px solid rgba(255, 255, 255, 0.08);
++  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+   max-height: 320px;
+   overflow: auto;
+   font-size: 0.85rem;
 
 tokens used
-25,586
-What you changed (short)
-- Reject empty dataset files early in `readDatasetFile` and added a test covering the empty-file case.
+27,507
+What I changed (short)
+- Improved results page readability by styling the summary block, adding subtle hover elevation on constraint cards, and enhancing code block depth in `web/static/styles.css`.
 
 Tests run
 - `go test ./...`
+
+If you want another iteration, tell me which area to focus on next.
