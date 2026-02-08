@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"path/filepath"
 	"strings"
 
 	"noema/internal/config"
@@ -88,6 +89,16 @@ func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.Fil
 	}
 	seenImageNames := make(map[string]struct{}, len(imageFiles))
 	for _, f := range imageFiles {
+		trimmedName := strings.TrimSpace(f.Filename)
+		if trimmedName == "" {
+			return nil, nil, fmt.Errorf("image filename must be non-empty")
+		}
+		if trimmedName != f.Filename {
+			return nil, nil, fmt.Errorf("image filename must not include leading/trailing whitespace")
+		}
+		if filepath.Base(f.Filename) != f.Filename {
+			return nil, nil, fmt.Errorf("image filename must not include path separators")
+		}
 		if _, exists := seenImageNames[f.Filename]; exists {
 			return nil, nil, fmt.Errorf("image filenames must be unique")
 		}

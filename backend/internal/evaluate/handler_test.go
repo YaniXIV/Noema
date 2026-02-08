@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -94,6 +95,30 @@ func TestParseEvalOutputOptional_DefaultsToStub(t *testing.T) {
 	}
 	if !sort.StringsAreSorted(ids) {
 		t.Fatalf("expected constraints sorted by id, got %v", ids)
+	}
+}
+
+func TestParseUploads_RejectsImageFilenameWhitespace(t *testing.T) {
+	dataset := `{"items":[{"id":"item-1","text":"hello"}]}`
+	form := buildMultipartForm(t, []formFile{
+		{
+			field:       "dataset",
+			filename:    "dataset.json",
+			contentType: "application/json",
+			content:     []byte(dataset),
+		},
+		{
+			field:       "images",
+			filename:    " bad.png ",
+			contentType: "image/png",
+			content:     []byte("fake"),
+		},
+	})
+
+	if _, _, err := parseUploads(form); err == nil {
+		t.Fatalf("expected error for image filename with whitespace")
+	} else if !strings.Contains(err.Error(), "leading/trailing whitespace") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
