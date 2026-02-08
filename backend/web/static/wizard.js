@@ -105,14 +105,18 @@
     var statusEl = document.getElementById('dataset-status');
     var previewEl = document.getElementById('dataset-preview');
     statusEl.classList.remove('is-valid', 'is-invalid');
+    var fileInput = document.getElementById('dataset-file');
+    var pasteInput = document.getElementById('dataset-paste');
+    if (fileInput) fileInput.classList.remove('is-invalid');
+    if (pasteInput) pasteInput.classList.remove('is-invalid');
 
     if (datasetSource === 'file') {
-      var fileInput = document.getElementById('dataset-file');
       if (fileInput.files && fileInput.files.length > 0) {
         var file = fileInput.files[0];
         if (file.size > MAX_DATASET_BYTES) {
           statusEl.textContent = 'File too large. Max size is 50MB.';
           statusEl.classList.add('is-invalid');
+          fileInput.classList.add('is-invalid');
         } else {
           statusEl.textContent = 'Selected file: ' + file.name + ' (' + formatBytes(file.size) + ')';
           statusEl.classList.add('is-valid');
@@ -136,6 +140,7 @@
     if (new Blob([paste]).size > MAX_DATASET_BYTES) {
       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
       statusEl.classList.add('is-invalid');
+      pasteInput.classList.add('is-invalid');
       previewEl.hidden = true;
       updateWizardNavState();
       return;
@@ -145,6 +150,7 @@
     if (!parsed.valid) {
       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
       statusEl.classList.add('is-invalid');
+      pasteInput.classList.add('is-invalid');
       previewEl.hidden = true;
       updateWizardNavState();
       return;
@@ -165,6 +171,7 @@
     statusEl.classList.remove('is-valid', 'is-invalid');
 
     var imagesInput = document.getElementById('images-file');
+    if (imagesInput) imagesInput.classList.remove('is-invalid');
     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
     if (files.length === 0) {
       statusEl.textContent = 'No images selected.';
@@ -175,6 +182,7 @@
     if (files.length > MAX_IMAGE_COUNT) {
       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
       statusEl.classList.add('is-invalid');
+      if (imagesInput) imagesInput.classList.add('is-invalid');
       updateWizardNavState();
       return false;
     }
@@ -183,6 +191,7 @@
     if (oversized) {
       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
       statusEl.classList.add('is-invalid');
+      if (imagesInput) imagesInput.classList.add('is-invalid');
       updateWizardNavState();
       return false;
     }

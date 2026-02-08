@@ -7,7 +7,7 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3c92-3cf2-7680-8fa7-10398b2a366c
+session id: 019c3edd-6963-70f0-973d-f93b194e695a
 --------
 user
 You are an autonomous coding agent polishing the Noema repository.
@@ -18,8 +18,9 @@ Hard rules:
 - Keep changes small: max 3 files per iteration.
 - No cosmetic-only edits.
 - No new dependencies unless absolutely necessary.
+- keep all the same ui functionality, the end user should be able to do the same stuff but the experiance and design should be better.
 
-Goal: continuously improve production quality.
+Goal: continuously improve production quality. continuously improve front end quality and polish.
 
 Iteration:
 1) Run: cd backend && go test ./...
@@ -29,7 +30,7 @@ Iteration:
 Pick the highest-value improvement:
 A) Reliability/correctness: validation, error handling, run persistence, verify robustness
 B) Tests: add/strengthen tests for the change you made
-C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+C) upgrading the user interface so that it looks better.
 D) Maintainability: reduce duplication with tiny refactors
 E) UX: wizard/results/verify clarity (small, safe changes)
 F) Docs: README/DEPLOYMENT polish
@@ -39,642 +40,668 @@ Finish with:
 - What you changed (short)
 - Tests run (must include go test ./...)
 mcp startup: no servers
+
+thinking
+**Preparing to run command**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 92ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 191ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
 ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
 
 thinking
-**Evaluating test reliability versus maintainability**
-
-Tests are passing but an improvement is needed, so I'm planning to explore the repo with ripgrep to decide whether to prioritize test reliability or maintainability next.
+**Confirming test success and planning code inspection**
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && rg \"TODO|FIXME|panic|\\berror\\b\" internal -g'*.go'" in /Users/yani/Noema/backend succeeded in 52ms:
-internal/evaluate/prompt.go:func marshalSampledDataset(ds Dataset) ([]byte, error) {
-internal/evaluate/parse.go:func parseSpec(form *multipart.Form) (Spec, error) {
-internal/evaluate/parse.go:func validateSpec(spec Spec) error {
-internal/evaluate/parse.go:func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.FileHeader, error) {
-internal/evaluate/parse.go:func validateDatasetJSON(fh *multipart.FileHeader, imageFiles []*multipart.FileHeader) error {
-internal/evaluate/output.go:func parseEvalOutput(raw string) (EvalOutput, error) {
-internal/evaluate/output.go:func validateEvalOutput(out EvalOutput, enabled map[string]ConstraintRule) error {
-internal/evaluate/handler_test.go:		t.Fatalf("enabledConstraints error: %v", err)
-internal/evaluate/handler_test.go:		t.Fatalf("parseEvalOutputOptional error: %v", err)
-internal/evaluate/handler_test.go:		t.Fatalf("enabledConstraints error: %v", err)
-internal/evaluate/handler_test.go:		t.Fatalf("parseEvalOutputOptional error: %v", err)
-internal/evaluate/handler_test.go:		t.Fatalf("enabledConstraints error: %v", err)
-internal/evaluate/handler_test.go:		t.Fatalf("expected validation error for unknown constraint")
-internal/evaluate/handler_test.go:		t.Fatalf("expected error for image_ref without images")
-internal/evaluate/handler_test.go:		t.Fatalf("unexpected error: %v", err)
-internal/evaluate/handler_test.go:		t.Fatalf("expected error for duplicate dataset ids")
-internal/evaluate/handler_test.go:		t.Fatalf("expected error for unknown dataset fields")
-internal/evaluate/handler_test.go:		t.Fatalf("expected error for empty dataset file")
-internal/evaluate/handler_test.go:		t.Fatalf("expected error for multiple dataset files")
-internal/evaluate/handler_test.go:		t.Fatalf("expected error for duplicate image filenames")
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
+cmd
+data
+go.mod
+go.sum
+internal
+main
+web
 
 thinking
-**Inspecting run index update for edge cases**
+**Locating frontend in web directory**
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"crypto/rand"
-	"encoding/json"
-	"fmt"
-	"io"
-	"math/big"
-	"mime/multipart"
-	"os"
-	"path/filepath"
-	"strconv"
-	"sync/atomic"
-	"time"
-)
-
-var runIDCounter uint64
-
-func genRunID() string {
-	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web' in /Users/yani/Noema/backend succeeded in 52ms:
+static
+templates
 
 thinking
-**Considering saveJSON durability improvements**
-
-I'm evaluating adding fsync and atomic rename with temp files in saveJSON to enhance durability but noting current temp file use in the same directory may suffice; also spotting that updateRunsIndex error handling could be improved for index corruption cases.
+**Checking templates**
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package evaluate
-
-import (
-	"encoding/json"
-	"fmt"
-	"io"
-	"mime/multipart"
-	"strings"
-
-	"noema/internal/config"
-)
-
-func parseSpec(form *multipart.Form) (Spec, error) {
-	specStrs := form.Value["spec"]
-	if len(specStrs) == 0 || specStrs[0] == "" {
-		return Spec{}, fmt.Errorf("missing field: spec")
-	}
-	var spec Spec
-	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
-	dec.DisallowUnknownFields()
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/templates' in /Users/yani/Noema/backend succeeded in 51ms:
+app.html
+app_new.html
+app_results.html
+index.html
+partial_header_app.html
+partial_header_public.html
+partial_header_upload.html
+partial_orb.html
+upload.html
+verify.html
+verify_results.html
 
 thinking
-**Reviewing dataset file reading**
+**Planning small UX improvement**
 
-Noted that reading dataset files involves JSON decoding in dataset.go; next step is to examine this file to confirm how data is processed.
+Considering adding CSS to the static list for a minor UX enhancement.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io"
-	"mime/multipart"
-)
-
-type Dataset struct {
-	Items []DatasetItem `json:"items"`
-}
-
-type DatasetItem struct {
-	ID       string         `json:"id"`
-	Text     string         `json:"text"`
-	Metadata map[string]any `json:"metadata,omitempty"`
-	ImageRef string         `json:"image_ref,omitempty"`
-}
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/static' in /Users/yani/Noema/backend succeeded in 52ms:
+app.js
+constraints.js
+results.js
+styles.css
+upload.js
+verify.js
+wizard.js
 
 thinking
-**Considering metadata validation options**
-
-I'm evaluating if enforcing metadata as an object or checking for non-empty image references is worthwhile but leaning toward minimal changes since the current parseSpec error messaging suffices.
+**Reviewing styles for improvement**
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/output.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap');
 
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-)
-
-type EvalConstraintResult struct {
-	ID        string `json:"id"`
-	Severity  int    `json:"severity"`
-	Rationale string `json:"rationale"`
+:root {
+  --bg: #05060a;
+  --bg-card: rgba(9, 12, 18, 0.9);
+  --text: #f4f6fb;
+  --text-muted: #9aa3b2;
+  --accent: #45d4ff;
+  --accent-strong: #2c7bff;
+  --accent-glow: rgba(69, 212, 255, 0.35);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(69, 212, 255, 0.4);
+  --error: #f87171;
+  --success: #22c55e;
+  --warning: #fbbf24;
+  --shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
 }
 
-type EvalOutput struct {
-	SchemaVersion int                    `json:"schema_version"`
-	Constraints   []EvalConstraintResult `json:"constraints"`
-	MaxSeverity   int                    `json:"max_severity"`
-	Confidence    *float64               `json:"confidence,omitempty"`
-}
-
-thinking
-**Evaluating error handling and reliability improvements**
-
-I'm considering enhancing error messages with more context where it aids debugging, especially for client use, and reviewing saveJSON's atomic write approach for Windows compatibility. Also, I noted that updateRunsIndex may return a corrupted error even if backup and save succeed, potentially causing unnecessary handler errors—I'll verify that behavior.
+*,
+*::before,
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package evaluate
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+  margin-bottom: 0.75rem;
+}
 
-import (
-	"encoding/json"
-	"log"
-	"mime/multipart"
-	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
-	"time"
+.text-muted { color: var(--text-muted); }
 
-	"noema/internal/config"
-	"noema/internal/zk"
+.form { display: flex; flex-direction: column; gap: 1rem; }
 
-	"github.com/gin-gonic/gin"
-)
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
 
-// EvaluateResponse is the JSON response for POST /api/evaluate.
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-bottom: 1.2rem;
+}
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '240,480p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
-		})
-	}
-	sort.Slice(out.Constraints, func(i, j int) bool {
-		return out.Constraints[i].ID < out.Constraints[j].ID
-	})
-	return out
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '520,1040p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.3);
 }
 
-func jsonBytes(v any) ([]byte, error) {
-	return json.Marshal(v)
+.upload-file {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
 }
+
+.upload-file-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-file-size {
+  font-size: 0.82rem;
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1040,1560p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 51ms:
+  color: var(--text-muted);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.results-constraint-meta {
+  margin-top: 0.35rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.results-constraint-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.35);
+  font-size: 0.75rem;
 
 
 thinking
-**Identifying bug in extra token handling**
+**Prioritizing meaningful UX improvements**
 
-I noticed that parseEvalOutput incorrectly treats non-EOF decode errors when checking for extra JSON tokens, potentially accepting invalid trailing garbage; this differs from parseSpec which fails properly on such errors, indicating a bug to fix for stricter validation.
+I'm focusing on functional UI enhancements that improve accessibility or layout, like better button focus states, clearer disabled styles, or improved results area usability, avoiding purely cosmetic tweaks. Next, I'll verify current accessibility support and add subtle but impactful improvements like ARIA attributes or interactive feedback.
 thinking
-**Planning to fix trailing garbage check**
+**Targeting clearer form feedback and button states**
 
-I'm confirming that parseEvalOutput should be updated to reject decode errors for trailing garbage by checking err != io.EOF like parseSpec does, and I plan to add tests to validate this behavior.
+I'm considering adding focus-within highlights on form groups and enhancing disabled button clarity beyond opacity to improve user feedback without altering core functionality. I'll review app.js for possible small JS UX tweaks like copy feedback to complement these CSS accessibility improvements.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' web/static/app.js" in /Users/yani/Noema/backend succeeded in 52ms:
+(function() {
+  var STORAGE_KEY = 'noema_recent_runs';
+  var listEl = document.getElementById('recent-runs-list');
+  var emptyEl = document.getElementById('recent-runs-empty');
 
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"mime/multipart"
-	"net/textproto"
-	"os"
-	"path/filepath"
-	"sort"
-	"testing"
-	"time"
-)
+  function statusClass(status) {
+    if (!status) return 'status-pill-unknown';
+    var normalized = String(status).toUpperCase();
+    if (normalized === 'PASS') return 'status-pill-pass';
+    if (normalized === 'FAIL') return 'status-pill-fail';
+    return 'status-pill-unknown';
+  }
 
-type formFile struct {
-	field       string
-	filename    string
-	contentType string
-	content     []byte
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '240,520p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
-func TestValidateDatasetJSON_RejectsEmptyFile(t *testing.T) {
-	form := buildMultipartForm(t, []formFile{
-		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte{}},
-	})
-	datasetFile := form.File["dataset"][0]
-	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-		t.Fatalf("expected error for empty dataset file")
-	}
-}
-
-func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
-	dataset := `{"items":[{"id":"1","text":"hello"}]}`
-	form := buildMultipartForm(t, []formFile{
-		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-		{field: "dataset", filename: "dataset2.json", contentType: "application/json", content: []byte(dataset)},
-	})
-	if _, _, err := parseUploads(form); err == nil {
-		t.Fatalf("expected error for multiple dataset files")
-	}
-}
+  function formatTimestamp(ts) {
+    if (!ts) return null;
+    var date = new Date(ts);
+    if (Number.isNaN(date.getTime())) return null;
+    var diffMs = Math.abs(Date.now() - date.getTime());
+    var minutes = Math.round(diffMs / 60000);
+    var label = '';
 
 thinking
-**Adding trailing garbage rejection to parsing**
+**Considering UI and accessibility improvements**
 
-I'm updating parseEvalOutput to reject trailing data by checking for io.EOF after decoding, and adding a test to confirm parseEvalOutputOptional errors on input with valid JSON plus trailing garbage.
+I'm weighing adding aria-live or aria-label for better copy feedback and stabilizing "Copy ID" button width to prevent layout shift. I'll also check wizard.js to see if "recent runs" persistence is already implemented before adding it.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' web/static/wizard.js" in /Users/yani/Noema/backend succeeded in 52ms:
+(function() {
+  var PRESET_CONSTRAINTS = window.NOEMA_PRESET_CONSTRAINTS || [];
+  var currentStep = 1;
+  var maxStep = 3;
+  var customConstraintCount = 0;
+  var maxCustomConstraints = 5;
+  var datasetSource = 'file';
+  var MAX_DATASET_BYTES = 50 * 1024 * 1024;
+  var MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+  var MAX_IMAGE_COUNT = 10;
+
+  function stepEl(n) { return document.querySelector('.stepper-step[data-step="' + n + '"]'); }
+  function paneEl(n) { return document.getElementById('pane-' + n); }
+
+  function titleCase(str) {
+    return str
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, function(m) { return m.toUpperCase(); });
+  }
+
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '260,520p' web/static/wizard.js" in /Users/yani/Noema/backend succeeded in 52ms:
+        div.querySelector('.constraint-enabled').addEventListener('change', updateConstraintsCount);
+        group.appendChild(div);
+      });
+
+      container.appendChild(group);
+    });
+
+    updateConstraintsCount();
+  }
+
+  function updateConstraintsCount() {
+    var count = 0;
+    document.querySelectorAll('.constraint-enabled').forEach(function(el) {
+      if (el.checked) count++;
+    });
+    var customEnabled = 0;
+    document.querySelectorAll('.custom-enabled').forEach(function(el) {
+      if (el.checked) customEnabled++;
+    });
+    var total = count + customEnabled;
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '520,1040p' web/static/wizard.js" in /Users/yani/Noema/backend succeeded in 52ms:
+    var invalidCustom = false;
+    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
+      if (!validateCustomConstraint(item)) invalidCustom = true;
+    });
+
+    if (invalidCustom) {
+      document.getElementById('submit-error').textContent = 'Please complete required custom constraint fields or disable them.';
+      document.getElementById('submit-error').style.display = 'block';
+      return;
+    }
+
+    document.getElementById('submit-error').style.display = 'none';
+    document.getElementById('running-state').style.display = 'block';
+    var runBtn = document.getElementById('run-eval-btn');
+    if (runBtn) runBtn.disabled = true;
+    document.getElementById('wizard-next').disabled = true;
+
+    var spec = buildSpec();
+    var formData = new FormData();
+    formData.append('spec', JSON.stringify(spec));
+
+thinking
+**Planning "Copy Run ID" button**
+
+I'm targeting the results page UI to add a convenient "Copy Run ID" button, which will involve updating the template and corresponding JavaScript.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' web/static/results.js" in /Users/yani/Noema/backend succeeded in 52ms:
+(function() {
+  var runId = document.body.getAttribute('data-run-id') || document.getElementById('results-run-id').textContent.replace('Run ID: ', '').trim();
+  var key = 'noema_run_' + runId;
+  var data;
+  try {
+    var raw = localStorage.getItem(key);
+    data = raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    data = null;
+  }
+
+  function copyText(text, button) {
+    if (!text) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function() {
+        if (button) showCopied(button);
+      });
+    } else {
+      var temp = document.createElement('textarea');
+      temp.value = text;
+
+thinking
+**Checking existing run id in results template**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "copy-run-id" -n web/templates' in /Users/yani/Noema/backend succeeded in 52ms:
+web/templates/verify_results.html:21:            <button type="button" class="btn btn-ghost btn-sm" id="copy-run-id">Copy Run ID</button>
+web/templates/app_results.html:21:            <button type="button" class="btn btn-ghost btn-sm" id="copy-run-id">Copy Run ID</button>
+
+thinking
+**Planning UX improvements for image uploads**
+
+Considering adding collapsible sections in results for better proof display and improving runId reliability; prioritizing a UX fix by highlighting image upload input with error styling when limits are exceeded for clearer user feedback. Next, I'll inspect the upload input markup in the wizard template.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' web/templates/app_new.html" in /Users/yani/Noema/backend succeeded in 51ms:
+{{define "app_new"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — New Evaluation</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_app" .}}
+
+  <main class="main main-wizard">
+    {{template "orb" .}}
+    <div class="wizard-card card">
+      <h1 class="card-title">New Evaluation</h1>
+      <div class="stepper" role="tablist">
+        <button type="button" class="stepper-step active" data-step="1" aria-selected="true">Dataset</button>
+        <span class="stepper-sep"></span>
+        <button type="button" class="stepper-step" data-step="2">Policy</button>
+
+
+thinking
+**Enhancing image validation UI**
+
+I'm improving user feedback by toggling `is-invalid` classes on image and dataset input elements in wizard.js to visually highlight invalid inputs, leveraging existing CSS without HTML changes.
+thinking
+**Planning input invalid class toggling**
+
+I'm detailing code changes in wizard.js to clear and add `is-invalid` classes on dataset file, paste, and image inputs within their status update functions for clearer visual error feedback.
 file update
-M /Users/yani/Noema/backend/internal/evaluate/output.go
-@@ -6,2 +6,3 @@
- 	"fmt"
-+	"io"
- )
-@@ -28,3 +29,3 @@
- 	}
--	if err := dec.Decode(&struct{}{}); err == nil {
-+	if err := dec.Decode(&struct{}{}); err != io.EOF {
- 		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
-apply_patch(auto_approved=true) exited 0 in 29ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/output.go
-file update:
-diff --git a/backend/internal/evaluate/output.go b/backend/internal/evaluate/output.go
-index 07e7dbe74e461751bb2d97be1b9fed77555e610f..a3364b2ebf35d84a47b6487a623890d38f7200a4
---- a/backend/internal/evaluate/output.go
-+++ b/backend/internal/evaluate/output.go
-@@ -4,6 +4,7 @@
- 	"bytes"
- 	"encoding/json"
- 	"fmt"
-+	"io"
- )
+M /Users/yani/Noema/backend/web/static/wizard.js
+@@ -107,5 +107,8 @@
+     statusEl.classList.remove('is-valid', 'is-invalid');
++    var fileInput = document.getElementById('dataset-file');
++    var pasteInput = document.getElementById('dataset-paste');
++    if (fileInput) fileInput.classList.remove('is-invalid');
++    if (pasteInput) pasteInput.classList.remove('is-invalid');
  
- type EvalConstraintResult struct {
-@@ -26,7 +27,7 @@
- 	if err := dec.Decode(&out); err != nil {
- 		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
- 	}
--	if err := dec.Decode(&struct{}{}); err == nil {
-+	if err := dec.Decode(&struct{}{}); err != io.EOF {
- 		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
- 	}
- 	if out.SchemaVersion != 1 {
+     if (datasetSource === 'file') {
+-      var fileInput = document.getElementById('dataset-file');
+       if (fileInput.files && fileInput.files.length > 0) {
+@@ -115,2 +118,3 @@
+           statusEl.classList.add('is-invalid');
++          fileInput.classList.add('is-invalid');
+         } else {
+@@ -138,2 +142,3 @@
+       statusEl.classList.add('is-invalid');
++      pasteInput.classList.add('is-invalid');
+       previewEl.hidden = true;
+@@ -147,2 +152,3 @@
+       statusEl.classList.add('is-invalid');
++      pasteInput.classList.add('is-invalid');
+       previewEl.hidden = true;
+@@ -167,2 +173,3 @@
+     var imagesInput = document.getElementById('images-file');
++    if (imagesInput) imagesInput.classList.remove('is-invalid');
+     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
+@@ -177,2 +184,3 @@
+       statusEl.classList.add('is-invalid');
++      if (imagesInput) imagesInput.classList.add('is-invalid');
+       updateWizardNavState();
+@@ -185,2 +193,3 @@
+       statusEl.classList.add('is-invalid');
++      if (imagesInput) imagesInput.classList.add('is-invalid');
+       updateWizardNavState();
+apply_patch(auto_approved=true) exited 0 in 30ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/web/static/wizard.js
+file update:
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index bfc4ae4af41fc0ca09e79fd34ab679b06f1dd349..fd671677be3f82e3359c95f6b0147878be6b5eb3
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -105,14 +105,18 @@
+     var statusEl = document.getElementById('dataset-status');
+     var previewEl = document.getElementById('dataset-preview');
+     statusEl.classList.remove('is-valid', 'is-invalid');
++    var fileInput = document.getElementById('dataset-file');
++    var pasteInput = document.getElementById('dataset-paste');
++    if (fileInput) fileInput.classList.remove('is-invalid');
++    if (pasteInput) pasteInput.classList.remove('is-invalid');
+ 
+     if (datasetSource === 'file') {
+-      var fileInput = document.getElementById('dataset-file');
+       if (fileInput.files && fileInput.files.length > 0) {
+         var file = fileInput.files[0];
+         if (file.size > MAX_DATASET_BYTES) {
+           statusEl.textContent = 'File too large. Max size is 50MB.';
+           statusEl.classList.add('is-invalid');
++          fileInput.classList.add('is-invalid');
+         } else {
+           statusEl.textContent = 'Selected file: ' + file.name + ' (' + formatBytes(file.size) + ')';
+           statusEl.classList.add('is-valid');
+@@ -136,6 +140,7 @@
+     if (new Blob([paste]).size > MAX_DATASET_BYTES) {
+       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
+       statusEl.classList.add('is-invalid');
++      pasteInput.classList.add('is-invalid');
+       previewEl.hidden = true;
+       updateWizardNavState();
+       return;
+@@ -145,6 +150,7 @@
+     if (!parsed.valid) {
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+       statusEl.classList.add('is-invalid');
++      pasteInput.classList.add('is-invalid');
+       previewEl.hidden = true;
+       updateWizardNavState();
+       return;
+@@ -165,6 +171,7 @@
+     statusEl.classList.remove('is-valid', 'is-invalid');
+ 
+     var imagesInput = document.getElementById('images-file');
++    if (imagesInput) imagesInput.classList.remove('is-invalid');
+     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
+     if (files.length === 0) {
+       statusEl.textContent = 'No images selected.';
+@@ -175,6 +182,7 @@
+     if (files.length > MAX_IMAGE_COUNT) {
+       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
+       statusEl.classList.add('is-invalid');
++      if (imagesInput) imagesInput.classList.add('is-invalid');
+       updateWizardNavState();
+       return false;
+     }
+@@ -183,6 +191,7 @@
+     if (oversized) {
+       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
+       statusEl.classList.add('is-invalid');
++      if (imagesInput) imagesInput.classList.add('is-invalid');
+       updateWizardNavState();
+       return false;
+     }
 
 file update:
-diff --git a/backend/internal/evaluate/output.go b/backend/internal/evaluate/output.go
-index 07e7dbe74e461751bb2d97be1b9fed77555e610f..a3364b2ebf35d84a47b6487a623890d38f7200a4
---- a/backend/internal/evaluate/output.go
-+++ b/backend/internal/evaluate/output.go
-@@ -4,6 +4,7 @@
- 	"bytes"
- 	"encoding/json"
- 	"fmt"
-+	"io"
- )
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index bfc4ae4af41fc0ca09e79fd34ab679b06f1dd349..fd671677be3f82e3359c95f6b0147878be6b5eb3
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -105,14 +105,18 @@
+     var statusEl = document.getElementById('dataset-status');
+     var previewEl = document.getElementById('dataset-preview');
+     statusEl.classList.remove('is-valid', 'is-invalid');
++    var fileInput = document.getElementById('dataset-file');
++    var pasteInput = document.getElementById('dataset-paste');
++    if (fileInput) fileInput.classList.remove('is-invalid');
++    if (pasteInput) pasteInput.classList.remove('is-invalid');
  
- type EvalConstraintResult struct {
-@@ -26,7 +27,7 @@
- 	if err := dec.Decode(&out); err != nil {
- 		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
- 	}
--	if err := dec.Decode(&struct{}{}); err == nil {
-+	if err := dec.Decode(&struct{}{}); err != io.EOF {
- 		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
- 	}
- 	if out.SchemaVersion != 1 {
+     if (datasetSource === 'file') {
+-      var fileInput = document.getElementById('dataset-file');
+       if (fileInput.files && fileInput.files.length > 0) {
+         var file = fileInput.files[0];
+         if (file.size > MAX_DATASET_BYTES) {
+           statusEl.textContent = 'File too large. Max size is 50MB.';
+           statusEl.classList.add('is-invalid');
++          fileInput.classList.add('is-invalid');
+         } else {
+           statusEl.textContent = 'Selected file: ' + file.name + ' (' + formatBytes(file.size) + ')';
+           statusEl.classList.add('is-valid');
+@@ -136,6 +140,7 @@
+     if (new Blob([paste]).size > MAX_DATASET_BYTES) {
+       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
+       statusEl.classList.add('is-invalid');
++      pasteInput.classList.add('is-invalid');
+       previewEl.hidden = true;
+       updateWizardNavState();
+       return;
+@@ -145,6 +150,7 @@
+     if (!parsed.valid) {
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+       statusEl.classList.add('is-invalid');
++      pasteInput.classList.add('is-invalid');
+       previewEl.hidden = true;
+       updateWizardNavState();
+       return;
+@@ -165,6 +171,7 @@
+     statusEl.classList.remove('is-valid', 'is-invalid');
+ 
+     var imagesInput = document.getElementById('images-file');
++    if (imagesInput) imagesInput.classList.remove('is-invalid');
+     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
+     if (files.length === 0) {
+       statusEl.textContent = 'No images selected.';
+@@ -175,6 +182,7 @@
+     if (files.length > MAX_IMAGE_COUNT) {
+       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
+       statusEl.classList.add('is-invalid');
++      if (imagesInput) imagesInput.classList.add('is-invalid');
+       updateWizardNavState();
+       return false;
+     }
+@@ -183,6 +191,7 @@
+     if (oversized) {
+       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
+       statusEl.classList.add('is-invalid');
++      if (imagesInput) imagesInput.classList.add('is-invalid');
+       updateWizardNavState();
+       return false;
+     }
 
 
 thinking
-**Adding test**
-file update
-M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
-@@ -168,2 +168,32 @@
- 
-+func TestParseEvalOutputOptional_RejectsTrailingGarbage(t *testing.T) {
-+	spec := Spec{
-+		SchemaVersion: 1,
-+		Constraints: []Constraint{
-+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
-+		},
-+	}
-+	enabled, err := enabledConstraints(spec)
-+	if err != nil {
-+		t.Fatalf("enabledConstraints error: %v", err)
-+	}
-+
-+	payload := EvalOutput{
-+		SchemaVersion: 1,
-+		Constraints: []EvalConstraintResult{
-+			{ID: "pii_exposure_risk", Severity: 0, Rationale: "ok"},
-+		},
-+		MaxSeverity: 0,
-+	}
-+	raw, err := json.Marshal(payload)
-+	if err != nil {
-+		t.Fatalf("marshal eval_output: %v", err)
-+	}
-+
-+	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw) + " trailing"}}}
-+	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
-+		t.Fatalf("expected error for trailing garbage")
-+	}
-+}
-+
- func TestComputePolicyResult(t *testing.T) {
-apply_patch(auto_approved=true) exited 0 in 34ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
-file update:
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 79e3111bbacf0a897b1339dfe48b04c10b372075..2327c77b3fc12627ef79c95c3df0c0eeaa092646
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -166,6 +166,36 @@
- 	}
- }
- 
-+func TestParseEvalOutputOptional_RejectsTrailingGarbage(t *testing.T) {
-+	spec := Spec{
-+		SchemaVersion: 1,
-+		Constraints: []Constraint{
-+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
-+		},
-+	}
-+	enabled, err := enabledConstraints(spec)
-+	if err != nil {
-+		t.Fatalf("enabledConstraints error: %v", err)
-+	}
-+
-+	payload := EvalOutput{
-+		SchemaVersion: 1,
-+		Constraints: []EvalConstraintResult{
-+			{ID: "pii_exposure_risk", Severity: 0, Rationale: "ok"},
-+		},
-+		MaxSeverity: 0,
-+	}
-+	raw, err := json.Marshal(payload)
-+	if err != nil {
-+		t.Fatalf("marshal eval_output: %v", err)
-+	}
-+
-+	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw) + " trailing"}}}
-+	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
-+		t.Fatalf("expected error for trailing garbage")
-+	}
-+}
-+
- func TestComputePolicyResult(t *testing.T) {
- 	enabled := map[string]ConstraintRule{
- 		"pii":    {ID: "pii", AllowedMaxSeverity: 1},
-diff --git a/backend/internal/evaluate/output.go b/backend/internal/evaluate/output.go
-index 07e7dbe74e461751bb2d97be1b9fed77555e610f..a3364b2ebf35d84a47b6487a623890d38f7200a4
---- a/backend/internal/evaluate/output.go
-+++ b/backend/internal/evaluate/output.go
-@@ -4,6 +4,7 @@
- 	"bytes"
- 	"encoding/json"
- 	"fmt"
-+	"io"
- )
- 
- type EvalConstraintResult struct {
-@@ -26,7 +27,7 @@
- 	if err := dec.Decode(&out); err != nil {
- 		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
- 	}
--	if err := dec.Decode(&struct{}{}); err == nil {
-+	if err := dec.Decode(&struct{}{}); err != io.EOF {
- 		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
- 	}
- 	if out.SchemaVersion != 1 {
-
-file update:
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 79e3111bbacf0a897b1339dfe48b04c10b372075..2327c77b3fc12627ef79c95c3df0c0eeaa092646
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -166,6 +166,36 @@
- 	}
- }
- 
-+func TestParseEvalOutputOptional_RejectsTrailingGarbage(t *testing.T) {
-+	spec := Spec{
-+		SchemaVersion: 1,
-+		Constraints: []Constraint{
-+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
-+		},
-+	}
-+	enabled, err := enabledConstraints(spec)
-+	if err != nil {
-+		t.Fatalf("enabledConstraints error: %v", err)
-+	}
-+
-+	payload := EvalOutput{
-+		SchemaVersion: 1,
-+		Constraints: []EvalConstraintResult{
-+			{ID: "pii_exposure_risk", Severity: 0, Rationale: "ok"},
-+		},
-+		MaxSeverity: 0,
-+	}
-+	raw, err := json.Marshal(payload)
-+	if err != nil {
-+		t.Fatalf("marshal eval_output: %v", err)
-+	}
-+
-+	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw) + " trailing"}}}
-+	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
-+		t.Fatalf("expected error for trailing garbage")
-+	}
-+}
-+
- func TestComputePolicyResult(t *testing.T) {
- 	enabled := map[string]ConstraintRule{
- 		"pii":    {ID: "pii", AllowedMaxSeverity: 1},
-diff --git a/backend/internal/evaluate/output.go b/backend/internal/evaluate/output.go
-index 07e7dbe74e461751bb2d97be1b9fed77555e610f..a3364b2ebf35d84a47b6487a623890d38f7200a4
---- a/backend/internal/evaluate/output.go
-+++ b/backend/internal/evaluate/output.go
-@@ -4,6 +4,7 @@
- 	"bytes"
- 	"encoding/json"
- 	"fmt"
-+	"io"
- )
- 
- type EvalConstraintResult struct {
-@@ -26,7 +27,7 @@
- 	if err := dec.Decode(&out); err != nil {
- 		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
- 	}
--	if err := dec.Decode(&struct{}{}); err == nil {
-+	if err := dec.Decode(&struct{}{}); err != io.EOF {
- 		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
- 	}
- 	if out.SchemaVersion != 1 {
-
-
-thinking
-**Running tests**
+**Rerunning tests**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 501ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 211ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	0.053s
+ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
 file update:
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 79e3111bbacf0a897b1339dfe48b04c10b372075..2327c77b3fc12627ef79c95c3df0c0eeaa092646
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -166,6 +166,36 @@
- 	}
- }
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index bfc4ae4af41fc0ca09e79fd34ab679b06f1dd349..fd671677be3f82e3359c95f6b0147878be6b5eb3
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -105,14 +105,18 @@
+     var statusEl = document.getElementById('dataset-status');
+     var previewEl = document.getElementById('dataset-preview');
+     statusEl.classList.remove('is-valid', 'is-invalid');
++    var fileInput = document.getElementById('dataset-file');
++    var pasteInput = document.getElementById('dataset-paste');
++    if (fileInput) fileInput.classList.remove('is-invalid');
++    if (pasteInput) pasteInput.classList.remove('is-invalid');
  
-+func TestParseEvalOutputOptional_RejectsTrailingGarbage(t *testing.T) {
-+	spec := Spec{
-+		SchemaVersion: 1,
-+		Constraints: []Constraint{
-+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
-+		},
-+	}
-+	enabled, err := enabledConstraints(spec)
-+	if err != nil {
-+		t.Fatalf("enabledConstraints error: %v", err)
-+	}
-+
-+	payload := EvalOutput{
-+		SchemaVersion: 1,
-+		Constraints: []EvalConstraintResult{
-+			{ID: "pii_exposure_risk", Severity: 0, Rationale: "ok"},
-+		},
-+		MaxSeverity: 0,
-+	}
-+	raw, err := json.Marshal(payload)
-+	if err != nil {
-+		t.Fatalf("marshal eval_output: %v", err)
-+	}
-+
-+	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw) + " trailing"}}}
-+	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
-+		t.Fatalf("expected error for trailing garbage")
-+	}
-+}
-+
- func TestComputePolicyResult(t *testing.T) {
- 	enabled := map[string]ConstraintRule{
- 		"pii":    {ID: "pii", AllowedMaxSeverity: 1},
-diff --git a/backend/internal/evaluate/output.go b/backend/internal/evaluate/output.go
-index 07e7dbe74e461751bb2d97be1b9fed77555e610f..a3364b2ebf35d84a47b6487a623890d38f7200a4
---- a/backend/internal/evaluate/output.go
-+++ b/backend/internal/evaluate/output.go
-@@ -4,6 +4,7 @@
- 	"bytes"
- 	"encoding/json"
- 	"fmt"
-+	"io"
- )
+     if (datasetSource === 'file') {
+-      var fileInput = document.getElementById('dataset-file');
+       if (fileInput.files && fileInput.files.length > 0) {
+         var file = fileInput.files[0];
+         if (file.size > MAX_DATASET_BYTES) {
+           statusEl.textContent = 'File too large. Max size is 50MB.';
+           statusEl.classList.add('is-invalid');
++          fileInput.classList.add('is-invalid');
+         } else {
+           statusEl.textContent = 'Selected file: ' + file.name + ' (' + formatBytes(file.size) + ')';
+           statusEl.classList.add('is-valid');
+@@ -136,6 +140,7 @@
+     if (new Blob([paste]).size > MAX_DATASET_BYTES) {
+       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
+       statusEl.classList.add('is-invalid');
++      pasteInput.classList.add('is-invalid');
+       previewEl.hidden = true;
+       updateWizardNavState();
+       return;
+@@ -145,6 +150,7 @@
+     if (!parsed.valid) {
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+       statusEl.classList.add('is-invalid');
++      pasteInput.classList.add('is-invalid');
+       previewEl.hidden = true;
+       updateWizardNavState();
+       return;
+@@ -165,6 +171,7 @@
+     statusEl.classList.remove('is-valid', 'is-invalid');
  
- type EvalConstraintResult struct {
-@@ -26,7 +27,7 @@
- 	if err := dec.Decode(&out); err != nil {
- 		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
- 	}
--	if err := dec.Decode(&struct{}{}); err == nil {
-+	if err := dec.Decode(&struct{}{}); err != io.EOF {
- 		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
- 	}
- 	if out.SchemaVersion != 1 {
+     var imagesInput = document.getElementById('images-file');
++    if (imagesInput) imagesInput.classList.remove('is-invalid');
+     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
+     if (files.length === 0) {
+       statusEl.textContent = 'No images selected.';
+@@ -175,6 +182,7 @@
+     if (files.length > MAX_IMAGE_COUNT) {
+       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
+       statusEl.classList.add('is-invalid');
++      if (imagesInput) imagesInput.classList.add('is-invalid');
+       updateWizardNavState();
+       return false;
+     }
+@@ -183,6 +191,7 @@
+     if (oversized) {
+       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
+       statusEl.classList.add('is-invalid');
++      if (imagesInput) imagesInput.classList.add('is-invalid');
+       updateWizardNavState();
+       return false;
+     }
 
+
+thinking
+**Preparing final summary and tests**
 codex
-What you changed (short)
-- Fixed `parseEvalOutput` to reject any trailing data after valid JSON.
-- Added a test to ensure `eval_output` with trailing garbage is rejected.
+What I changed (short)
+- Added inline invalid-state highlighting on the dataset and image inputs in the wizard so users can immediately see which field needs attention when size/format limits are violated. (`web/static/wizard.js`)
 
 Tests run
 - `go test ./...`
-
-Natural next steps
-1. Review `parseEvalOutput` error messaging if you want more specific client feedback.
-2. Add similar trailing-data checks for other JSON inputs if needed.
 file update:
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 79e3111bbacf0a897b1339dfe48b04c10b372075..2327c77b3fc12627ef79c95c3df0c0eeaa092646
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -166,6 +166,36 @@
- 	}
- }
+diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
+index bfc4ae4af41fc0ca09e79fd34ab679b06f1dd349..fd671677be3f82e3359c95f6b0147878be6b5eb3
+--- a/backend/web/static/wizard.js
++++ b/backend/web/static/wizard.js
+@@ -105,14 +105,18 @@
+     var statusEl = document.getElementById('dataset-status');
+     var previewEl = document.getElementById('dataset-preview');
+     statusEl.classList.remove('is-valid', 'is-invalid');
++    var fileInput = document.getElementById('dataset-file');
++    var pasteInput = document.getElementById('dataset-paste');
++    if (fileInput) fileInput.classList.remove('is-invalid');
++    if (pasteInput) pasteInput.classList.remove('is-invalid');
  
-+func TestParseEvalOutputOptional_RejectsTrailingGarbage(t *testing.T) {
-+	spec := Spec{
-+		SchemaVersion: 1,
-+		Constraints: []Constraint{
-+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
-+		},
-+	}
-+	enabled, err := enabledConstraints(spec)
-+	if err != nil {
-+		t.Fatalf("enabledConstraints error: %v", err)
-+	}
-+
-+	payload := EvalOutput{
-+		SchemaVersion: 1,
-+		Constraints: []EvalConstraintResult{
-+			{ID: "pii_exposure_risk", Severity: 0, Rationale: "ok"},
-+		},
-+		MaxSeverity: 0,
-+	}
-+	raw, err := json.Marshal(payload)
-+	if err != nil {
-+		t.Fatalf("marshal eval_output: %v", err)
-+	}
-+
-+	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw) + " trailing"}}}
-+	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
-+		t.Fatalf("expected error for trailing garbage")
-+	}
-+}
-+
- func TestComputePolicyResult(t *testing.T) {
- 	enabled := map[string]ConstraintRule{
- 		"pii":    {ID: "pii", AllowedMaxSeverity: 1},
-diff --git a/backend/internal/evaluate/output.go b/backend/internal/evaluate/output.go
-index 07e7dbe74e461751bb2d97be1b9fed77555e610f..a3364b2ebf35d84a47b6487a623890d38f7200a4
---- a/backend/internal/evaluate/output.go
-+++ b/backend/internal/evaluate/output.go
-@@ -4,6 +4,7 @@
- 	"bytes"
- 	"encoding/json"
- 	"fmt"
-+	"io"
- )
+     if (datasetSource === 'file') {
+-      var fileInput = document.getElementById('dataset-file');
+       if (fileInput.files && fileInput.files.length > 0) {
+         var file = fileInput.files[0];
+         if (file.size > MAX_DATASET_BYTES) {
+           statusEl.textContent = 'File too large. Max size is 50MB.';
+           statusEl.classList.add('is-invalid');
++          fileInput.classList.add('is-invalid');
+         } else {
+           statusEl.textContent = 'Selected file: ' + file.name + ' (' + formatBytes(file.size) + ')';
+           statusEl.classList.add('is-valid');
+@@ -136,6 +140,7 @@
+     if (new Blob([paste]).size > MAX_DATASET_BYTES) {
+       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
+       statusEl.classList.add('is-invalid');
++      pasteInput.classList.add('is-invalid');
+       previewEl.hidden = true;
+       updateWizardNavState();
+       return;
+@@ -145,6 +150,7 @@
+     if (!parsed.valid) {
+       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
+       statusEl.classList.add('is-invalid');
++      pasteInput.classList.add('is-invalid');
+       previewEl.hidden = true;
+       updateWizardNavState();
+       return;
+@@ -165,6 +171,7 @@
+     statusEl.classList.remove('is-valid', 'is-invalid');
  
- type EvalConstraintResult struct {
-@@ -26,7 +27,7 @@
- 	if err := dec.Decode(&out); err != nil {
- 		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
- 	}
--	if err := dec.Decode(&struct{}{}); err == nil {
-+	if err := dec.Decode(&struct{}{}); err != io.EOF {
- 		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
- 	}
- 	if out.SchemaVersion != 1 {
+     var imagesInput = document.getElementById('images-file');
++    if (imagesInput) imagesInput.classList.remove('is-invalid');
+     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
+     if (files.length === 0) {
+       statusEl.textContent = 'No images selected.';
+@@ -175,6 +182,7 @@
+     if (files.length > MAX_IMAGE_COUNT) {
+       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
+       statusEl.classList.add('is-invalid');
++      if (imagesInput) imagesInput.classList.add('is-invalid');
+       updateWizardNavState();
+       return false;
+     }
+@@ -183,6 +191,7 @@
+     if (oversized) {
+       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
+       statusEl.classList.add('is-invalid');
++      if (imagesInput) imagesInput.classList.add('is-invalid');
+       updateWizardNavState();
+       return false;
+     }
 
 tokens used
-23,836
-What you changed (short)
-- Fixed `parseEvalOutput` to reject any trailing data after valid JSON.
-- Added a test to ensure `eval_output` with trailing garbage is rejected.
+53,236
+What I changed (short)
+- Added inline invalid-state highlighting on the dataset and image inputs in the wizard so users can immediately see which field needs attention when size/format limits are violated. (`web/static/wizard.js`)
 
 Tests run
 - `go test ./...`
-
-Natural next steps
-1. Review `parseEvalOutput` error messaging if you want more specific client feedback.
-2. Add similar trailing-data checks for other JSON inputs if needed.
