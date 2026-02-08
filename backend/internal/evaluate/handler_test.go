@@ -269,7 +269,7 @@ func TestParseEvalOutputOptional_RejectsMultipleValues(t *testing.T) {
 	}
 }
 
-func TestParseEvalOutputOptional_IgnoresWhitespace(t *testing.T) {
+func TestParseEvalOutputOptional_RejectsWhitespace(t *testing.T) {
 	spec := Spec{
 		SchemaVersion: 1,
 		Constraints: []Constraint{
@@ -283,15 +283,8 @@ func TestParseEvalOutputOptional_IgnoresWhitespace(t *testing.T) {
 	}
 
 	form := &multipart.Form{Value: map[string][]string{"eval_output": {" \n\t "}}}
-	out, err := parseEvalOutputOptional(form, enabled)
-	if err != nil {
-		t.Fatalf("parseEvalOutputOptional error: %v", err)
-	}
-	if len(out.Constraints) != len(enabled) {
-		t.Fatalf("expected %d constraints, got %d", len(enabled), len(out.Constraints))
-	}
-	if out.MaxSeverity != 0 {
-		t.Fatalf("expected max_severity 0, got %d", out.MaxSeverity)
+	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
+		t.Fatalf("expected error for blank eval_output")
 	}
 }
 

@@ -280,7 +280,7 @@ func parseEvalOutputProvided(form *multipart.Form, enabled map[string]Constraint
 	}
 	raw := strings.TrimSpace(form.Value["eval_output"][0])
 	if raw == "" {
-		return EvalOutput{}, false, nil
+		return EvalOutput{}, true, fmt.Errorf("eval_output must be non-empty")
 	}
 	out, err := parseEvalOutput(raw)
 	if err != nil {

@@ -1,0 +1,727 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3cbf-72bc-7522-b0ac-e0d5d0f202a7
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 106ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+ok  	noema/internal/config	(cached)
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Planning meaningful improvement**
+
+I'm focusing on finding a substantive enhancement involving at most three files, likely around error handling or similar, and preparing to inspect the repo with targeted searches to identify it.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"TODO|FIXME|panic\\(\" internal cmd | head" in /Users/yani/Noema/backend succeeded in 52ms:
+
+
+thinking
+**Scanning for error handling**
+
+I'm checking httputil and related files to understand the current error handling approach and identify where to improve it.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "nil" internal | head' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/session/session.go:19:	sig := hex.EncodeToString(mac.Sum(nil))
+internal/session/session.go:32:	if err != nil || len(sig) != sha256.Size {
+internal/session/session.go:36:	if err != nil {
+internal/session/session.go:42:	expected := mac.Sum(nil)
+internal/evaluate/parse.go:25:	if err := dec.Decode(&spec); err != nil {
+internal/evaluate/parse.go:31:	return spec, nil
+internal/evaluate/parse.go:78:	return nil
+internal/evaluate/parse.go:84:		return nil, nil, fmt.Errorf("missing required file: dataset")
+internal/evaluate/parse.go:87:		return nil, nil, fmt.Errorf("only one dataset file allowed")
+internal/evaluate/parse.go:91:		return nil, nil, fmt.Errorf("dataset exceeds limit of %s", formatBytes(int64(config.MaxDatasetBytes)))
+
+thinking
+**Considering enforcing limits**
+
+I'm reflecting on adding enforcement for limits during evaluation or parsing to improve robustness.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"path/filepath"
+	"strings"
+
+	"noema/internal/config"
+)
+
+func parseSpec(form *multipart.Form) (Spec, error) {
+	specStrs := form.Value["spec"]
+	if len(specStrs) == 0 || specStrs[0] == "" {
+		return Spec{}, fmt.Errorf("missing field: spec")
+	}
+	if len(specStrs) > 1 {
+		return Spec{}, fmt.Errorf("only one spec value allowed")
+
+thinking
+**Inspecting dataset file handling**
+
+I'm considering enhancing error messages for invalid JSON by adding more detail without leaking sensitive info and checking dataset file names for path separators to prevent security issues. Next, I'll review dataset file reading and evaluation code to confirm filename validation and error handling.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "readDatasetFile|dataset" internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
+Total output lines: 127
+
+internal/evaluate/prompt.go:23:		Description: "Assess whether the dataset contains personally identifiable information that could identify individuals directly or indirectly, including contextual linkage of names, addresses, contact details, or identifiable imagery.",
+internal/evaluate/prompt.go:32:		Description: "Determine whether the dataset contains regulated sensitive information such as medical records, financial account information, biometric identifiers, or government-issued identifiers.",
+internal/evaluate/prompt.go:41:		Description: "Evaluate whether the dataset appears to contain content that may have been collected without proper user consent or originates from private communications or restricted sources.",
+internal/evaluate/prompt.go:50:		Description: "Assess whether the dataset contains safety-critical guidance such as medical, legal, engineering, or operational instructions that could cause harm if followed incorrectly.",
+internal/evaluate/prompt.go:59:		Description: "Evaluate whether the dataset includes content that could enable harmful real-world actions if generated or amplified by AI systems, including operational misuse or harmful procedural knowledge.",
+internal/evaluate/prompt.go:66:	"dataset_intended_use_mismatch": {
+internal/evaluate/prompt.go:67:		ID:          "dataset_intended_use_mismatch",
+internal/evaluate/prompt.go:68:		Description: "Determine whether the dataset content appears inconsistent with its stated intended use or declared labeling context, indicating potential governance or deployment risk.",
+internal/evaluate/prompt.go:72:			"2": "Clear mismatch between dataset content and intended use",
+internal/evaluate/prompt.go:79:You are a strict dataset policy evaluator for Noema.
+internal/evaluate/prompt.go:86:func buildUserPrompt(spec Spec, datasetJSON []byte, images []ImageInfo) string {
+internal/evaluate/prompt.go:89:	buf.WriteString("Evaluate the dataset against the following constraints.\n")
+internal/evaluate/prompt.go:109:	buf.Write(datasetJSON)
+internal/evaluate/parse.go:82:	datasetFiles := form.File["dataset"]
+internal/evaluate/parse.go:83:	if len(datasetFiles) == 0 {
+internal/evaluate/parse.go:84:		return nil, nil, fmt.Errorf("missing required file: dataset")
+internal/evaluate/parse.go:86:	if len(datasetFiles) > 1 {
+internal/evaluate/parse.go:87:		return nil, nil, fmt.Errorf("only one dataset file allowed")
+
+thinking
+**Inspecting storage implementation**
+
+I'm reviewing the storage code to consider validating filenames in the saveUpload function to improve reliability.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math/big"
+	"mime/multipart"
+	"os"
+	"path/filepath"
+	"strconv"
+	"sync/atomic"
+	"time"
+)
+
+var runIDCounter uint64
+
+func genRunID() string {
+	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
+
+thinking
+**Considering error detail inclusion**
+
+The current spec parse error message lacks detail; including the underlying error could aid debugging but risks leaking information to clients. Next, I'll review how the handler uses these errors to decide the best approach.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+thinking
+**Considering validation and error detail improvements**
+
+I'm assessing possible improvements like including underlying errors in spec parsing, validating filenames more strictly, and checking for constraint ID conflicts but noting many safeguards already exist; next step is identifying meaningful validation enhancements with tests.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/constraints.go" in /Users/yani/Noema/backend exited 1 in 52ms:
+sed: internal/evaluate/constraints.go: No such file or directory
+
+thinking
+**Starting internal evaluation**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
+cache.go
+commitment.go
+dataset.go
+gemini_eval.go
+handler.go
+handler_integration_test.go
+handler_test.go
+images.go
+output.go
+parse.go
+policy.go
+prompt.go
+schema.go
+spec.go
+storage.go
+storage_test.go
+
+thinking
+**Inspecting enabledConstraints in spec**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/spec.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+// Spec is the parsed evaluation spec (schema_version 1).
+type Spec struct {
+	SchemaVersion     int                `json:"schema_version"`
+	EvaluationName    string             `json:"evaluation_name"`
+	Policy            Policy             `json:"policy"`
+	Constraints       []Constraint       `json:"constraints"`
+	CustomConstraints []CustomConstraint `json:"custom_constraints"`
+}
+
+type Policy struct {
+	Reveal RevealPolicy `json:"reveal"`
+}
+
+type RevealPolicy struct {
+	MaxSeverity bool `json:"max_severity"`
+	Commitment  bool `json:"commitment"`
+}
+
+
+thinking
+**Locating enabledConstraints function**
+
+I'm searching for the enabledConstraints function, likely under policy-related files, to understand its implementation and role.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "enabledConstraints" internal/evaluate' in /Users/yani/Noema/backend succeeded in 51ms:
+internal/evaluate/handler_test.go:66:	enabled, err := enabledConstraints(spec)
+internal/evaluate/handler_test.go:68:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:151:	enabled, err := enabledConstraints(spec)
+internal/evaluate/handler_test.go:153:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:189:	enabled, err := enabledConstraints(spec)
+internal/evaluate/handler_test.go:191:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:219:	enabled, err := enabledConstraints(spec)
+internal/evaluate/handler_test.go:221:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:249:	enabled, err := enabledConstraints(spec)
+internal/evaluate/handler_test.go:251:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:280:	enabled, err := enabledConstraints(spec)
+internal/evaluate/handler_test.go:282:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/policy.go:10:func enabledConstraints(spec Spec) (map[string]ConstraintRule, error) {
+internal/evaluate/handler.go:98:		enabled, err := enabledConstraints(spec)
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/policy.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import "fmt"
+
+type ConstraintRule struct {
+	ID                 string
+	AllowedMaxSeverity int
+}
+
+func enabledConstraints(spec Spec) (map[string]ConstraintRule, error) {
+	out := make(map[string]ConstraintRule)
+	for _, c := range spec.Constraints {
+		if !c.Enabled {
+			continue
+		}
+		if _, exists := out[c.ID]; exists {
+			return nil, fmt.Errorf("duplicate constraint id: %s", c.ID)
+		}
+		out[c.ID] = ConstraintRule{ID: c.ID, AllowedMaxSeverity: c.AllowedMaxSeverity}
+	}
+
+thinking
+**Assessing constraint validation location**
+
+Considering that enabledConstraints duplication is partly handled in validation, but computePolicyResult might need to verify all enabled constraints are present in output for correctness; planning to check the EvalOutput struct in output.go to decide where to enforce this.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/output.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+)
+
+type EvalConstraintResult struct {
+	ID        string `json:"id"`
+	Severity  int    `json:"severity"`
+	Rationale string `json:"rationale"`
+}
+
+type EvalOutput struct {
+	SchemaVersion int                    `json:"schema_version"`
+	Constraints   []EvalConstraintResult `json:"constraints"`
+	MaxSeverity   int                    `json:"max_severity"`
+	Confidence    *float64               `json:"confidence,omitempty"`
+
+thinking
+**Reviewing potential error handling improvements**
+
+Considering enhancing parseSpec error details and strengthening run index update error reporting, but current handling is consistent and sufficient; testing coverage in handler_test will be reviewed next.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"mime/multipart"
+	"net/textproto"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"testing"
+	"time"
+)
+
+type formFile struct {
+	field       string
+	filename    string
+	contentType string
+
+thinking
+**Noticing test improvement opportunities**
+
+I see existing tests could be enhanced by adding validation for spec.Policy.Reveal flags and refining parseEvalOutputOptional, especially around how gemini_eval handles eval responses with commitment and proof.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/gemini_eval.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"context"
+	"log"
+	"mime/multipart"
+	"os"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/gemini"
+)
+
+const geminiEvalTimeout = 45 * time.Second
+
+func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
+	if out, provided, err := parseEvalOutputProvided(form, enabled); err != nil {
+		return EvalOutput{}, err
+	} else if provided {
+		return out, nil
+
+thinking
+**Considering output parsing improvements**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "parseEvalOutputProvided" -n internal/evaluate -n' in /Users/yani/Noema/backend succeeded in 51ms:
+internal/evaluate/gemini_eval.go:17:	if out, provided, err := parseEvalOutputProvided(form, enabled); err != nil {
+internal/evaluate/handler.go:241:	out, provided, err := parseEvalOutputProvided(form, enabled)
+internal/evaluate/handler.go:274:func parseEvalOutputProvided(form *multipart.Form, enabled map[string]ConstraintRule) (EvalOutput, bool, error) {
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '200,340p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	var runs []runEntry
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if !strings.HasPrefix(entry.Name(), "run_") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		runs = append(runs, runEntry{
+			path:    filepath.Join(runsDir, entry.Name()),
+
+thinking
+**Considering stricter empty eval_output handling**
+
+I'm thinking of enforcing errors when eval_output is explicitly provided but empty (only whitespace) to avoid silent fallback and improve reliability, which will require updating relevant tests accordingly.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "eval_output" internal/evaluate/handler_test.go' in /Users/yani/Noema/backend succeeded in 52ms:
+166:		t.Fatalf("marshal eval_output: %v", err)
+169:	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw)}}}
+203:		t.Fatalf("marshal eval_output: %v", err)
+206:	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw)}}}
+233:		t.Fatalf("marshal eval_output: %v", err)
+236:	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw) + " trailing"}}}
+263:		t.Fatalf("marshal eval_output: %v", err)
+266:	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw), string(raw)}}}
+268:		t.Fatalf("expected error for multiple eval_output values")
+285:	form := &multipart.Form{Value: map[string][]string{"eval_output": {" \n\t "}}}
+
+thinking
+**Exploring tests for output evaluation**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '180,320p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+}
+
+func TestParseEvalOutputOptional_RejectsInvalidOutput(t *testing.T) {
+	spec := Spec{
+		SchemaVersion: 1,
+		Constraints: []Constraint{
+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+		},
+	}
+	enabled, err := enabledConstraints(spec)
+	if err != nil {
+		t.Fatalf("enabledConstraints error: %v", err)
+	}
+
+	payload := EvalOutput{
+		SchemaVersion: 1,
+		Constraints: []EvalConstraintResult{
+			{ID: "unknown_constraint", Severity: 2, Rationale: "bad"},
+		},
+		MaxSeverity: 2,
+
+thinking
+**Changing eval_output handling to error on blank**
+
+I'm updating the eval_output parsing to return an error if the field is present but blank, improving API correctness. This involves adjusting the parsing function and modifying the related test to expect an error instead of ignoring whitespace.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler.go
+@@ -282,3 +282,3 @@
+ 	if raw == "" {
+-		return EvalOutput{}, false, nil
++		return EvalOutput{}, true, fmt.Errorf("eval_output must be non-empty")
+ 	}
+apply_patch(auto_approved=true) exited 0 in 30ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/handler.go
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 71a2a51143091eb6a1687c52a84fe43706ac480b..d34e8e78044b2cbd05c096f00682d37ae2278c39
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -280,7 +280,7 @@
+ 	}
+ 	raw := strings.TrimSpace(form.Value["eval_output"][0])
+ 	if raw == "" {
+-		return EvalOutput{}, false, nil
++		return EvalOutput{}, true, fmt.Errorf("eval_output must be non-empty")
+ 	}
+ 	out, err := parseEvalOutput(raw)
+ 	if err != nil {
+
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 71a2a51143091eb6a1687c52a84fe43706ac480b..d34e8e78044b2cbd05c096f00682d37ae2278c39
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -280,7 +280,7 @@
+ 	}
+ 	raw := strings.TrimSpace(form.Value["eval_output"][0])
+ 	if raw == "" {
+-		return EvalOutput{}, false, nil
++		return EvalOutput{}, true, fmt.Errorf("eval_output must be non-empty")
+ 	}
+ 	out, err := parseEvalOutput(raw)
+ 	if err != nil {
+
+
+thinking
+**Updating test**
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
+@@ -271,3 +271,3 @@
+ 
+-func TestParseEvalOutputOptional_IgnoresWhitespace(t *testing.T) {
++func TestParseEvalOutputOptional_RejectsWhitespace(t *testing.T) {
+ 	spec := Spec{
+@@ -285,11 +285,4 @@
+ 	form := &multipart.Form{Value: map[string][]string{"eval_output": {" \n\t "}}}
+-	out, err := parseEvalOutputOptional(form, enabled)
+-	if err != nil {
+-		t.Fatalf("parseEvalOutputOptional error: %v", err)
+-	}
+-	if len(out.Constraints) != len(enabled) {
+-		t.Fatalf("expected %d constraints, got %d", len(enabled), len(out.Constraints))
+-	}
+-	if out.MaxSeverity != 0 {
+-		t.Fatalf("expected max_severity 0, got %d", out.MaxSeverity)
++	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
++		t.Fatalf("expected error for blank eval_output")
+ 	}
+apply_patch(auto_approved=true) exited 0 in 34ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 71a2a51143091eb6a1687c52a84fe43706ac480b..d34e8e78044b2cbd05c096f00682d37ae2278c39
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -280,7 +280,7 @@
+ 	}
+ 	raw := strings.TrimSpace(form.Value["eval_output"][0])
+ 	if raw == "" {
+-		return EvalOutput{}, false, nil
++		return EvalOutput{}, true, fmt.Errorf("eval_output must be non-empty")
+ 	}
+ 	out, err := parseEvalOutput(raw)
+ 	if err != nil {
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 119855505614c5f186d4bd09ca8a6a455b7cb491..8da76aec9dd68334812485309ce6ba3b92d95cbf
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -269,7 +269,7 @@
+ 	}
+ }
+ 
+-func TestParseEvalOutputOptional_IgnoresWhitespace(t *testing.T) {
++func TestParseEvalOutputOptional_RejectsWhitespace(t *testing.T) {
+ 	spec := Spec{
+ 		SchemaVersion: 1,
+ 		Constraints: []Constraint{
+@@ -283,15 +283,8 @@
+ 	}
+ 
+ 	form := &multipart.Form{Value: map[string][]string{"eval_output": {" \n\t "}}}
+-	out, err := parseEvalOutputOptional(form, enabled)
+-	if err != nil {
+-		t.Fatalf("parseEvalOutputOptional error: %v", err)
+-	}
+-	if len(out.Constraints) != len(enabled) {
+-		t.Fatalf("expected %d constraints, got %d", len(enabled), len(out.Constraints))
+-	}
+-	if out.MaxSeverity != 0 {
+-		t.Fatalf("expected max_severity 0, got %d", out.MaxSeverity)
++	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
++		t.Fatalf("expected error for blank eval_output")
+ 	}
+ }
+ 
+
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 71a2a51143091eb6a1687c52a84fe43706ac480b..d34e8e78044b2cbd05c096f00682d37ae2278c39
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -280,7 +280,7 @@
+ 	}
+ 	raw := strings.TrimSpace(form.Value["eval_output"][0])
+ 	if raw == "" {
+-		return EvalOutput{}, false, nil
++		return EvalOutput{}, true, fmt.Errorf("eval_output must be non-empty")
+ 	}
+ 	out, err := parseEvalOutput(raw)
+ 	if err != nil {
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 119855505614c5f186d4bd09ca8a6a455b7cb491..8da76aec9dd68334812485309ce6ba3b92d95cbf
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -269,7 +269,7 @@
+ 	}
+ }
+ 
+-func TestParseEvalOutputOptional_IgnoresWhitespace(t *testing.T) {
++func TestParseEvalOutputOptional_RejectsWhitespace(t *testing.T) {
+ 	spec := Spec{
+ 		SchemaVersion: 1,
+ 		Constraints: []Constraint{
+@@ -283,15 +283,8 @@
+ 	}
+ 
+ 	form := &multipart.Form{Value: map[string][]string{"eval_output": {" \n\t "}}}
+-	out, err := parseEvalOutputOptional(form, enabled)
+-	if err != nil {
+-		t.Fatalf("parseEvalOutputOptional error: %v", err)
+-	}
+-	if len(out.Constraints) != len(enabled) {
+-		t.Fatalf("expected %d constraints, got %d", len(enabled), len(out.Constraints))
+-	}
+-	if out.MaxSeverity != 0 {
+-		t.Fatalf("expected max_severity 0, got %d", out.MaxSeverity)
++	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
++		t.Fatalf("expected error for blank eval_output")
+ 	}
+ }
+ 
+
+
+thinking
+**Running tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 639ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+ok  	noema/internal/config	(cached)
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.145s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 71a2a51143091eb6a1687c52a84fe43706ac480b..d34e8e78044b2cbd05c096f00682d37ae2278c39
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -280,7 +280,7 @@
+ 	}
+ 	raw := strings.TrimSpace(form.Value["eval_output"][0])
+ 	if raw == "" {
+-		return EvalOutput{}, false, nil
++		return EvalOutput{}, true, fmt.Errorf("eval_output must be non-empty")
+ 	}
+ 	out, err := parseEvalOutput(raw)
+ 	if err != nil {
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 119855505614c5f186d4bd09ca8a6a455b7cb491..8da76aec9dd68334812485309ce6ba3b92d95cbf
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -269,7 +269,7 @@
+ 	}
+ }
+ 
+-func TestParseEvalOutputOptional_IgnoresWhitespace(t *testing.T) {
++func TestParseEvalOutputOptional_RejectsWhitespace(t *testing.T) {
+ 	spec := Spec{
+ 		SchemaVersion: 1,
+ 		Constraints: []Constraint{
+@@ -283,15 +283,8 @@
+ 	}
+ 
+ 	form := &multipart.Form{Value: map[string][]string{"eval_output": {" \n\t "}}}
+-	out, err := parseEvalOutputOptional(form, enabled)
+-	if err != nil {
+-		t.Fatalf("parseEvalOutputOptional error: %v", err)
+-	}
+-	if len(out.Constraints) != len(enabled) {
+-		t.Fatalf("expected %d constraints, got %d", len(enabled), len(out.Constraints))
+-	}
+-	if out.MaxSeverity != 0 {
+-		t.Fatalf("expected max_severity 0, got %d", out.MaxSeverity)
++	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
++		t.Fatalf("expected error for blank eval_output")
+ 	}
+ }
+ 
+
+
+thinking
+**Summarizing final changes and tests**
+
+The implementation improves behavior by fixing the targeted functionality and includes running all tests with `go test ./...` to ensure correctness.
+codex
+What I changed (short)
+- Treat blank `eval_output` as an error instead of silently falling back to stub, and updated the test to reflect the stricter validation.
+
+Tests run
+- `go test ./...`
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 71a2a51143091eb6a1687c52a84fe43706ac480b..d34e8e78044b2cbd05c096f00682d37ae2278c39
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -280,7 +280,7 @@
+ 	}
+ 	raw := strings.TrimSpace(form.Value["eval_output"][0])
+ 	if raw == "" {
+-		return EvalOutput{}, false, nil
++		return EvalOutput{}, true, fmt.Errorf("eval_output must be non-empty")
+ 	}
+ 	out, err := parseEvalOutput(raw)
+ 	if err != nil {
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 119855505614c5f186d4bd09ca8a6a455b7cb491..8da76aec9dd68334812485309ce6ba3b92d95cbf
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -269,7 +269,7 @@
+ 	}
+ }
+ 
+-func TestParseEvalOutputOptional_IgnoresWhitespace(t *testing.T) {
++func TestParseEvalOutputOptional_RejectsWhitespace(t *testing.T) {
+ 	spec := Spec{
+ 		SchemaVersion: 1,
+ 		Constraints: []Constraint{
+@@ -283,15 +283,8 @@
+ 	}
+ 
+ 	form := &multipart.Form{Value: map[string][]string{"eval_output": {" \n\t "}}}
+-	out, err := parseEvalOutputOptional(form, enabled)
+-	if err != nil {
+-		t.Fatalf("parseEvalOutputOptional error: %v", err)
+-	}
+-	if len(out.Constraints) != len(enabled) {
+-		t.Fatalf("expected %d constraints, got %d", len(enabled), len(out.Constraints))
+-	}
+-	if out.MaxSeverity != 0 {
+-		t.Fatalf("expected max_severity 0, got %d", out.MaxSeverity)
++	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
++		t.Fatalf("expected error for blank eval_output")
+ 	}
+ }
+ 
+
+tokens used
+25,749
+What I changed (short)
+- Treat blank `eval_output` as an error instead of silently falling back to stub, and updated the test to reflect the stricter validation.
+
+Tests run
+- `go test ./...`
