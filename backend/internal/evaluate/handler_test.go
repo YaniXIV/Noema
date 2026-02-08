@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"mime/multipart"
 	"net/textproto"
+	"os"
+	"path/filepath"
 	"sort"
 	"testing"
+	"time"
 )
 
 type formFile struct {
@@ -234,5 +237,46 @@ func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
 	}
 	if err := validateSpec(spec); err == nil {
 		t.Fatalf("expected error for empty custom constraint id")
+	}
+}
+
+func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
+	base := t.TempDir()
+
+	runOld := filepath.Join(base, "run_old")
+	runNew := filepath.Join(base, "run_new")
+	cacheDir := filepath.Join(base, "cache")
+	otherDir := filepath.Join(base, "misc")
+
+	for _, dir := range []string{runOld, runNew, cacheDir, otherDir} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	oldTime := time.Now().Add(-2 * time.Hour)
+	newTime := time.Now().Add(-1 * time.Hour)
+	if err := os.Chtimes(runOld, oldTime, oldTime); err != nil {
+		t.Fatalf("chtimes run_old: %v", err)
+	}
+	if err := os.Chtimes(runNew, newTime, newTime); err != nil {
+		t.Fatalf("chtimes run_new: %v", err)
+	}
+
+	if err := pruneRuns(base, 1); err != nil {
+		t.Fatalf("pruneRuns error: %v", err)
+	}
+
+	if _, err := os.Stat(runOld); err == nil {
+		t.Fatalf("expected run_old to be pruned")
+	}
+	if _, err := os.Stat(runNew); err != nil {
+		t.Fatalf("expected run_new to remain, got err: %v", err)
+	}
+	if _, err := os.Stat(cacheDir); err != nil {
+		t.Fatalf("expected cache dir to remain, got err: %v", err)
+	}
+	if _, err := os.Stat(otherDir); err != nil {
+		t.Fatalf("expected misc dir to remain, got err: %v", err)
 	}
 }

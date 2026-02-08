@@ -1,0 +1,802 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3c81-b523-7b70-bc1c-6da960bc8048
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Preparing to run tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 215ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+?   	noema/internal/verify	[no test files]
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Searching for improvement targets**
+
+I'm scanning the repo for TODOs and areas flagged for reliability or maintainability improvements to identify up to three non-cosmetic files to focus on.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME|panic|fatal" .' in /Users/yani/Noema/backend exited 1 in 52ms:
+
+
+thinking
+**Checking error handling in internal/web**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
+cmd
+data
+go.mod
+go.sum
+internal
+main
+server
+web
+
+thinking
+**Scanning for error handling and improvement spots**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"fmt\\.Errorf|errors\\.New|return nil|return err\" internal | head -n 200" in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/parse.go:15:		return Spec{}, fmt.Errorf("missing field: spec")
+internal/evaluate/parse.go:19:		return Spec{}, fmt.Errorf("invalid spec JSON")
+internal/evaluate/parse.go:26:		return fmt.Errorf("unsupported schema_version")
+internal/evaluate/parse.go:30:			return fmt.Errorf("constraint id must be non-empty")
+internal/evaluate/parse.go:33:			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
+internal/evaluate/parse.go:38:			return fmt.Errorf("custom_constraint id must be non-empty")
+internal/evaluate/parse.go:41:			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
+internal/evaluate/parse.go:44:	return nil
+internal/evaluate/parse.go:50:		return nil, nil, fmt.Errorf("missing required file: dataset")
+internal/evaluate/parse.go:54:		return nil, nil, fmt.Errorf("dataset exceeds 50MB limit")
+internal/evaluate/parse.go:58:		return nil, nil, fmt.Errorf("maximum 10 images allowed")
+internal/evaluate/parse.go:62:			return nil, nil, fmt.Errorf("each image must be at most 5MB")
+internal/evaluate/parse.go:66:		return nil, nil, err
+internal/evaluate/parse.go:74:		return err
+internal/evaluate/parse.go:79:				return fmt.Errorf("dataset.items[%d].image_ref provided but no images uploaded", i)
+internal/evaluate/parse.go:82:		return nil
+internal/evaluate/parse.go:93:			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
+internal/evaluate/parse.go:96:	return nil
+internal/evaluate/output.go:27:		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
+internal/evaluate/output.go:30:		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
+
+thinking
+**Inspecting evaluation storage code**
+
+I'm opening the evaluation storage implementation to assess its robustness and identify potential areas for improving the picking logic.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math/big"
+	"mime/multipart"
+	"os"
+	"path/filepath"
+	"strconv"
+	"sync/atomic"
+	"time"
+)
+
+var runIDCounter uint64
+
+func genRunID() string {
+	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
+
+thinking
+**Assessing data persistence and error handling**
+
+I'm noting that the saveUpload function lacks fsync, risking data loss, and saveRunFiles returns generic errors that lose context but might be acceptable. Next, I'll check the evaluate/cache code for potential instability.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/cache.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+type CachedGeminiOutput struct {
+	Model         string       `json:"model"`
+	PromptVersion string       `json:"prompt_version"`
+	Output        EvalOutput   `json:"output"`
+	RawText       string       `json:"raw_text"`
+	Usage         *GeminiUsage `json:"usage,omitempty"`
+	CachedAt      string       `json:"cached_at"`
+}
+
+thinking
+**Planning cache corruption handling**
+
+I'm considering verifying that loadCache properly handles corrupted JSON by removing it if needed, and planning to inspect internal/evaluate/output.go for evaluation and output validation.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/output.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+)
+
+type EvalConstraintResult struct {
+	ID        string `json:"id"`
+	Severity  int    `json:"severity"`
+	Rationale string `json:"rationale"`
+}
+
+type EvalOutput struct {
+	SchemaVersion int                    `json:"schema_version"`
+	Constraints   []EvalConstraintResult `json:"constraints"`
+	MaxSeverity   int                    `json:"max_severity"`
+	Confidence    *float64               `json:"confidence,omitempty"`
+}
+
+thinking
+**Noticing potential error handling issues**
+
+I see updateRunsIndex might report errors after successfully saving, which could mistakenly mark a run as errored; next, I'll verify if this behavior is intended in evaluate/handler. Also, saveUpload lacks fsync which could risk data integrity, worth considering stronger non-cosmetic error messages.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+// EvaluateResponse is the JSON response for POST /api/evaluate.
+type EvaluateResponse struct {
+
+thinking
+**Identifying bug in run pruning logic**
+
+Noticed pruneRuns treats cache directory as a run and might wrongly delete it; planning to fix by filtering run directories to those with the "run_" prefix and to add tests to validate this change.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
+cache.go
+commitment.go
+dataset.go
+gemini_eval.go
+handler.go
+handler_integration_test.go
+handler_test.go
+images.go
+output.go
+parse.go
+policy.go
+prompt.go
+schema.go
+spec.go
+storage.go
+
+thinking
+**Adding test for pruneRuns**
+
+I'm preparing to add a test for pruneRuns in handler.go by updating handler_test.go to ensure this function's behavior is covered.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"mime/multipart"
+	"net/textproto"
+	"sort"
+	"testing"
+)
+
+type formFile struct {
+	field       string
+	filename    string
+	contentType string
+	content     []byte
+}
+
+func buildMultipartForm(t *testing.T, files []formFile) *multipart.Form {
+
+thinking
+**Adding selective pruning with tests**
+
+I'm updating pruneRuns to only consider directories prefixed with "run_" for removal, preserving the cache directory. I'll add tests that create sample run and cache dirs with controlled mod times to verify only older run dirs are pruned and cache stays intact.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler.go
+@@ -173,2 +173,5 @@
+ 		}
++		if !strings.HasPrefix(entry.Name(), "run_") {
++			continue
++		}
+ 		info, err := entry.Info()
+apply_patch(auto_approved=true) exited 0 in 31ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/handler.go
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 2a1ce76ddca85f88fe5ec497a0c9245f35546956..df8dd8f88bb72325c4a9997c15993f2e86fe6b47
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -171,6 +171,9 @@
+ 		if !entry.IsDir() {
+ 			continue
+ 		}
++		if !strings.HasPrefix(entry.Name(), "run_") {
++			continue
++		}
+ 		info, err := entry.Info()
+ 		if err != nil {
+ 			continue
+
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 2a1ce76ddca85f88fe5ec497a0c9245f35546956..df8dd8f88bb72325c4a9997c15993f2e86fe6b47
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -171,6 +171,9 @@
+ 		if !entry.IsDir() {
+ 			continue
+ 		}
++		if !strings.HasPrefix(entry.Name(), "run_") {
++			continue
++		}
+ 		info, err := entry.Info()
+ 		if err != nil {
+ 			continue
+
+
+thinking
+**Adding missing strings import**
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler.go
+@@ -10,2 +10,3 @@
+ 	"sort"
++	"strings"
+ 	"time"
+apply_patch(auto_approved=true) exited 0 in 40ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/handler.go
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 2a1ce76ddca85f88fe5ec497a0c9245f35546956..1dd54b55b6f8a4ce47e0087d8f4fbfa2c005eb12
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -8,6 +8,7 @@
+ 	"os"
+ 	"path/filepath"
+ 	"sort"
++	"strings"
+ 	"time"
+ 
+ 	"noema/internal/config"
+@@ -171,6 +172,9 @@
+ 		if !entry.IsDir() {
+ 			continue
+ 		}
++		if !strings.HasPrefix(entry.Name(), "run_") {
++			continue
++		}
+ 		info, err := entry.Info()
+ 		if err != nil {
+ 			continue
+
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 2a1ce76ddca85f88fe5ec497a0c9245f35546956..1dd54b55b6f8a4ce47e0087d8f4fbfa2c005eb12
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -8,6 +8,7 @@
+ 	"os"
+ 	"path/filepath"
+ 	"sort"
++	"strings"
+ 	"time"
+ 
+ 	"noema/internal/config"
+@@ -171,6 +172,9 @@
+ 		if !entry.IsDir() {
+ 			continue
+ 		}
++		if !strings.HasPrefix(entry.Name(), "run_") {
++			continue
++		}
+ 		info, err := entry.Info()
+ 		if err != nil {
+ 			continue
+
+
+thinking
+**Adding test for patch application**
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
+@@ -8,4 +8,7 @@
+ 	"net/textproto"
++	"os"
++	"path/filepath"
+ 	"sort"
+ 	"testing"
++	"time"
+ )
+@@ -238 +241,42 @@
+ }
++
++func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
++	base := t.TempDir()
++
++	runOld := filepath.Join(base, "run_old")
++	runNew := filepath.Join(base, "run_new")
++	cacheDir := filepath.Join(base, "cache")
++	otherDir := filepath.Join(base, "misc")
++
++	for _, dir := range []string{runOld, runNew, cacheDir, otherDir} {
++		if err := os.MkdirAll(dir, 0755); err != nil {
++			t.Fatalf("mkdir %s: %v", dir, err)
++		}
++	}
++
++	oldTime := time.Now().Add(-2 * time.Hour)
++	newTime := time.Now().Add(-1 * time.Hour)
++	if err := os.Chtimes(runOld, oldTime, oldTime); err != nil {
++		t.Fatalf("chtimes run_old: %v", err)
++	}
++	if err := os.Chtimes(runNew, newTime, newTime); err != nil {
++		t.Fatalf("chtimes run_new: %v", err)
++	}
++
++	if err := pruneRuns(base, 1); err != nil {
++		t.Fatalf("pruneRuns error: %v", err)
++	}
++
++	if _, err := os.Stat(runOld); err == nil {
++		t.Fatalf("expected run_old to be pruned")
++	}
++	if _, err := os.Stat(runNew); err != nil {
++		t.Fatalf("expected run_new to remain, got err: %v", err)
++	}
++	if _, err := os.Stat(cacheDir); err != nil {
++		t.Fatalf("expected cache dir to remain, got err: %v", err)
++	}
++	if _, err := os.Stat(otherDir); err != nil {
++		t.Fatalf("expected misc dir to remain, got err: %v", err)
++	}
++}
+apply_patch(auto_approved=true) exited 0 in 40ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 2a1ce76ddca85f88fe5ec497a0c9245f35546956..1dd54b55b6f8a4ce47e0087d8f4fbfa2c005eb12
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -8,6 +8,7 @@
+ 	"os"
+ 	"path/filepath"
+ 	"sort"
++	"strings"
+ 	"time"
+ 
+ 	"noema/internal/config"
+@@ -171,6 +172,9 @@
+ 		if !entry.IsDir() {
+ 			continue
+ 		}
++		if !strings.HasPrefix(entry.Name(), "run_") {
++			continue
++		}
+ 		info, err := entry.Info()
+ 		if err != nil {
+ 			continue
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 51b2b30093747df682b1379eff8e6012b3acffe9..8228bf435f0da3463cf3b975e968e91a3909086e
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -6,8 +6,11 @@
+ 	"fmt"
+ 	"mime/multipart"
+ 	"net/textproto"
++	"os"
++	"path/filepath"
+ 	"sort"
+ 	"testing"
++	"time"
+ )
+ 
+ type formFile struct {
+@@ -236,3 +239,44 @@
+ 		t.Fatalf("expected error for empty custom constraint id")
+ 	}
+ }
++
++func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
++	base := t.TempDir()
++
++	runOld := filepath.Join(base, "run_old")
++	runNew := filepath.Join(base, "run_new")
++	cacheDir := filepath.Join(base, "cache")
++	otherDir := filepath.Join(base, "misc")
++
++	for _, dir := range []string{runOld, runNew, cacheDir, otherDir} {
++		if err := os.MkdirAll(dir, 0755); err != nil {
++			t.Fatalf("mkdir %s: %v", dir, err)
++		}
++	}
++
++	oldTime := time.Now().Add(-2 * time.Hour)
++	newTime := time.Now().Add(-1 * time.Hour)
++	if err := os.Chtimes(runOld, oldTime, oldTime); err != nil {
++		t.Fatalf("chtimes run_old: %v", err)
++	}
++	if err := os.Chtimes(runNew, newTime, newTime); err != nil {
++		t.Fatalf("chtimes run_new: %v", err)
++	}
++
++	if err := pruneRuns(base, 1); err != nil {
++		t.Fatalf("pruneRuns error: %v", err)
++	}
++
++	if _, err := os.Stat(runOld); err == nil {
++		t.Fatalf("expected run_old to be pruned")
++	}
++	if _, err := os.Stat(runNew); err != nil {
++		t.Fatalf("expected run_new to remain, got err: %v", err)
++	}
++	if _, err := os.Stat(cacheDir); err != nil {
++		t.Fatalf("expected cache dir to remain, got err: %v", err)
++	}
++	if _, err := os.Stat(otherDir); err != nil {
++		t.Fatalf("expected misc dir to remain, got err: %v", err)
++	}
++}
+
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 2a1ce76ddca85f88fe5ec497a0c9245f35546956..1dd54b55b6f8a4ce47e0087d8f4fbfa2c005eb12
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -8,6 +8,7 @@
+ 	"os"
+ 	"path/filepath"
+ 	"sort"
++	"strings"
+ 	"time"
+ 
+ 	"noema/internal/config"
+@@ -171,6 +172,9 @@
+ 		if !entry.IsDir() {
+ 			continue
+ 		}
++		if !strings.HasPrefix(entry.Name(), "run_") {
++			continue
++		}
+ 		info, err := entry.Info()
+ 		if err != nil {
+ 			continue
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 51b2b30093747df682b1379eff8e6012b3acffe9..8228bf435f0da3463cf3b975e968e91a3909086e
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -6,8 +6,11 @@
+ 	"fmt"
+ 	"mime/multipart"
+ 	"net/textproto"
++	"os"
++	"path/filepath"
+ 	"sort"
+ 	"testing"
++	"time"
+ )
+ 
+ type formFile struct {
+@@ -236,3 +239,44 @@
+ 		t.Fatalf("expected error for empty custom constraint id")
+ 	}
+ }
++
++func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
++	base := t.TempDir()
++
++	runOld := filepath.Join(base, "run_old")
++	runNew := filepath.Join(base, "run_new")
++	cacheDir := filepath.Join(base, "cache")
++	otherDir := filepath.Join(base, "misc")
++
++	for _, dir := range []string{runOld, runNew, cacheDir, otherDir} {
++		if err := os.MkdirAll(dir, 0755); err != nil {
++			t.Fatalf("mkdir %s: %v", dir, err)
++		}
++	}
++
++	oldTime := time.Now().Add(-2 * time.Hour)
++	newTime := time.Now().Add(-1 * time.Hour)
++	if err := os.Chtimes(runOld, oldTime, oldTime); err != nil {
++		t.Fatalf("chtimes run_old: %v", err)
++	}
++	if err := os.Chtimes(runNew, newTime, newTime); err != nil {
++		t.Fatalf("chtimes run_new: %v", err)
++	}
++
++	if err := pruneRuns(base, 1); err != nil {
++		t.Fatalf("pruneRuns error: %v", err)
++	}
++
++	if _, err := os.Stat(runOld); err == nil {
++		t.Fatalf("expected run_old to be pruned")
++	}
++	if _, err := os.Stat(runNew); err != nil {
++		t.Fatalf("expected run_new to remain, got err: %v", err)
++	}
++	if _, err := os.Stat(cacheDir); err != nil {
++		t.Fatalf("expected cache dir to remain, got err: %v", err)
++	}
++	if _, err := os.Stat(otherDir); err != nil {
++		t.Fatalf("expected misc dir to remain, got err: %v", err)
++	}
++}
+
+
+thinking
+**Running tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 936ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.033s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+?   	noema/internal/verify	[no test files]
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 2a1ce76ddca85f88fe5ec497a0c9245f35546956..1dd54b55b6f8a4ce47e0087d8f4fbfa2c005eb12
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -8,6 +8,7 @@
+ 	"os"
+ 	"path/filepath"
+ 	"sort"
++	"strings"
+ 	"time"
+ 
+ 	"noema/internal/config"
+@@ -171,6 +172,9 @@
+ 		if !entry.IsDir() {
+ 			continue
+ 		}
++		if !strings.HasPrefix(entry.Name(), "run_") {
++			continue
++		}
+ 		info, err := entry.Info()
+ 		if err != nil {
+ 			continue
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 51b2b30093747df682b1379eff8e6012b3acffe9..8228bf435f0da3463cf3b975e968e91a3909086e
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -6,8 +6,11 @@
+ 	"fmt"
+ 	"mime/multipart"
+ 	"net/textproto"
++	"os"
++	"path/filepath"
+ 	"sort"
+ 	"testing"
++	"time"
+ )
+ 
+ type formFile struct {
+@@ -236,3 +239,44 @@
+ 		t.Fatalf("expected error for empty custom constraint id")
+ 	}
+ }
++
++func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
++	base := t.TempDir()
++
++	runOld := filepath.Join(base, "run_old")
++	runNew := filepath.Join(base, "run_new")
++	cacheDir := filepath.Join(base, "cache")
++	otherDir := filepath.Join(base, "misc")
++
++	for _, dir := range []string{runOld, runNew, cacheDir, otherDir} {
++		if err := os.MkdirAll(dir, 0755); err != nil {
++			t.Fatalf("mkdir %s: %v", dir, err)
++		}
++	}
++
++	oldTime := time.Now().Add(-2 * time.Hour)
++	newTime := time.Now().Add(-1 * time.Hour)
++	if err := os.Chtimes(runOld, oldTime, oldTime); err != nil {
++		t.Fatalf("chtimes run_old: %v", err)
++	}
++	if err := os.Chtimes(runNew, newTime, newTime); err != nil {
++		t.Fatalf("chtimes run_new: %v", err)
++	}
++
++	if err := pruneRuns(base, 1); err != nil {
++		t.Fatalf("pruneRuns error: %v", err)
++	}
++
++	if _, err := os.Stat(runOld); err == nil {
++		t.Fatalf("expected run_old to be pruned")
++	}
++	if _, err := os.Stat(runNew); err != nil {
++		t.Fatalf("expected run_new to remain, got err: %v", err)
++	}
++	if _, err := os.Stat(cacheDir); err != nil {
++		t.Fatalf("expected cache dir to remain, got err: %v", err)
++	}
++	if _, err := os.Stat(otherDir); err != nil {
++		t.Fatalf("expected misc dir to remain, got err: %v", err)
++	}
++}
+
+codex
+What you changed (short)
+- Prevented `pruneRuns` from deleting non-run directories like `cache`, and added a test to cover this case.
+
+Tests run (must include go test ./...)
+- `go test ./...`
+
+If you want a next step, pick one:
+1. Add a small regression test for `updateRunsIndex` when index is corrupted.  
+2. Tighten error reporting in `saveRunFiles` to include the specific file that failed.
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index 2a1ce76ddca85f88fe5ec497a0c9245f35546956..1dd54b55b6f8a4ce47e0087d8f4fbfa2c005eb12
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -8,6 +8,7 @@
+ 	"os"
+ 	"path/filepath"
+ 	"sort"
++	"strings"
+ 	"time"
+ 
+ 	"noema/internal/config"
+@@ -171,6 +172,9 @@
+ 		if !entry.IsDir() {
+ 			continue
+ 		}
++		if !strings.HasPrefix(entry.Name(), "run_") {
++			continue
++		}
+ 		info, err := entry.Info()
+ 		if err != nil {
+ 			continue
+diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
+index 51b2b30093747df682b1379eff8e6012b3acffe9..8228bf435f0da3463cf3b975e968e91a3909086e
+--- a/backend/internal/evaluate/handler_test.go
++++ b/backend/internal/evaluate/handler_test.go
+@@ -6,8 +6,11 @@
+ 	"fmt"
+ 	"mime/multipart"
+ 	"net/textproto"
++	"os"
++	"path/filepath"
+ 	"sort"
+ 	"testing"
++	"time"
+ )
+ 
+ type formFile struct {
+@@ -236,3 +239,44 @@
+ 		t.Fatalf("expected error for empty custom constraint id")
+ 	}
+ }
++
++func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
++	base := t.TempDir()
++
++	runOld := filepath.Join(base, "run_old")
++	runNew := filepath.Join(base, "run_new")
++	cacheDir := filepath.Join(base, "cache")
++	otherDir := filepath.Join(base, "misc")
++
++	for _, dir := range []string{runOld, runNew, cacheDir, otherDir} {
++		if err := os.MkdirAll(dir, 0755); err != nil {
++			t.Fatalf("mkdir %s: %v", dir, err)
++		}
++	}
++
++	oldTime := time.Now().Add(-2 * time.Hour)
++	newTime := time.Now().Add(-1 * time.Hour)
++	if err := os.Chtimes(runOld, oldTime, oldTime); err != nil {
++		t.Fatalf("chtimes run_old: %v", err)
++	}
++	if err := os.Chtimes(runNew, newTime, newTime); err != nil {
++		t.Fatalf("chtimes run_new: %v", err)
++	}
++
++	if err := pruneRuns(base, 1); err != nil {
++		t.Fatalf("pruneRuns error: %v", err)
++	}
++
++	if _, err := os.Stat(runOld); err == nil {
++		t.Fatalf("expected run_old to be pruned")
++	}
++	if _, err := os.Stat(runNew); err != nil {
++		t.Fatalf("expected run_new to remain, got err: %v", err)
++	}
++	if _, err := os.Stat(cacheDir); err != nil {
++		t.Fatalf("expected cache dir to remain, got err: %v", err)
++	}
++	if _, err := os.Stat(otherDir); err != nil {
++		t.Fatalf("expected misc dir to remain, got err: %v", err)
++	}
++}
+
+tokens used
+24,227
+What you changed (short)
+- Prevented `pruneRuns` from deleting non-run directories like `cache`, and added a test to cover this case.
+
+Tests run (must include go test ./...)
+- `go test ./...`
+
+If you want a next step, pick one:
+1. Add a small regression test for `updateRunsIndex` when index is corrupted.  
+2. Tighten error reporting in `saveRunFiles` to include the specific file that failed.

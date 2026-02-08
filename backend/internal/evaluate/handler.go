@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"noema/internal/config"
@@ -169,6 +170,9 @@ func pruneRuns(runsDir string, maxRuns int) error {
 	var runs []runEntry
 	for _, entry := range entries {
 		if !entry.IsDir() {
+			continue
+		}
+		if !strings.HasPrefix(entry.Name(), "run_") {
 			continue
 		}
 		info, err := entry.Info()
