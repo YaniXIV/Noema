@@ -33,6 +33,10 @@ func Handler() gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
 			return
 		}
+		if req.RunID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "missing run_id"})
+			return
+		}
 		if req.ProofB64 == "" || req.PublicInputsB64 == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing proof or public inputs"})
 			return

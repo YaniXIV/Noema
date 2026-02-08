@@ -1,0 +1,647 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3c89-bd23-7e70-b375-77acc751d41c
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Running tests command**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 428ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Searching for improvement areas**
+
+I'm scanning the repo with ripgrep to find TODOs or error handling notes as potential candidates for a focused improvement in up to three files.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME|panic|fatal"' in /Users/yani/Noema/backend exited 1 in 52ms:
+
+
+thinking
+**Investigating error handling coverage**
+
+No matches for the initial error search suggest weak or missing error handling tests; next, I'll explore files in internal/gemini integration to verify error use and handling.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
+cmd
+data
+go.mod
+go.sum
+internal
+main
+server
+web
+
+thinking
+**Exploring internal/web for error handling**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal' in /Users/yani/Noema/backend succeeded in 52ms:
+auth
+config
+crypto
+evaluate
+gemini
+session
+verify
+web
+zk
+
+thinking
+**Inspecting internal web fetch**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/web/web.go" in /Users/yani/Noema/backend exited 1 in 52ms:
+sed: internal/web/web.go: No such file or directory
+
+thinking
+**Identifying missing internal package**
+
+Noticed the internal/web package is needed but currently missing; next step is to locate or create it to proceed.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/web' in /Users/yani/Noema/backend succeeded in 52ms:
+auth.go
+results.go
+upload.go
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/web/results.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package web
+
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+)
+
+// ResultsData is passed to the results template.
+type ResultsData struct {
+	RunID string
+}
+
+// ResultsPage renders GET /app/results/:id.
+func ResultsPage(c *gin.Context, tmpl string, runID string) {
+	c.HTML(http.StatusOK, tmpl, ResultsData{RunID: runID})
+}
+
+thinking
+**Considering validation on runID**
+
+I'm evaluating whether to add validation for runID and planning to check related upload or authentication logic next.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/web/upload.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package web
+
+import (
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+
+	"github.com/gin-gonic/gin"
+)
+
+// UploadData is passed to the upload template.
+type UploadData struct {
+	Error    string
+	Success  bool
+
+thinking
+**Assessing file upload constraints**
+
+I'm considering enforcing single file selection and limiting number of files to improve reliability, noting that filepath.Ext safely handles extensions and the existing MaxUploadBytes covers size limits. Next, I'll explore internal/verify for related checks.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/verify/verify.go" in /Users/yani/Noema/backend exited 1 in 52ms:
+sed: internal/verify/verify.go: No such file or directory
+
+thinking
+**Listing internal/verify**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/verify' in /Users/yani/Noema/backend succeeded in 52ms:
+handler.go
+handler_test.go
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/verify/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package verify
+
+import (
+	"encoding/base64"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+// VerifyRequest is the JSON body for POST /api/verify.
+type VerifyRequest struct {
+	RunID           string `json:"run_id"`
+	ProofB64        string `json:"proof_b64"`
+	PublicInputsB64 string `json:"public_inputs_b64"`
+}
+
+
+thinking
+**Considering run_id validation**
+
+Noticing that run_id emptiness is only checked in a legacy stub but not in the primary verify, so responses might allow empty run_id. Planning to check if enforcing validation earlier makes sense, and inspecting related code in internal/evaluate next.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+// EvaluateResponse is the JSON response for POST /api/evaluate.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+	if err != nil {
+		return EvalOutput{}, err
+	}
+	if err := validateEvalOutput(out, enabled); err != nil {
+		return EvalOutput{}, err
+	}
+	return out, nil
+}
+
+func stubEvalOutput(enabled map[string]ConstraintRule) EvalOutput {
+	out := EvalOutput{
+		SchemaVersion: 1,
+		Constraints:   make([]EvalConstraintResult, 0, len(enabled)),
+		MaxSeverity:   0,
+	}
+	for id := range enabled {
+		out.Constraints = append(out.Constraints, EvalConstraintResult{
+			ID:        id,
+			Severity:  0,
+			Rationale: "stub",
+
+thinking
+**Identifying validation improvement**
+
+Considering adding run_id presence validation in the Verify handler to boost reliability, since current logic allows empty run_id to pass; next step is reviewing existing Verify tests.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/verify/handler_test.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package verify
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+)
+
+type errorResponse struct {
+	Error string `json:"error"`
+}
+
+func setupRouter() *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+
+
+thinking
+**Adding run_id validation universally**
+
+I'll add an early check enforcing non-empty run_id for all paths, ensuring consistent 400 errors, and update tests with one covering empty run_id on non-legacy proofs to improve reliability with minimal code changes.
+thinking
+**Enforcing run_id check before proof verification**
+
+I'll implement the run_id empty check returning 400 with the standard error, ensuring it triggers before proof verification, and add a test using valid base64 proof/inputs to confirm consistent early rejection.
+file update
+M /Users/yani/Noema/backend/internal/verify/handler.go
+@@ -35,2 +35,6 @@
+ 		}
++		if req.RunID == "" {
++			c.JSON(http.StatusBadRequest, gin.H{"error": "missing run_id"})
++			return
++		}
+ 		if req.ProofB64 == "" || req.PublicInputsB64 == "" {
+apply_patch(auto_approved=true) exited 0 in 33ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/verify/handler.go
+file update:
+diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
+index ede7399b4113f79a9bcde7b4bec6a5a265179eab..6a34468479ec72bad5f8aa8a3b8c7eba507acde5
+--- a/backend/internal/verify/handler.go
++++ b/backend/internal/verify/handler.go
+@@ -33,6 +33,10 @@
+ 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+ 			return
+ 		}
++		if req.RunID == "" {
++			c.JSON(http.StatusBadRequest, gin.H{"error": "missing run_id"})
++			return
++		}
+ 		if req.ProofB64 == "" || req.PublicInputsB64 == "" {
+ 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing proof or public inputs"})
+ 			return
+
+file update:
+diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
+index ede7399b4113f79a9bcde7b4bec6a5a265179eab..6a34468479ec72bad5f8aa8a3b8c7eba507acde5
+--- a/backend/internal/verify/handler.go
++++ b/backend/internal/verify/handler.go
+@@ -33,6 +33,10 @@
+ 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+ 			return
+ 		}
++		if req.RunID == "" {
++			c.JSON(http.StatusBadRequest, gin.H{"error": "missing run_id"})
++			return
++		}
+ 		if req.ProofB64 == "" || req.PublicInputsB64 == "" {
+ 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing proof or public inputs"})
+ 			return
+
+
+thinking
+**Adding test with apply_patch append**
+file update
+M /Users/yani/Noema/backend/internal/verify/handler_test.go
+@@ -101 +101,26 @@
+ }
++
++func TestVerifyHandlerMissingRunIDReturns400(t *testing.T) {
++	r := setupRouter()
++	body := `{"run_id":"","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}`
++
++	w := httptest.NewRecorder()
++	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
++	if err != nil {
++		t.Fatalf("new request: %v", err)
++	}
++	req.Header.Set("Content-Type", "application/json")
++	r.ServeHTTP(w, req)
++
++	if w.Code != http.StatusBadRequest {
++		t.Fatalf("expected status 400, got %d", w.Code)
++	}
++
++	var resp errorResponse
++	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
++		t.Fatalf("decode response: %v", err)
++	}
++	if resp.Error != "missing run_id" {
++		t.Fatalf("expected missing run_id, got %q", resp.Error)
++	}
++}
+apply_patch(auto_approved=true) exited 0 in 40ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/verify/handler_test.go
+file update:
+diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
+index ede7399b4113f79a9bcde7b4bec6a5a265179eab..6a34468479ec72bad5f8aa8a3b8c7eba507acde5
+--- a/backend/internal/verify/handler.go
++++ b/backend/internal/verify/handler.go
+@@ -33,6 +33,10 @@
+ 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+ 			return
+ 		}
++		if req.RunID == "" {
++			c.JSON(http.StatusBadRequest, gin.H{"error": "missing run_id"})
++			return
++		}
+ 		if req.ProofB64 == "" || req.PublicInputsB64 == "" {
+ 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing proof or public inputs"})
+ 			return
+diff --git a/backend/internal/verify/handler_test.go b/backend/internal/verify/handler_test.go
+index 40b0e0df0286be10bd1eeee18d67dd57d06e8e0d..1e1f62e7efdc102f95eba9dafb24beab988b6d42
+--- a/backend/internal/verify/handler_test.go
++++ b/backend/internal/verify/handler_test.go
+@@ -99,3 +99,28 @@
+ 		t.Fatalf("expected missing run_id, got %q", resp.Error)
+ 	}
+ }
++
++func TestVerifyHandlerMissingRunIDReturns400(t *testing.T) {
++	r := setupRouter()
++	body := `{"run_id":"","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}`
++
++	w := httptest.NewRecorder()
++	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
++	if err != nil {
++		t.Fatalf("new request: %v", err)
++	}
++	req.Header.Set("Content-Type", "application/json")
++	r.ServeHTTP(w, req)
++
++	if w.Code != http.StatusBadRequest {
++		t.Fatalf("expected status 400, got %d", w.Code)
++	}
++
++	var resp errorResponse
++	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
++		t.Fatalf("decode response: %v", err)
++	}
++	if resp.Error != "missing run_id" {
++		t.Fatalf("expected missing run_id, got %q", resp.Error)
++	}
++}
+
+file update:
+diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
+index ede7399b4113f79a9bcde7b4bec6a5a265179eab..6a34468479ec72bad5f8aa8a3b8c7eba507acde5
+--- a/backend/internal/verify/handler.go
++++ b/backend/internal/verify/handler.go
+@@ -33,6 +33,10 @@
+ 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+ 			return
+ 		}
++		if req.RunID == "" {
++			c.JSON(http.StatusBadRequest, gin.H{"error": "missing run_id"})
++			return
++		}
+ 		if req.ProofB64 == "" || req.PublicInputsB64 == "" {
+ 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing proof or public inputs"})
+ 			return
+diff --git a/backend/internal/verify/handler_test.go b/backend/internal/verify/handler_test.go
+index 40b0e0df0286be10bd1eeee18d67dd57d06e8e0d..1e1f62e7efdc102f95eba9dafb24beab988b6d42
+--- a/backend/internal/verify/handler_test.go
++++ b/backend/internal/verify/handler_test.go
+@@ -99,3 +99,28 @@
+ 		t.Fatalf("expected missing run_id, got %q", resp.Error)
+ 	}
+ }
++
++func TestVerifyHandlerMissingRunIDReturns400(t *testing.T) {
++	r := setupRouter()
++	body := `{"run_id":"","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}`
++
++	w := httptest.NewRecorder()
++	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
++	if err != nil {
++		t.Fatalf("new request: %v", err)
++	}
++	req.Header.Set("Content-Type", "application/json")
++	r.ServeHTTP(w, req)
++
++	if w.Code != http.StatusBadRequest {
++		t.Fatalf("expected status 400, got %d", w.Code)
++	}
++
++	var resp errorResponse
++	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
++		t.Fatalf("decode response: %v", err)
++	}
++	if resp.Error != "missing run_id" {
++		t.Fatalf("expected missing run_id, got %q", resp.Error)
++	}
++}
+
+
+thinking
+**Running full Go test suite**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backendfile update:
+diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
+index ede7399b4113f79a9bcde7b4bec6a5a265179eab..6a34468479ec72bad5f8aa8a3b8c7eba507acde5
+--- a/backend/internal/verify/handler.go
++++ b/backend/internal/verify/handler.go
+@@ -33,6 +33,10 @@
+ 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+ 			return
+ 		}
++		if req.RunID == "" {
++			c.JSON(http.StatusBadRequest, gin.H{"error": "missing run_id"})
++			return
++		}
+ 		if req.ProofB64 == "" || req.PublicInputsB64 == "" {
+ 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing proof or public inputs"})
+ 			return
+diff --git a/backend/internal/verify/handler_test.go b/backend/internal/verify/handler_test.go
+index 40b0e0df0286be10bd1eeee18d67dd57d06e8e0d..1e1f62e7efdc102f95eba9dafb24beab988b6d42
+--- a/backend/internal/verify/handler_test.go
++++ b/backend/internal/verify/handler_test.go
+@@ -99,3 +99,28 @@
+ 		t.Fatalf("expected missing run_id, got %q", resp.Error)
+ 	}
+ }
++
++func TestVerifyHandlerMissingRunIDReturns400(t *testing.T) {
++	r := setupRouter()
++	body := `{"run_id":"","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}`
++
++	w := httptest.NewRecorder()
++	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
++	if err != nil {
++		t.Fatalf("new request: %v", err)
++	}
++	req.Header.Set("Content-Type", "application/json")
++	r.ServeHTTP(w, req)
++
++	if w.Code != http.StatusBadRequest {
++		t.Fatalf("expected status 400, got %d", w.Code)
++	}
++
++	var resp errorResponse
++	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
++		t.Fatalf("decode response: %v", err)
++	}
++	if resp.Error != "missing run_id" {
++		t.Fatalf("expected missing run_id, got %q", resp.Error)
++	}
++}
+
+ succeeded in 1.57s:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	0.017s
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Noting command progress and polling requirement**
+file update:
+diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
+index ede7399b4113f79a9bcde7b4bec6a5a265179eab..6a34468479ec72bad5f8aa8a3b8c7eba507acde5
+--- a/backend/internal/verify/handler.go
++++ b/backend/internal/verify/handler.go
+@@ -33,6 +33,10 @@
+ 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+ 			return
+ 		}
++		if req.RunID == "" {
++			c.JSON(http.StatusBadRequest, gin.H{"error": "missing run_id"})
++			return
++		}
+ 		if req.ProofB64 == "" || req.PublicInputsB64 == "" {
+ 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing proof or public inputs"})
+ 			return
+diff --git a/backend/internal/verify/handler_test.go b/backend/internal/verify/handler_test.go
+index 40b0e0df0286be10bd1eeee18d67dd57d06e8e0d..1e1f62e7efdc102f95eba9dafb24beab988b6d42
+--- a/backend/internal/verify/handler_test.go
++++ b/backend/internal/verify/handler_test.go
+@@ -99,3 +99,28 @@
+ 		t.Fatalf("expected missing run_id, got %q", resp.Error)
+ 	}
+ }
++
++func TestVerifyHandlerMissingRunIDReturns400(t *testing.T) {
++	r := setupRouter()
++	body := `{"run_id":"","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}`
++
++	w := httptest.NewRecorder()
++	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
++	if err != nil {
++		t.Fatalf("new request: %v", err)
++	}
++	req.Header.Set("Content-Type", "application/json")
++	r.ServeHTTP(w, req)
++
++	if w.Code != http.StatusBadRequest {
++		t.Fatalf("expected status 400, got %d", w.Code)
++	}
++
++	var resp errorResponse
++	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
++		t.Fatalf("decode response: %v", err)
++	}
++	if resp.Error != "missing run_id" {
++		t.Fatalf("expected missing run_id, got %q", resp.Error)
++	}
++}
+
+
+thinking
+**Preparing final summary and tests**
+
+I'm summarizing the changes made across two files, including running tests to confirm correctness, and will provide a concise final response without external references or web content.
+codex
+What I changed (short)
+- Added `run_id` validation to `/api/verify` so empty IDs are rejected early.
+- Added a test to enforce the new `run_id` requirement.
+
+Tests run
+- `go test ./...`
+file update:
+diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
+index ede7399b4113f79a9bcde7b4bec6a5a265179eab..6a34468479ec72bad5f8aa8a3b8c7eba507acde5
+--- a/backend/internal/verify/handler.go
++++ b/backend/internal/verify/handler.go
+@@ -33,6 +33,10 @@
+ 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+ 			return
+ 		}
++		if req.RunID == "" {
++			c.JSON(http.StatusBadRequest, gin.H{"error": "missing run_id"})
++			return
++		}
+ 		if req.ProofB64 == "" || req.PublicInputsB64 == "" {
+ 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing proof or public inputs"})
+ 			return
+diff --git a/backend/internal/verify/handler_test.go b/backend/internal/verify/handler_test.go
+index 40b0e0df0286be10bd1eeee18d67dd57d06e8e0d..1e1f62e7efdc102f95eba9dafb24beab988b6d42
+--- a/backend/internal/verify/handler_test.go
++++ b/backend/internal/verify/handler_test.go
+@@ -99,3 +99,28 @@
+ 		t.Fatalf("expected missing run_id, got %q", resp.Error)
+ 	}
+ }
++
++func TestVerifyHandlerMissingRunIDReturns400(t *testing.T) {
++	r := setupRouter()
++	body := `{"run_id":"","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}`
++
++	w := httptest.NewRecorder()
++	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
++	if err != nil {
++		t.Fatalf("new request: %v", err)
++	}
++	req.Header.Set("Content-Type", "application/json")
++	r.ServeHTTP(w, req)
++
++	if w.Code != http.StatusBadRequest {
++		t.Fatalf("expected status 400, got %d", w.Code)
++	}
++
++	var resp errorResponse
++	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
++		t.Fatalf("decode response: %v", err)
++	}
++	if resp.Error != "missing run_id" {
++		t.Fatalf("expected missing run_id, got %q", resp.Error)
++	}
++}
+
+tokens used
+21,303
+What I changed (short)
+- Added `run_id` validation to `/api/verify` so empty IDs are rejected early.
+- Added a test to enforce the new `run_id` requirement.
+
+Tests run
+- `go test ./...`
