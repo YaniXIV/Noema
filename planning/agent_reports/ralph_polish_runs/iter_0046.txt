@@ -1,0 +1,603 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3cac-82e5-7940-9014-d80eba6bc697
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 270ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+ok  	noema/internal/config	(cached)
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Planning improvement by inspecting repo**
+
+I'm running a search to identify candidate files for a meaningful improvement limited to three files based on recent test success.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"TODO|FIXME|panic|errorf\\(|fmt\\.Errorf|log\\.Printf\" internal" in /Users/yani/Noema/backend succeeded in 51ms:
+internal/evaluate/parse.go:17:		return Spec{}, fmt.Errorf("missing field: spec")
+internal/evaluate/parse.go:20:		return Spec{}, fmt.Errorf("only one spec value allowed")
+internal/evaluate/parse.go:26:		return Spec{}, fmt.Errorf("invalid spec JSON")
+internal/evaluate/parse.go:29:		return Spec{}, fmt.Errorf("invalid spec JSON")
+internal/evaluate/parse.go:36:		return fmt.Errorf("unsupported schema_version")
+internal/evaluate/parse.go:42:			return fmt.Errorf("constraint id must be non-empty")
+internal/evaluate/parse.go:45:			return fmt.Errorf("constraint id must not include leading/trailing whitespace")
+internal/evaluate/parse.go:48:			return fmt.Errorf("duplicate constraint id: %s", id)
+internal/evaluate/parse.go:52:			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
+internal/evaluate/parse.go:58:			return fmt.Errorf("custom_constraint id must be non-empty")
+internal/evaluate/parse.go:61:			return fmt.Errorf("custom_constraint id must not include leading/trailing whitespace")
+internal/evaluate/parse.go:64:			return fmt.Errorf("duplicate constraint id: %s", id)
+internal/evaluate/parse.go:68:			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
+internal/evaluate/parse.go:77:		return nil, nil, fmt.Errorf("missing required file: dataset")
+internal/evaluate/parse.go:80:		return nil, nil, fmt.Errorf("only one dataset file allowed")
+internal/evaluate/parse.go:84:		return nil, nil, fmt.Errorf("dataset exceeds limit of %s", formatBytes(int64(config.MaxDatasetBytes)))
+internal/evaluate/parse.go:88:		return nil, nil, fmt.Errorf("maximum %d images allowed", config.MaxImages)
+internal/evaluate/parse.go:94:			return nil, nil, fmt.Errorf("image filename must be non-empty")
+internal/evaluate/parse.go:97:			return nil, nil, fmt.Errorf("image filename must not include leading/trailing whitespace")
+internal/evaluate/parse.go:100:			return nil, nil, fmt.Errorf("image filename must not include path separators")
+
+thinking
+**Inspecting image handling for improvements**
+
+I'm reviewing image handling code to ensure files are properly closed and consider enhancing dataset size checks or logging error handling.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/images.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"fmt"
+	"io"
+	"mime"
+	"mime/multipart"
+	"path/filepath"
+	"strings"
+)
+
+type ImageInfo struct {
+	Filename string
+	MIMEType string
+	Data     []byte
+}
+
+func readImages(files []*multipart.FileHeader) ([]ImageInfo, error) {
+	out := make([]ImageInfo, 0, len(files))
+	for _, fh := range files {
+
+thinking
+**Noticing potential improvements in data handling**
+
+I'm considering verifying size limits and Content-Type validation more thoroughly and will check if datasets in evaluate/parse.go are correctly closed after reading.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"path/filepath"
+	"strings"
+
+	"noema/internal/config"
+)
+
+func parseSpec(form *multipart.Form) (Spec, error) {
+	specStrs := form.Value["spec"]
+	if len(specStrs) == 0 || specStrs[0] == "" {
+		return Spec{}, fmt.Errorf("missing field: spec")
+	}
+	if len(specStrs) > 1 {
+		return Spec{}, fmt.Errorf("only one spec value allowed")
+
+thinking
+**Assessing error handling and validation limits**
+
+The code handles read errors and closures properly, but dataset validation lacks file size checks beyond the header. Improving error message detail or adding full file size validation could add meaningful robustness; next, I'll inspect evaluate/storage.go for better opportunities.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math/big"
+	"mime/multipart"
+	"os"
+	"path/filepath"
+	"strconv"
+	"sync/atomic"
+	"time"
+)
+
+var runIDCounter uint64
+
+func genRunID() string {
+	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
+
+thinking
+**Reviewing error handling and resource management**
+
+Noted that saveUpload may not enforce size, but file size is in the header; updateRunsIndex can lose saveJSON errors if corruptedErr is returned first. Also confirmed file handles close properly on read errors in readImages. Planning to examine evaluate/handler.go, focusing on run index update logic for possible behavior bugs and missing context.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+thinking
+**Planning size limit enforcement**
+
+I identified that relying on file header sizes can be unreliable for multipart uploads, risking oversized reads. Adding enforced max byte limits using io.LimitReader when reading images and datasets will improve robustness and prevent memory issues. Next, I'll verify dataset reading uses and update parse functions accordingly.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"strings"
+)
+
+type Dataset struct {
+	Items []DatasetItem `json:"items"`
+}
+
+type DatasetItem struct {
+	ID       string         `json:"id"`
+	Text     string         `json:"text"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+	ImageRef string         `json:"image_ref,omitempty"`
+
+
+thinking
+**Planning to enforce read size limits**
+
+I'm preparing to add size limits for reading dataset and image files by wrapping readers with limits and checking exceeded sizes to improve reliability, requiring new config imports without increasing dependencies.
+thinking
+**Aligning error messages and reusing formatting**
+
+I'm ensuring read limit errors match existing parseUploads wording by reusing the unexported formatBytes within the package and returning consistent messages for dataset and image size excesses while avoiding adding new files.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/dataset.go
+@@ -9,2 +9,4 @@
+ 	"strings"
++
++	"noema/internal/config"
+ )
+@@ -29,3 +31,3 @@
+ 
+-	raw, err := io.ReadAll(src)
++	raw, err := io.ReadAll(io.LimitReader(src, int64(config.MaxDatasetBytes)+1))
+ 	if err != nil {
+@@ -33,2 +35,5 @@
+ 	}
++	if len(raw) > config.MaxDatasetBytes {
++		return nil, Dataset{}, fmt.Errorf("dataset exceeds limit of %s", formatBytes(int64(config.MaxDatasetBytes)))
++	}
+ 	if len(raw) == 0 {
+apply_patch(auto_approved=true) exited 0 in 31ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/dataset.go
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 52f2a3b7bc8ca6358a68728234fa70ed3ecf5873..d2680e9cf89837817c3842782349649f702668c4
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -7,6 +7,8 @@
+ 	"io"
+ 	"mime/multipart"
+ 	"strings"
++
++	"noema/internal/config"
+ )
+ 
+ type Dataset struct {
+@@ -27,10 +29,13 @@
+ 	}
+ 	defer src.Close()
+ 
+-	raw, err := io.ReadAll(src)
++	raw, err := io.ReadAll(io.LimitReader(src, int64(config.MaxDatasetBytes)+1))
+ 	if err != nil {
+ 		return nil, Dataset{}, fmt.Errorf("could not read dataset")
+ 	}
++	if len(raw) > config.MaxDatasetBytes {
++		return nil, Dataset{}, fmt.Errorf("dataset exceeds limit of %s", formatBytes(int64(config.MaxDatasetBytes)))
++	}
+ 	if len(raw) == 0 {
+ 		return nil, Dataset{}, fmt.Errorf("dataset file is empty")
+ 	}
+
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 52f2a3b7bc8ca6358a68728234fa70ed3ecf5873..d2680e9cf89837817c3842782349649f702668c4
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -7,6 +7,8 @@
+ 	"io"
+ 	"mime/multipart"
+ 	"strings"
++
++	"noema/internal/config"
+ )
+ 
+ type Dataset struct {
+@@ -27,10 +29,13 @@
+ 	}
+ 	defer src.Close()
+ 
+-	raw, err := io.ReadAll(src)
++	raw, err := io.ReadAll(io.LimitReader(src, int64(config.MaxDatasetBytes)+1))
+ 	if err != nil {
+ 		return nil, Dataset{}, fmt.Errorf("could not read dataset")
+ 	}
++	if len(raw) > config.MaxDatasetBytes {
++		return nil, Dataset{}, fmt.Errorf("dataset exceeds limit of %s", formatBytes(int64(config.MaxDatasetBytes)))
++	}
+ 	if len(raw) == 0 {
+ 		return nil, Dataset{}, fmt.Errorf("dataset file is empty")
+ 	}
+
+
+thinking
+**Adding limit to image-related code**
+file update
+M /Users/yani/Noema/backend/internal/evaluate/images.go
+@@ -9,2 +9,4 @@
+ 	"strings"
++
++	"noema/internal/config"
+ )
+@@ -24,3 +26,3 @@
+ 		}
+-		data, err := io.ReadAll(src)
++		data, err := io.ReadAll(io.LimitReader(src, int64(config.MaxImageBytes)+1))
+ 		closeErr := src.Close()
+@@ -29,2 +31,5 @@
+ 		}
++		if len(data) > config.MaxImageBytes {
++			return nil, fmt.Errorf("image %q exceeds limit of %s", fh.Filename, formatBytes(int64(config.MaxImageBytes)))
++		}
+ 		if closeErr != nil {
+apply_patch(auto_approved=true) exited 0 in 34ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/images.go
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 52f2a3b7bc8ca6358a68728234fa70ed3ecf5873..d2680e9cf89837817c3842782349649f702668c4
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -7,6 +7,8 @@
+ 	"io"
+ 	"mime/multipart"
+ 	"strings"
++
++	"noema/internal/config"
+ )
+ 
+ type Dataset struct {
+@@ -27,10 +29,13 @@
+ 	}
+ 	defer src.Close()
+ 
+-	raw, err := io.ReadAll(src)
++	raw, err := io.ReadAll(io.LimitReader(src, int64(config.MaxDatasetBytes)+1))
+ 	if err != nil {
+ 		return nil, Dataset{}, fmt.Errorf("could not read dataset")
+ 	}
++	if len(raw) > config.MaxDatasetBytes {
++		return nil, Dataset{}, fmt.Errorf("dataset exceeds limit of %s", formatBytes(int64(config.MaxDatasetBytes)))
++	}
+ 	if len(raw) == 0 {
+ 		return nil, Dataset{}, fmt.Errorf("dataset file is empty")
+ 	}
+diff --git a/backend/internal/evaluate/images.go b/backend/internal/evaluate/images.go
+index 1c9706fdebf109f60bf25c120327a0b407bba25b..433603c6ebfdb258db93017f3b0914d1fbf1f7e8
+--- a/backend/internal/evaluate/images.go
++++ b/backend/internal/evaluate/images.go
+@@ -7,6 +7,8 @@
+ 	"mime/multipart"
+ 	"path/filepath"
+ 	"strings"
++
++	"noema/internal/config"
+ )
+ 
+ type ImageInfo struct {
+@@ -22,11 +24,14 @@
+ 		if err != nil {
+ 			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
+ 		}
+-		data, err := io.ReadAll(src)
++		data, err := io.ReadAll(io.LimitReader(src, int64(config.MaxImageBytes)+1))
+ 		closeErr := src.Close()
+ 		if err != nil {
+ 			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
+ 		}
++		if len(data) > config.MaxImageBytes {
++			return nil, fmt.Errorf("image %q exceeds limit of %s", fh.Filename, formatBytes(int64(config.MaxImageBytes)))
++		}
+ 		if closeErr != nil {
+ 			return nil, fmt.Errorf("could not close image %q: %w", fh.Filename, closeErr)
+ 		}
+
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 52f2a3b7bc8ca6358a68728234fa70ed3ecf5873..d2680e9cf89837817c3842782349649f702668c4
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -7,6 +7,8 @@
+ 	"io"
+ 	"mime/multipart"
+ 	"strings"
++
++	"noema/internal/config"
+ )
+ 
+ type Dataset struct {
+@@ -27,10 +29,13 @@
+ 	}
+ 	defer src.Close()
+ 
+-	raw, err := io.ReadAll(src)
++	raw, err := io.ReadAll(io.LimitReader(src, int64(config.MaxDatasetBytes)+1))
+ 	if err != nil {
+ 		return nil, Dataset{}, fmt.Errorf("could not read dataset")
+ 	}
++	if len(raw) > config.MaxDatasetBytes {
++		return nil, Dataset{}, fmt.Errorf("dataset exceeds limit of %s", formatBytes(int64(config.MaxDatasetBytes)))
++	}
+ 	if len(raw) == 0 {
+ 		return nil, Dataset{}, fmt.Errorf("dataset file is empty")
+ 	}
+diff --git a/backend/internal/evaluate/images.go b/backend/internal/evaluate/images.go
+index 1c9706fdebf109f60bf25c120327a0b407bba25b..433603c6ebfdb258db93017f3b0914d1fbf1f7e8
+--- a/backend/internal/evaluate/images.go
++++ b/backend/internal/evaluate/images.go
+@@ -7,6 +7,8 @@
+ 	"mime/multipart"
+ 	"path/filepath"
+ 	"strings"
++
++	"noema/internal/config"
+ )
+ 
+ type ImageInfo struct {
+@@ -22,11 +24,14 @@
+ 		if err != nil {
+ 			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
+ 		}
+-		data, err := io.ReadAll(src)
++		data, err := io.ReadAll(io.LimitReader(src, int64(config.MaxImageBytes)+1))
+ 		closeErr := src.Close()
+ 		if err != nil {
+ 			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
+ 		}
++		if len(data) > config.MaxImageBytes {
++			return nil, fmt.Errorf("image %q exceeds limit of %s", fh.Filename, formatBytes(int64(config.MaxImageBytes)))
++		}
+ 		if closeErr != nil {
+ 			return nil, fmt.Errorf("could not close image %q: %w", fh.Filename, closeErr)
+ 		}
+
+
+thinking
+**Running all tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 612ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+ok  	noema/internal/config	(cached)
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.106s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 52f2a3b7bc8ca6358a68728234fa70ed3ecf5873..d2680e9cf89837817c3842782349649f702668c4
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -7,6 +7,8 @@
+ 	"io"
+ 	"mime/multipart"
+ 	"strings"
++
++	"noema/internal/config"
+ )
+ 
+ type Dataset struct {
+@@ -27,10 +29,13 @@
+ 	}
+ 	defer src.Close()
+ 
+-	raw, err := io.ReadAll(src)
++	raw, err := io.ReadAll(io.LimitReader(src, int64(config.MaxDatasetBytes)+1))
+ 	if err != nil {
+ 		return nil, Dataset{}, fmt.Errorf("could not read dataset")
+ 	}
++	if len(raw) > config.MaxDatasetBytes {
++		return nil, Dataset{}, fmt.Errorf("dataset exceeds limit of %s", formatBytes(int64(config.MaxDatasetBytes)))
++	}
+ 	if len(raw) == 0 {
+ 		return nil, Dataset{}, fmt.Errorf("dataset file is empty")
+ 	}
+diff --git a/backend/internal/evaluate/images.go b/backend/internal/evaluate/images.go
+index 1c9706fdebf109f60bf25c120327a0b407bba25b..433603c6ebfdb258db93017f3b0914d1fbf1f7e8
+--- a/backend/internal/evaluate/images.go
++++ b/backend/internal/evaluate/images.go
+@@ -7,6 +7,8 @@
+ 	"mime/multipart"
+ 	"path/filepath"
+ 	"strings"
++
++	"noema/internal/config"
+ )
+ 
+ type ImageInfo struct {
+@@ -22,11 +24,14 @@
+ 		if err != nil {
+ 			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
+ 		}
+-		data, err := io.ReadAll(src)
++		data, err := io.ReadAll(io.LimitReader(src, int64(config.MaxImageBytes)+1))
+ 		closeErr := src.Close()
+ 		if err != nil {
+ 			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
+ 		}
++		if len(data) > config.MaxImageBytes {
++			return nil, fmt.Errorf("image %q exceeds limit of %s", fh.Filename, formatBytes(int64(config.MaxImageBytes)))
++		}
+ 		if closeErr != nil {
+ 			return nil, fmt.Errorf("could not close image %q: %w", fh.Filename, closeErr)
+ 		}
+
+
+thinking
+**Preparing final summary and test details**
+
+I'm consolidating a clear summary that mentions two changed files along with a concise note on tests run. The response will include "What you changed" and "Tests run" sections without nested instructions.
+codex
+**What You Changed**
+- Enforced dataset size limits while reading, guarding against mismatched multipart sizes (`internal/evaluate/dataset.go`).
+- Enforced image size limits during read with clearer error context (`internal/evaluate/images.go`).
+
+**Tests Run**
+- `go test ./...`
+file update:
+diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
+index 52f2a3b7bc8ca6358a68728234fa70ed3ecf5873..d2680e9cf89837817c3842782349649f702668c4
+--- a/backend/internal/evaluate/dataset.go
++++ b/backend/internal/evaluate/dataset.go
+@@ -7,6 +7,8 @@
+ 	"io"
+ 	"mime/multipart"
+ 	"strings"
++
++	"noema/internal/config"
+ )
+ 
+ type Dataset struct {
+@@ -27,10 +29,13 @@
+ 	}
+ 	defer src.Close()
+ 
+-	raw, err := io.ReadAll(src)
++	raw, err := io.ReadAll(io.LimitReader(src, int64(config.MaxDatasetBytes)+1))
+ 	if err != nil {
+ 		return nil, Dataset{}, fmt.Errorf("could not read dataset")
+ 	}
++	if len(raw) > config.MaxDatasetBytes {
++		return nil, Dataset{}, fmt.Errorf("dataset exceeds limit of %s", formatBytes(int64(config.MaxDatasetBytes)))
++	}
+ 	if len(raw) == 0 {
+ 		return nil, Dataset{}, fmt.Errorf("dataset file is empty")
+ 	}
+diff --git a/backend/internal/evaluate/images.go b/backend/internal/evaluate/images.go
+index 1c9706fdebf109f60bf25c120327a0b407bba25b..433603c6ebfdb258db93017f3b0914d1fbf1f7e8
+--- a/backend/internal/evaluate/images.go
++++ b/backend/internal/evaluate/images.go
+@@ -7,6 +7,8 @@
+ 	"mime/multipart"
+ 	"path/filepath"
+ 	"strings"
++
++	"noema/internal/config"
+ )
+ 
+ type ImageInfo struct {
+@@ -22,11 +24,14 @@
+ 		if err != nil {
+ 			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
+ 		}
+-		data, err := io.ReadAll(src)
++		data, err := io.ReadAll(io.LimitReader(src, int64(config.MaxImageBytes)+1))
+ 		closeErr := src.Close()
+ 		if err != nil {
+ 			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
+ 		}
++		if len(data) > config.MaxImageBytes {
++			return nil, fmt.Errorf("image %q exceeds limit of %s", fh.Filename, formatBytes(int64(config.MaxImageBytes)))
++		}
+ 		if closeErr != nil {
+ 			return nil, fmt.Errorf("could not close image %q: %w", fh.Filename, closeErr)
+ 		}
+
+tokens used
+23,185
+**What You Changed**
+- Enforced dataset size limits while reading, guarding against mismatched multipart sizes (`internal/evaluate/dataset.go`).
+- Enforced image size limits during read with clearer error context (`internal/evaluate/images.go`).
+
+**Tests Run**
+- `go test ./...`

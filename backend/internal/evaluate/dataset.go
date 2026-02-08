@@ -7,6 +7,8 @@ import (
 	"io"
 	"mime/multipart"
 	"strings"
+
+	"noema/internal/config"
 )
 
 type Dataset struct {
@@ -27,9 +29,12 @@ func readDatasetFile(fh *multipart.FileHeader) ([]byte, Dataset, error) {
 	}
 	defer src.Close()
 
-	raw, err := io.ReadAll(src)
+	raw, err := io.ReadAll(io.LimitReader(src, int64(config.MaxDatasetBytes)+1))
 	if err != nil {
 		return nil, Dataset{}, fmt.Errorf("could not read dataset")
+	}
+	if len(raw) > config.MaxDatasetBytes {
+		return nil, Dataset{}, fmt.Errorf("dataset exceeds limit of %s", formatBytes(int64(config.MaxDatasetBytes)))
 	}
 	if len(raw) == 0 {
 		return nil, Dataset{}, fmt.Errorf("dataset file is empty")

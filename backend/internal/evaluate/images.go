@@ -7,6 +7,8 @@ import (
 	"mime/multipart"
 	"path/filepath"
 	"strings"
+
+	"noema/internal/config"
 )
 
 type ImageInfo struct {
@@ -22,10 +24,13 @@ func readImages(files []*multipart.FileHeader) ([]ImageInfo, error) {
 		if err != nil {
 			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
 		}
-		data, err := io.ReadAll(src)
+		data, err := io.ReadAll(io.LimitReader(src, int64(config.MaxImageBytes)+1))
 		closeErr := src.Close()
 		if err != nil {
 			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
+		}
+		if len(data) > config.MaxImageBytes {
+			return nil, fmt.Errorf("image %q exceeds limit of %s", fh.Filename, formatBytes(int64(config.MaxImageBytes)))
 		}
 		if closeErr != nil {
 			return nil, fmt.Errorf("could not close image %q: %w", fh.Filename, closeErr)
