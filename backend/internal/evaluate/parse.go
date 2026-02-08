@@ -63,11 +63,11 @@ func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.Fil
 	}
 	datasetFile := datasetFiles[0]
 	if datasetFile.Size > config.MaxDatasetBytes {
-		return nil, nil, fmt.Errorf("dataset exceeds 50MB limit")
+		return nil, nil, fmt.Errorf("dataset exceeds limit of %s", formatBytes(int64(config.MaxDatasetBytes)))
 	}
 	imageFiles := form.File["images"]
 	if len(imageFiles) > config.MaxImages {
-		return nil, nil, fmt.Errorf("maximum 10 images allowed")
+		return nil, nil, fmt.Errorf("maximum %d images allowed", config.MaxImages)
 	}
 	seenImageNames := make(map[string]struct{}, len(imageFiles))
 	for _, f := range imageFiles {
@@ -76,7 +76,7 @@ func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.Fil
 		}
 		seenImageNames[f.Filename] = struct{}{}
 		if f.Size > config.MaxImageBytes {
-			return nil, nil, fmt.Errorf("each image must be at most 5MB")
+			return nil, nil, fmt.Errorf("each image must be at most %s", formatBytes(int64(config.MaxImageBytes)))
 		}
 	}
 	if err := validateDatasetJSON(datasetFile, imageFiles); err != nil {
@@ -111,4 +111,17 @@ func validateDatasetJSON(fh *multipart.FileHeader, imageFiles []*multipart.FileH
 		}
 	}
 	return nil
+}
+
+func formatBytes(n int64) string {
+	const kb = 1024
+	const mb = 1024 * 1024
+	switch {
+	case n%mb == 0:
+		return fmt.Sprintf("%dMB", n/mb)
+	case n%kb == 0:
+		return fmt.Sprintf("%dKB", n/kb)
+	default:
+		return fmt.Sprintf("%d bytes", n)
+	}
 }

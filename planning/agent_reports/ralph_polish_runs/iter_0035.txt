@@ -1,0 +1,573 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3c9c-f03e-7320-8e4c-e58148f985b2
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Running Go tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 92ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+?   	noema/internal/httputil	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Inspecting repo for high-value improvement**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME|panic|Must|fatal" internal' in /Users/yani/Noema/backend exited 1 in 52ms:
+
+
+thinking
+**Checking error handling and integration**
+
+No matches found for the initial search, so I'll explore error handling and the Gemini integration, possibly reviewing relevant files in internal/evaluate and listing the project structure to identify key areas.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
+cmd
+data
+go.mod
+go.sum
+internal
+main
+server
+web
+
+thinking
+**Searching for ignored errors**
+
+I'm looking for places in the code, possibly in internal/verify, where errors are ignored to identify small reliability improvements.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "_ =|TODO|error" internal' in /Users/yani/Noema/backend succeeded in 51ms:
+internal/evaluate/prompt.go:160:func marshalSampledDataset(ds Dataset) ([]byte, error) {
+internal/evaluate/parse.go:13:func parseSpec(form *multipart.Form) (Spec, error) {
+internal/evaluate/parse.go:33:func validateSpec(spec Spec) error {
+internal/evaluate/parse.go:56:func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.FileHeader, error) {
+internal/evaluate/parse.go:88:func validateDatasetJSON(fh *multipart.FileHeader, imageFiles []*multipart.FileHeader) error {
+internal/evaluate/output.go:23:func parseEvalOutput(raw string) (EvalOutput, error) {
+internal/evaluate/output.go:50:func validateEvalOutput(out EvalOutput, enabled map[string]ConstraintRule) error {
+internal/evaluate/handler_test.go:67:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:73:		t.Fatalf("parseEvalOutputOptional error: %v", err)
+internal/evaluate/handler_test.go:110:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:129:		t.Fatalf("parseEvalOutputOptional error: %v", err)
+internal/evaluate/handler_test.go:148:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:165:		t.Fatalf("expected validation error for unknown constraint")
+internal/evaluate/handler_test.go:178:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:195:		t.Fatalf("expected error for trailing garbage")
+internal/evaluate/handler_test.go:208:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:225:		t.Fatalf("expected error for multiple eval_output values")
+internal/evaluate/handler_test.go:239:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:245:		t.Fatalf("parseEvalOutputOptional error: %v", err)
+internal/evaluate/handler_test.go:287:		t.Fatalf("expected error for image_ref without images")
+
+thinking
+**Reviewing atomic write error handling**
+
+I'm checking if the writeAtomic function uses os.Remove on error and whether it ignores sync errors, considering improvements especially around directory sync handling. Next, I'll inspect the file opening logic.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math/big"
+	"mime/multipart"
+	"os"
+	"path/filepath"
+	"strconv"
+	"sync/atomic"
+	"time"
+)
+
+var runIDCounter uint64
+
+func genRunID() string {
+	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
+
+thinking
+**Considering robust sync error handling**
+
+I'm evaluating whether to return errors if directory sync fails after rename in writeAtomic, which could improve reliability for important files. This would be a minimal change focused on one file, ensuring that file writes remain visible even if the dir sync errors, and possibly refining how corrupted index errors are handled.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/cache.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+type CachedGeminiOutput struct {
+	Model         string       `json:"model"`
+	PromptVersion string       `json:"prompt_version"`
+	Output        EvalOutput   `json:"output"`
+	RawText       string       `json:"raw_text"`
+	Usage         *GeminiUsage `json:"usage,omitempty"`
+	CachedAt      string       `json:"cached_at"`
+}
+
+thinking
+**Considering error handling for corrupted cache**
+
+I'm checking if loadCache should return an error on corrupted files to let the caller fallback gracefully; next, I'll explore gemini_eval.go usage for confirmation.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/gemini_eval.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"context"
+	"log"
+	"mime/multipart"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/gemini"
+)
+
+const geminiEvalTimeout = 45 * time.Second
+
+func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
+	if out, provided, err := parseEvalOutputProvided(form, enabled); err != nil {
+		return EvalOutput{}, err
+	} else if provided {
+		return out, nil
+	}
+
+thinking
+**Reviewing cache and index error handling**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"strings"
+
+	"noema/internal/config"
+)
+
+func parseSpec(form *multipart.Form) (Spec, error) {
+	specStrs := form.Value["spec"]
+	if len(specStrs) == 0 || specStrs[0] == "" {
+		return Spec{}, fmt.Errorf("missing field: spec")
+	}
+	if len(specStrs) > 1 {
+		return Spec{}, fmt.Errorf("only one spec value allowed")
+	}
+
+thinking
+**Planning error message improvement**
+
+Considering replacing hardcoded size/limit values in error messages with dynamic config values for accuracy and better UX; contemplating adding tests though changes are minor and mostly cosmetic.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/config/config.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package config
+
+import (
+	"os"
+	"strconv"
+
+	"github.com/joho/godotenv"
+)
+
+const devCookieSecret = "dev-secret-change-in-production"
+
+// Load reads .env from the current directory and sets env vars.
+// Safe to call multiple times; existing env vars are not overwritten.
+func Load() error {
+	return godotenv.Load()
+}
+
+// JudgeKey returns the judge key used to gate protected routes.
+func JudgeKey() string {
+	return os.Getenv("JUDGE_KEY")
+
+thinking
+**Considering config for dataset size limits**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "MaxDatasetBytes|MaxImageBytes|MaxImages" -S' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/parse.go:65:	if datasetFile.Size > config.MaxDatasetBytes {
+internal/evaluate/parse.go:69:	if len(imageFiles) > config.MaxImages {
+internal/evaluate/parse.go:78:		if f.Size > config.MaxImageBytes {
+internal/evaluate/handler.go:49:		maxBody := int64(config.MaxDatasetBytes) + int64(config.MaxImages*config.MaxImageBytes) + multipartOverhead
+internal/config/limits.go:4:	MaxDatasetBytes    = 50 * 1024 * 1024 // 50MB
+internal/config/limits.go:5:	MaxImageBytes      = 5 * 1024 * 1024  // 5MB
+internal/config/limits.go:6:	MaxImages          = 10
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,120p' internal/config/limits.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package config
+
+const (
+	MaxDatasetBytes    = 50 * 1024 * 1024 // 50MB
+	MaxImageBytes      = 5 * 1024 * 1024  // 5MB
+	MaxImages          = 10
+	MaxUploadBytes     = 50 * 1024 * 1024 // 50MB
+	MaxMultipartMemory = 100 << 20        // 100MB for evaluate (dataset + images)
+)
+
+thinking
+**Planning size formatting helper**
+
+I'm deciding to add a simple helper function in parse.go to format byte sizes in error messages to avoid hardcoded values and maintain consistency without new dependencies. Next, I’ll check handler.go usage of related constants to ensure alignment.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+thinking
+**Improving error responses with config-based size limits**
+
+I'm updating the error messages to reflect actual size limits dynamically using config values and formatted sizes, adding a helper in parse.go. Next, I'll check and possibly update handler tests that verify these error strings for accuracy.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '240,420p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 51ms:
+	}
+
+	form := &multipart.Form{Value: map[string][]string{"eval_output": {" \n\t "}}}
+	out, err := parseEvalOutputOptional(form, enabled)
+	if err != nil {
+		t.Fatalf("parseEvalOutputOptional error: %v", err)
+	}
+	if len(out.Constraints) != len(enabled) {
+		t.Fatalf("expected %d constraints, got %d", len(enabled), len(out.Constraints))
+	}
+	if out.MaxSeverity != 0 {
+		t.Fatalf("expected max_severity 0, got %d", out.MaxSeverity)
+	}
+}
+
+func TestComputePolicyResult(t *testing.T) {
+	enabled := map[string]ConstraintRule{
+		"pii":    {ID: "pii", AllowedMaxSeverity: 1},
+		"safety": {ID: "safety", AllowedMaxSeverity: 2},
+	}
+
+thinking
+**Planning byte formatting helper**
+
+I'm planning to add a helper in parse.go that formats byte counts into human-readable strings (MB, KB, or bytes) matching config limits, then update error messages to use it for consistent, accurate size reporting without floats.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/parse.go
+@@ -65,3 +65,3 @@
+ 	if datasetFile.Size > config.MaxDatasetBytes {
+-		return nil, nil, fmt.Errorf("dataset exceeds 50MB limit")
++		return nil, nil, fmt.Errorf("dataset exceeds limit of %s", formatBytes(int64(config.MaxDatasetBytes)))
+ 	}
+@@ -69,3 +69,3 @@
+ 	if len(imageFiles) > config.MaxImages {
+-		return nil, nil, fmt.Errorf("maximum 10 images allowed")
++		return nil, nil, fmt.Errorf("maximum %d images allowed", config.MaxImages)
+ 	}
+@@ -78,3 +78,3 @@
+ 		if f.Size > config.MaxImageBytes {
+-			return nil, nil, fmt.Errorf("each image must be at most 5MB")
++			return nil, nil, fmt.Errorf("each image must be at most %s", formatBytes(int64(config.MaxImageBytes)))
+ 		}
+@@ -114 +114,14 @@
+ }
++
++func formatBytes(n int64) string {
++	const kb = 1024
++	const mb = 1024 * 1024
++	switch {
++	case n%mb == 0:
++		return fmt.Sprintf("%dMB", n/mb)
++	case n%kb == 0:
++		return fmt.Sprintf("%dKB", n/kb)
++	default:
++		return fmt.Sprintf("%d bytes", n)
++	}
++}
+apply_patch(auto_approved=true) exited 0 in 30ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/evaluate/parse.go
+file update:
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 7f73c3f896a585a47b99564fea2c1df281a40e62..9a5aa6ee0ad6fbd56abdc94ec904ded459c5e81a
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -63,11 +63,11 @@
+ 	}
+ 	datasetFile := datasetFiles[0]
+ 	if datasetFile.Size > config.MaxDatasetBytes {
+-		return nil, nil, fmt.Errorf("dataset exceeds 50MB limit")
++		return nil, nil, fmt.Errorf("dataset exceeds limit of %s", formatBytes(int64(config.MaxDatasetBytes)))
+ 	}
+ 	imageFiles := form.File["images"]
+ 	if len(imageFiles) > config.MaxImages {
+-		return nil, nil, fmt.Errorf("maximum 10 images allowed")
++		return nil, nil, fmt.Errorf("maximum %d images allowed", config.MaxImages)
+ 	}
+ 	seenImageNames := make(map[string]struct{}, len(imageFiles))
+ 	for _, f := range imageFiles {
+@@ -76,7 +76,7 @@
+ 		}
+ 		seenImageNames[f.Filename] = struct{}{}
+ 		if f.Size > config.MaxImageBytes {
+-			return nil, nil, fmt.Errorf("each image must be at most 5MB")
++			return nil, nil, fmt.Errorf("each image must be at most %s", formatBytes(int64(config.MaxImageBytes)))
+ 		}
+ 	}
+ 	if err := validateDatasetJSON(datasetFile, imageFiles); err != nil {
+@@ -112,3 +112,16 @@
+ 	}
+ 	return nil
+ }
++
++func formatBytes(n int64) string {
++	const kb = 1024
++	const mb = 1024 * 1024
++	switch {
++	case n%mb == 0:
++		return fmt.Sprintf("%dMB", n/mb)
++	case n%kb == 0:
++		return fmt.Sprintf("%dKB", n/kb)
++	default:
++		return fmt.Sprintf("%d bytes", n)
++	}
++}
+
+file update:
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 7f73c3f896a585a47b99564fea2c1df281a40e62..9a5aa6ee0ad6fbd56abdc94ec904ded459c5e81a
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -63,11 +63,11 @@
+ 	}
+ 	datasetFile := datasetFiles[0]
+ 	if datasetFile.Size > config.MaxDatasetBytes {
+-		return nil, nil, fmt.Errorf("dataset exceeds 50MB limit")
++		return nil, nil, fmt.Errorf("dataset exceeds limit of %s", formatBytes(int64(config.MaxDatasetBytes)))
+ 	}
+ 	imageFiles := form.File["images"]
+ 	if len(imageFiles) > config.MaxImages {
+-		return nil, nil, fmt.Errorf("maximum 10 images allowed")
++		return nil, nil, fmt.Errorf("maximum %d images allowed", config.MaxImages)
+ 	}
+ 	seenImageNames := make(map[string]struct{}, len(imageFiles))
+ 	for _, f := range imageFiles {
+@@ -76,7 +76,7 @@
+ 		}
+ 		seenImageNames[f.Filename] = struct{}{}
+ 		if f.Size > config.MaxImageBytes {
+-			return nil, nil, fmt.Errorf("each image must be at most 5MB")
++			return nil, nil, fmt.Errorf("each image must be at most %s", formatBytes(int64(config.MaxImageBytes)))
+ 		}
+ 	}
+ 	if err := validateDatasetJSON(datasetFile, imageFiles); err != nil {
+@@ -112,3 +112,16 @@
+ 	}
+ 	return nil
+ }
++
++func formatBytes(n int64) string {
++	const kb = 1024
++	const mb = 1024 * 1024
++	switch {
++	case n%mb == 0:
++		return fmt.Sprintf("%dMB", n/mb)
++	case n%kb == 0:
++		return fmt.Sprintf("%dKB", n/kb)
++	default:
++		return fmt.Sprintf("%d bytes", n)
++	}
++}
+
+
+thinking
+**Running tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 581ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+?   	noema/internal/config	[no test files]
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.104s
+?   	noema/internal/gemini	[no test files]
+?   	noema/internal/httputil	[no test files]
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 7f73c3f896a585a47b99564fea2c1df281a40e62..9a5aa6ee0ad6fbd56abdc94ec904ded459c5e81a
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -63,11 +63,11 @@
+ 	}
+ 	datasetFile := datasetFiles[0]
+ 	if datasetFile.Size > config.MaxDatasetBytes {
+-		return nil, nil, fmt.Errorf("dataset exceeds 50MB limit")
++		return nil, nil, fmt.Errorf("dataset exceeds limit of %s", formatBytes(int64(config.MaxDatasetBytes)))
+ 	}
+ 	imageFiles := form.File["images"]
+ 	if len(imageFiles) > config.MaxImages {
+-		return nil, nil, fmt.Errorf("maximum 10 images allowed")
++		return nil, nil, fmt.Errorf("maximum %d images allowed", config.MaxImages)
+ 	}
+ 	seenImageNames := make(map[string]struct{}, len(imageFiles))
+ 	for _, f := range imageFiles {
+@@ -76,7 +76,7 @@
+ 		}
+ 		seenImageNames[f.Filename] = struct{}{}
+ 		if f.Size > config.MaxImageBytes {
+-			return nil, nil, fmt.Errorf("each image must be at most 5MB")
++			return nil, nil, fmt.Errorf("each image must be at most %s", formatBytes(int64(config.MaxImageBytes)))
+ 		}
+ 	}
+ 	if err := validateDatasetJSON(datasetFile, imageFiles); err != nil {
+@@ -112,3 +112,16 @@
+ 	}
+ 	return nil
+ }
++
++func formatBytes(n int64) string {
++	const kb = 1024
++	const mb = 1024 * 1024
++	switch {
++	case n%mb == 0:
++		return fmt.Sprintf("%dMB", n/mb)
++	case n%kb == 0:
++		return fmt.Sprintf("%dKB", n/kb)
++	default:
++		return fmt.Sprintf("%d bytes", n)
++	}
++}
+
+
+thinking
+**Summarizing changes and tests**
+
+I’m summarizing the completed changes and confirming tests ran successfully, mentioning the key file affected.
+codex
+What you changed (short)
+- Made upload limit errors derive from `internal/config` constants so messages stay accurate if limits change, using a small `formatBytes` helper in `internal/evaluate/parse.go`.
+
+Tests run
+- `go test ./...`
+file update:
+diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
+index 7f73c3f896a585a47b99564fea2c1df281a40e62..9a5aa6ee0ad6fbd56abdc94ec904ded459c5e81a
+--- a/backend/internal/evaluate/parse.go
++++ b/backend/internal/evaluate/parse.go
+@@ -63,11 +63,11 @@
+ 	}
+ 	datasetFile := datasetFiles[0]
+ 	if datasetFile.Size > config.MaxDatasetBytes {
+-		return nil, nil, fmt.Errorf("dataset exceeds 50MB limit")
++		return nil, nil, fmt.Errorf("dataset exceeds limit of %s", formatBytes(int64(config.MaxDatasetBytes)))
+ 	}
+ 	imageFiles := form.File["images"]
+ 	if len(imageFiles) > config.MaxImages {
+-		return nil, nil, fmt.Errorf("maximum 10 images allowed")
++		return nil, nil, fmt.Errorf("maximum %d images allowed", config.MaxImages)
+ 	}
+ 	seenImageNames := make(map[string]struct{}, len(imageFiles))
+ 	for _, f := range imageFiles {
+@@ -76,7 +76,7 @@
+ 		}
+ 		seenImageNames[f.Filename] = struct{}{}
+ 		if f.Size > config.MaxImageBytes {
+-			return nil, nil, fmt.Errorf("each image must be at most 5MB")
++			return nil, nil, fmt.Errorf("each image must be at most %s", formatBytes(int64(config.MaxImageBytes)))
+ 		}
+ 	}
+ 	if err := validateDatasetJSON(datasetFile, imageFiles); err != nil {
+@@ -112,3 +112,16 @@
+ 	}
+ 	return nil
+ }
++
++func formatBytes(n int64) string {
++	const kb = 1024
++	const mb = 1024 * 1024
++	switch {
++	case n%mb == 0:
++		return fmt.Sprintf("%dMB", n/mb)
++	case n%kb == 0:
++		return fmt.Sprintf("%dKB", n/kb)
++	default:
++		return fmt.Sprintf("%d bytes", n)
++	}
++}
+
+tokens used
+41,072
+What you changed (short)
+- Made upload limit errors derive from `internal/config` constants so messages stay accurate if limits change, using a small `formatBytes` helper in `internal/evaluate/parse.go`.
+
+Tests run
+- `go test ./...`
