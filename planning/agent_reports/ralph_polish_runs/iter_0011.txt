@@ -7,7 +7,7 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3c84-a142-7830-9a6e-5f01a3548dd5
+session id: 019c3ecb-2ca4-7bd3-9fd7-55011629c925
 --------
 user
 You are an autonomous coding agent polishing the Noema repository.
@@ -18,8 +18,9 @@ Hard rules:
 - Keep changes small: max 3 files per iteration.
 - No cosmetic-only edits.
 - No new dependencies unless absolutely necessary.
+- keep all the same ui functionality, the end user should be able to do the same stuff but the experiance and design should be better.
 
-Goal: continuously improve production quality.
+Goal: continuously improve production quality. continuously improve front end quality and polish.
 
 Iteration:
 1) Run: cd backend && go test ./...
@@ -29,7 +30,7 @@ Iteration:
 Pick the highest-value improvement:
 A) Reliability/correctness: validation, error handling, run persistence, verify robustness
 B) Tests: add/strengthen tests for the change you made
-C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+C) upgrading the user interface so that it looks better.
 D) Maintainability: reduce duplication with tiny refactors
 E) UX: wizard/results/verify clarity (small, safe changes)
 F) Docs: README/DEPLOYMENT polish
@@ -41,497 +42,428 @@ Finish with:
 mcp startup: no servers
 
 thinking
-**Running Go tests**
-
-I'm preparing to run the Go tests using the standard `go test` command since no other skills or tools triggered for test execution.
+**Running tests**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 235ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 196ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
 ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
 
 thinking
-**Planning targeted code inspection**
+**Listing front-end files**
 
-Tests are passing, but one file needs improvement—likely around validation or reliability. I'll inspect the repo using TODO comments or similar markers to identify the relevant area.
+I'm listing the project files to identify the front-end components and better understand its structure for inspection.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME|panic|Must" internal' in /Users/yani/Noema/backend exited 1 in 52ms:
-
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
+cmd
+data
+go.mod
+go.sum
+internal
+main
+web
 
 thinking
-**Checking error handling paths**
-
-No matches found with the initial search, so I'll inspect related files like verify and evaluate to understand potential error handling mechanisms. Listing files next for targeted exploration.
+**Inspecting web UI**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "err != nil|error" internal/session internal/verify internal/evaluate' in /Users/yani/Noema/backend succeeded in 51ms:
-internal/verify/handler_test.go:14:type errorResponse struct {
-internal/verify/handler_test.go:15:	Error string `json:"error"`
-internal/verify/handler_test.go:31:	if err != nil {
-internal/verify/handler_test.go:42:	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-internal/verify/handler_test.go:59:	if err != nil {
-internal/verify/handler_test.go:69:	var resp errorResponse
-internal/verify/handler_test.go:70:	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-internal/verify/handler_test.go:84:	if err != nil {
-internal/verify/handler_test.go:94:	var resp errorResponse
-internal/verify/handler_test.go:95:	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-internal/session/session.go:32:	if err != nil || len(sig) != sha256.Size {
-internal/session/session.go:36:	if err != nil {
-internal/evaluate/prompt.go:160:func marshalSampledDataset(ds Dataset) ([]byte, error) {
-internal/verify/handler.go:32:		if err := c.ShouldBindJSON(&req); err != nil {
-internal/verify/handler.go:33:			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
-internal/verify/handler.go:37:			c.JSON(http.StatusBadRequest, gin.H{"error": "missing proof or public inputs"})
-internal/verify/handler.go:42:		if err != nil {
-internal/verify/handler.go:43:			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
-internal/verify/handler.go:56:		if err != nil {
-internal/verify/handler.go:57:			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web' in /Users/yani/Noema/backend succeeded in 52ms:
+static
+templates
 
 thinking
-**Considering adding validation in parsing uploads**
+**Inspecting templates for improvement**
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package evaluate
-
-import (
-	"encoding/json"
-	"fmt"
-	"mime/multipart"
-	"strings"
-
-	"noema/internal/config"
-)
-
-func parseSpec(form *multipart.Form) (Spec, error) {
-	specStrs := form.Value["spec"]
-	if len(specStrs) == 0 || specStrs[0] == "" {
-		return Spec{}, fmt.Errorf("missing field: spec")
-	}
-	var spec Spec
-	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
-		return Spec{}, fmt.Errorf("invalid spec JSON")
-	}
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/templates' in /Users/yani/Noema/backend succeeded in 52ms:
+app.html
+app_new.html
+app_results.html
+index.html
+partial_header_app.html
+partial_header_public.html
+partial_header_upload.html
+partial_orb.html
+upload.html
+verify.html
+verify_results.html
 
 thinking
-**Considering duplicate data validation**
+**Considering CSS improvement options**
 
-Evaluating whether to enforce uniqueness for image filenames or dataset item IDs by inspecting the dataset structure and validation needs.
+I'm listing potential CSS improvements to implement under web/static before deciding on the best one to focus on.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/static' in /Users/yani/Noema/backend succeeded in 52ms:
+app.js
+constraints.js
+results.js
+styles.css
+upload.js
+verify.js
+wizard.js
 
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io"
-	"mime/multipart"
-)
+thinking
+**Inspecting styles for UI improvement**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap');
 
-type Dataset struct {
-	Items []DatasetItem `json:"items"`
+:root {
+  --bg: #05060a;
+  --bg-card: rgba(9, 12, 18, 0.9);
+  --text: #f4f6fb;
+  --text-muted: #9aa3b2;
+  --accent: #45d4ff;
+  --accent-strong: #2c7bff;
+  --accent-glow: rgba(69, 212, 255, 0.35);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(69, 212, 255, 0.4);
+  --error: #f87171;
+  --success: #22c55e;
+  --warning: #fbbf24;
+  --shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
 }
 
-type DatasetItem struct {
-	ID       string         `json:"id"`
-	Text     string         `json:"text"`
-	Metadata map[string]any `json:"metadata,omitempty"`
-	ImageRef string         `json:"image_ref,omitempty"`
-}
+*,
+*::before,
 
 thinking
-**Planning duplicate ID check**
+**Identifying large CSS for optimization**
 
-I'm adding a duplicate ID check in the dataset file reader for reliability and testing it, likely in the evaluation handler tests focused on dataset validation.
+The CSS is extensive, so focusing on optimizing the mobile header first makes sense before addressing form-related styles further down.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '180,260p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 51ms:
-		MaxSeverity: 2,
-	}
-	overall, maxSeverity, threshold := computePolicyResult(out, enabled)
-	if threshold != 1 {
-		t.Fatalf("expected threshold 1, got %d", threshold)
-	}
-	if maxSeverity != 2 {
-		t.Fatalf("expected max severity 2, got %d", maxSeverity)
-	}
-	if overall {
-		t.Fatalf("expected overall pass false due to pii threshold")
-	}
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '200,400p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent-glow);
+  animation: pulse 1.2s ease-in-out infinite;
 }
 
-func TestValidateDatasetJSON_ImageRefRequiresImages(t *testing.T) {
-	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"img1.png"}]}`
-	form := buildMultipartForm(t, []formFile{
-		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-	})
-	datasetFile := form.File["dataset"][0]
+@keyframes pulse {
+  0% { transform: scale(0.7); opacity: 0.5; }
+  50% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(0.7); opacity: 0.5; }
+}
+
+.card-kicker {
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  letter-spacing: 0.2em;
+  color: rgba(255, 255, 255, 0.5);
 
 thinking
-**Adding duplicate dataset ID validation**
+**Considering results display improvements**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '400,800p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+}
 
-I'm implementing duplicate ID checks in the dataset file reading function by tracking seen IDs in a map and returning an error if duplicates occur, then adding a test that builds a dataset JSON with duplicate IDs to verify the error is triggered.
+.recent-run-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.status-pill {
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  white-space: nowrap;
+
+thinking
+**Confirming continuation for results**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '800,1200p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+.running-state {
+  margin-top: 1rem;
+}
+
+/* ===== Results ===== */
+.main-results {
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.results-card {
+  max-width: 980px;
+}
+
+.results-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+
+thinking
+**Planning accessibility skip link**
+
+Considering requirements, adding a keyboard-accessible skip link is a meaningful UX improvement without altering existing UI functionality; next, I'll inspect header templates to add skip link and a main id for landmark navigation.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/templates/partial_header_public.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "header_public"}}
+<header class="header">
+  <a href="/" class="logo">Noema</a>
+  <nav class="nav">
+    <a href="/" class="nav-link">Home</a>
+    <a href="/verify" class="nav-link">Verify</a>
+  </nav>
+</header>
+{{end}}
+
+thinking
+**Assessing skip link placement**
+
+I'm reviewing the three header partials and considering adding a skip link before the header or in each page template, ensuring the main content has a consistent id or class for the link target, as seen in index.html.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/templates/index.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "index"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_public" .}}
+
+  <main class="main">
+    {{template "orb" .}}
+    <div class="card">
+      <div class="card-kicker">Secure access</div>
+      <h1 class="card-title">Judge Key</h1>
+      <p class="card-text">Evaluation and uploads are gated. Public verification is always open.</p>
+      <form action="/auth" method="post" class="form">
+        <input type="password" name="judge_key" id="judge_key" class="input" placeholder="Enter judge key" autocomplete="off" value="{{.JudgeKeyVal}}" autofocus>
+
+
+thinking
+**Planning skip link addition constraints**
+
+Adding a skip link requires assigning an id to main on all pages, which spans more than three files and exceeds iteration limits. Instead, focusing on a CSS change for reduced motion offers an accessibility improvement within one file.
+thinking
+**Considering focus and wrap improvements**
+
+Adding `overflow-wrap:anywhere` could improve code block readability, and adding `:focus-visible` styles to upload and stepper elements would enhance keyboard focus visibility, but these are minor UX tweaks. Showing selected file in upload might require JS changes to upload.js.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/static/upload.js" in /Users/yani/Noema/backend succeeded in 51ms:
+(function() {
+  var input = document.getElementById('file-input');
+  var zone = document.getElementById('drop-zone');
+  var zoneText = document.getElementById('zone-text');
+  var submitBtn = document.getElementById('submit-btn');
+  var details = document.getElementById('upload-details');
+  var fileName = document.getElementById('upload-file-name');
+  var fileSize = document.getElementById('upload-file-size');
+  var clearBtn = document.getElementById('clear-file');
+
+  function formatBytes(bytes) {
+    if (!bytes && bytes !== 0) return '';
+    if (bytes < 1024) return bytes + ' B';
+    var kb = bytes / 1024;
+    if (kb < 1024) return kb.toFixed(1) + ' KB';
+    var mb = kb / 1024;
+    if (mb < 1024) return mb.toFixed(1) + ' MB';
+    var gb = mb / 1024;
+    return gb.toFixed(1) + ' GB';
+  }
+
+thinking
+**Considering keyboard and accessibility improvements**
+
+Exploring adding keyboard support by triggering file input on Enter/Space and possibly enhancing accessibility with aria-live or status messages, likely requiring template changes noted in the upload template.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' web/templates/upload.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "upload"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Upload</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_upload" .}}
+
+  <main class="main">
+    {{template "orb" .}}
+    <div class="card">
+      <h1 class="card-title">Upload</h1>
+      <form id="upload-form" action="/upload" method="post" enctype="multipart/form-data">
+        <label class="upload-zone" for="file-input" id="drop-zone">
+          <input type="file" name="file" id="file-input" accept="*">
+          <span id="zone-text">Drag and drop a file here, or click to choose</span>
+
+
+thinking
+**Considering upload accept attribute and accessibility improvements**
+
+I'm reviewing upload accept settings to balance restricting file types with maintaining existing functionality and leaning toward limited filtering without hard blocking. Also contemplating accessibility improvements like reduced motion and contrast preferences for a meaningful UX upgrade.
+thinking
+**Adding reduced-motion media query for accessibility**
+
+I'm preparing to add CSS rules honoring reduced-motion preferences by minimizing animations and transitions globally with targeted exceptions for key elements, enhancing accessibility without adding new features.
 file update
-M /Users/yani/Noema/backend/internal/evaluate/dataset.go
-@@ -49,2 +49,3 @@
- 	}
-+	seenIDs := make(map[string]struct{}, len(ds.Items))
- 	for i, item := range ds.Items {
-@@ -56,2 +57,6 @@
- 		}
-+		if _, exists := seenIDs[item.ID]; exists {
-+			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
-+		}
-+		seenIDs[item.ID] = struct{}{}
- 	}
-apply_patch(auto_approved=true) exited 0 in 35ms:
+M /Users/yani/Noema/backend/web/static/styles.css
+@@ -1068,2 +1068,12 @@
+ 
++@media (prefers-reduced-motion: reduce) {
++  *,
++  *::before,
++  *::after {
++    animation-duration: 0.001ms !important;
++    animation-iteration-count: 1 !important;
++    transition-duration: 0.001ms !important;
++  }
++}
++
+ /* ===== Public Verify ===== */
+apply_patch(auto_approved=true) exited 0 in 30ms:
 Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/dataset.go
+M /Users/yani/Noema/backend/web/static/styles.css
 file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 004f38e213b54bac8b0ff27a20e1d3a9c090b37f..97fa69fff87ebf6b84ec903b2e8fa3cb8ae657a0
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -47,6 +47,7 @@
- 	if len(ds.Items) == 0 {
- 		return nil, Dataset{}, fmt.Errorf("dataset.items must be a non-empty array")
- 	}
-+	seenIDs := make(map[string]struct{}, len(ds.Items))
- 	for i, item := range ds.Items {
- 		if item.ID == "" {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
-@@ -54,6 +55,10 @@
- 		if item.Text == "" {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
- 		}
-+		if _, exists := seenIDs[item.ID]; exists {
-+			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
-+		}
-+		seenIDs[item.ID] = struct{}{}
- 	}
- 	return raw, ds, nil
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index b4398821905c29c555e265725408d45087175614..67e01e13dfcef59fbaf7f1ce12fb5b3a0d3370d1
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -1066,6 +1066,16 @@
+   }
  }
+ 
++@media (prefers-reduced-motion: reduce) {
++  *,
++  *::before,
++  *::after {
++    animation-duration: 0.001ms !important;
++    animation-iteration-count: 1 !important;
++    transition-duration: 0.001ms !important;
++  }
++}
++
+ /* ===== Public Verify ===== */
+ .main-verify {
+   align-items: flex-start;
 
 file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 004f38e213b54bac8b0ff27a20e1d3a9c090b37f..97fa69fff87ebf6b84ec903b2e8fa3cb8ae657a0
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -47,6 +47,7 @@
- 	if len(ds.Items) == 0 {
- 		return nil, Dataset{}, fmt.Errorf("dataset.items must be a non-empty array")
- 	}
-+	seenIDs := make(map[string]struct{}, len(ds.Items))
- 	for i, item := range ds.Items {
- 		if item.ID == "" {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
-@@ -54,6 +55,10 @@
- 		if item.Text == "" {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
- 		}
-+		if _, exists := seenIDs[item.ID]; exists {
-+			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
-+		}
-+		seenIDs[item.ID] = struct{}{}
- 	}
- 	return raw, ds, nil
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index b4398821905c29c555e265725408d45087175614..67e01e13dfcef59fbaf7f1ce12fb5b3a0d3370d1
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -1066,6 +1066,16 @@
+   }
  }
+ 
++@media (prefers-reduced-motion: reduce) {
++  *,
++  *::before,
++  *::after {
++    animation-duration: 0.001ms !important;
++    animation-iteration-count: 1 !important;
++    transition-duration: 0.001ms !important;
++  }
++}
++
+ /* ===== Public Verify ===== */
+ .main-verify {
+   align-items: flex-start;
 
 
 thinking
-**Adding a test**
-file update
-M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
-@@ -217,2 +217,13 @@
- 
-+func TestValidateDatasetJSON_RejectsDuplicateIDs(t *testing.T) {
-+	dataset := `{"items":[{"id":"1","text":"hello"},{"id":"1","text":"world"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+	})
-+	datasetFile := form.File["dataset"][0]
-+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-+		t.Fatalf("expected error for duplicate dataset ids")
-+	}
-+}
-+
- func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
-apply_patch(auto_approved=true) exited 0 in 41ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
-file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 004f38e213b54bac8b0ff27a20e1d3a9c090b37f..97fa69fff87ebf6b84ec903b2e8fa3cb8ae657a0
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -47,6 +47,7 @@
- 	if len(ds.Items) == 0 {
- 		return nil, Dataset{}, fmt.Errorf("dataset.items must be a non-empty array")
- 	}
-+	seenIDs := make(map[string]struct{}, len(ds.Items))
- 	for i, item := range ds.Items {
- 		if item.ID == "" {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
-@@ -54,6 +55,10 @@
- 		if item.Text == "" {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
- 		}
-+		if _, exists := seenIDs[item.ID]; exists {
-+			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
-+		}
-+		seenIDs[item.ID] = struct{}{}
- 	}
- 	return raw, ds, nil
- }
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 8228bf435f0da3463cf3b975e968e91a3909086e..04ae8fb90312924973356edf9c52a91c2cc93bc5
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -215,6 +215,17 @@
- 	}
- }
- 
-+func TestValidateDatasetJSON_RejectsDuplicateIDs(t *testing.T) {
-+	dataset := `{"items":[{"id":"1","text":"hello"},{"id":"1","text":"world"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+	})
-+	datasetFile := form.File["dataset"][0]
-+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-+		t.Fatalf("expected error for duplicate dataset ids")
-+	}
-+}
-+
- func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
- 	spec := Spec{
- 		SchemaVersion: 1,
-
-file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 004f38e213b54bac8b0ff27a20e1d3a9c090b37f..97fa69fff87ebf6b84ec903b2e8fa3cb8ae657a0
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -47,6 +47,7 @@
- 	if len(ds.Items) == 0 {
- 		return nil, Dataset{}, fmt.Errorf("dataset.items must be a non-empty array")
- 	}
-+	seenIDs := make(map[string]struct{}, len(ds.Items))
- 	for i, item := range ds.Items {
- 		if item.ID == "" {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
-@@ -54,6 +55,10 @@
- 		if item.Text == "" {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
- 		}
-+		if _, exists := seenIDs[item.ID]; exists {
-+			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
-+		}
-+		seenIDs[item.ID] = struct{}{}
- 	}
- 	return raw, ds, nil
- }
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 8228bf435f0da3463cf3b975e968e91a3909086e..04ae8fb90312924973356edf9c52a91c2cc93bc5
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -215,6 +215,17 @@
- 	}
- }
- 
-+func TestValidateDatasetJSON_RejectsDuplicateIDs(t *testing.T) {
-+	dataset := `{"items":[{"id":"1","text":"hello"},{"id":"1","text":"world"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+	})
-+	datasetFile := form.File["dataset"][0]
-+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-+		t.Fatalf("expected error for duplicate dataset ids")
-+	}
-+}
-+
- func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
- 	spec := Spec{
- 		SchemaVersion: 1,
-
-
-thinking
-**Running tests**
+**Running full Go test suite**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backendfile update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 004f38e213b54bac8b0ff27a20e1d3a9c090b37f..97fa69fff87ebf6b84ec903b2e8fa3cb8ae657a0
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -47,6 +47,7 @@
- 	if len(ds.Items) == 0 {
- 		return nil, Dataset{}, fmt.Errorf("dataset.items must be a non-empty array")
- 	}
-+	seenIDs := make(map[string]struct{}, len(ds.Items))
- 	for i, item := range ds.Items {
- 		if item.ID == "" {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
-@@ -54,6 +55,10 @@
- 		if item.Text == "" {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
- 		}
-+		if _, exists := seenIDs[item.ID]; exists {
-+			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
-+		}
-+		seenIDs[item.ID] = struct{}{}
- 	}
- 	return raw, ds, nil
- }
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 8228bf435f0da3463cf3b975e968e91a3909086e..04ae8fb90312924973356edf9c52a91c2cc93bc5
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -215,6 +215,17 @@
- 	}
- }
- 
-+func TestValidateDatasetJSON_RejectsDuplicateIDs(t *testing.T) {
-+	dataset := `{"items":[{"id":"1","text":"hello"},{"id":"1","text":"world"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+	})
-+	datasetFile := form.File["dataset"][0]
-+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-+		t.Fatalf("expected error for duplicate dataset ids")
-+	}
-+}
-+
- func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
- 	spec := Spec{
- 		SchemaVersion: 1,
-
- succeeded in 1.11s:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 203ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	0.032s
+ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index b4398821905c29c555e265725408d45087175614..67e01e13dfcef59fbaf7f1ce12fb5b3a0d3370d1
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -1066,6 +1066,16 @@
+   }
+ }
+ 
++@media (prefers-reduced-motion: reduce) {
++  *,
++  *::before,
++  *::after {
++    animation-duration: 0.001ms !important;
++    animation-iteration-count: 1 !important;
++    transition-duration: 0.001ms !important;
++  }
++}
++
+ /* ===== Public Verify ===== */
+ .main-verify {
+   align-items: flex-start;
+
 
 thinking
-**Verifying command completion and input status**
-file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 004f38e213b54bac8b0ff27a20e1d3a9c090b37f..97fa69fff87ebf6b84ec903b2e8fa3cb8ae657a0
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -47,6 +47,7 @@
- 	if len(ds.Items) == 0 {
- 		return nil, Dataset{}, fmt.Errorf("dataset.items must be a non-empty array")
- 	}
-+	seenIDs := make(map[string]struct{}, len(ds.Items))
- 	for i, item := range ds.Items {
- 		if item.ID == "" {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
-@@ -54,6 +55,10 @@
- 		if item.Text == "" {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
- 		}
-+		if _, exists := seenIDs[item.ID]; exists {
-+			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
-+		}
-+		seenIDs[item.ID] = struct{}{}
- 	}
- 	return raw, ds, nil
- }
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 8228bf435f0da3463cf3b975e968e91a3909086e..04ae8fb90312924973356edf9c52a91c2cc93bc5
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -215,6 +215,17 @@
- 	}
- }
- 
-+func TestValidateDatasetJSON_RejectsDuplicateIDs(t *testing.T) {
-+	dataset := `{"items":[{"id":"1","text":"hello"},{"id":"1","text":"world"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+	})
-+	datasetFile := form.File["dataset"][0]
-+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-+		t.Fatalf("expected error for duplicate dataset ids")
-+	}
-+}
-+
- func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
- 	spec := Spec{
- 		SchemaVersion: 1,
-
+**Preparing final response with changes and tests**
 codex
 What you changed (short)
-- Added dataset item ID uniqueness validation in `internal/evaluate/dataset.go`.
-- Added a test covering duplicate dataset IDs in `internal/evaluate/handler_test.go`.
+- Added a reduced-motion mode to respect OS accessibility preferences and minimize animation/transition motion for sensitive users in `web/static/styles.css`.
 
 Tests run (must include go test ./...)
 - `go test ./...`
 
-If you want another iteration, tell me to continue.
+If you want another iteration, pick a focus (A–G) and I’ll continue.
 file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 004f38e213b54bac8b0ff27a20e1d3a9c090b37f..97fa69fff87ebf6b84ec903b2e8fa3cb8ae657a0
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -47,6 +47,7 @@
- 	if len(ds.Items) == 0 {
- 		return nil, Dataset{}, fmt.Errorf("dataset.items must be a non-empty array")
- 	}
-+	seenIDs := make(map[string]struct{}, len(ds.Items))
- 	for i, item := range ds.Items {
- 		if item.ID == "" {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
-@@ -54,6 +55,10 @@
- 		if item.Text == "" {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
- 		}
-+		if _, exists := seenIDs[item.ID]; exists {
-+			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
-+		}
-+		seenIDs[item.ID] = struct{}{}
- 	}
- 	return raw, ds, nil
- }
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 8228bf435f0da3463cf3b975e968e91a3909086e..04ae8fb90312924973356edf9c52a91c2cc93bc5
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -215,6 +215,17 @@
- 	}
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index b4398821905c29c555e265725408d45087175614..67e01e13dfcef59fbaf7f1ce12fb5b3a0d3370d1
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -1066,6 +1066,16 @@
+   }
  }
  
-+func TestValidateDatasetJSON_RejectsDuplicateIDs(t *testing.T) {
-+	dataset := `{"items":[{"id":"1","text":"hello"},{"id":"1","text":"world"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+	})
-+	datasetFile := form.File["dataset"][0]
-+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-+		t.Fatalf("expected error for duplicate dataset ids")
-+	}
++@media (prefers-reduced-motion: reduce) {
++  *,
++  *::before,
++  *::after {
++    animation-duration: 0.001ms !important;
++    animation-iteration-count: 1 !important;
++    transition-duration: 0.001ms !important;
++  }
 +}
 +
- func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
- 	spec := Spec{
- 		SchemaVersion: 1,
+ /* ===== Public Verify ===== */
+ .main-verify {
+   align-items: flex-start;
 
 tokens used
-19,010
+18,286
 What you changed (short)
-- Added dataset item ID uniqueness validation in `internal/evaluate/dataset.go`.
-- Added a test covering duplicate dataset IDs in `internal/evaluate/handler_test.go`.
+- Added a reduced-motion mode to respect OS accessibility preferences and minimize animation/transition motion for sensitive users in `web/static/styles.css`.
 
 Tests run (must include go test ./...)
 - `go test ./...`
 
-If you want another iteration, tell me to continue.
+If you want another iteration, pick a focus (A–G) and I’ll continue.
