@@ -7,7 +7,7 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3c8a-f51d-7e82-8484-65b11c8c8999
+session id: 019c3ed3-3151-7c10-ac8d-a2861bd0a694
 --------
 user
 You are an autonomous coding agent polishing the Noema repository.
@@ -18,8 +18,9 @@ Hard rules:
 - Keep changes small: max 3 files per iteration.
 - No cosmetic-only edits.
 - No new dependencies unless absolutely necessary.
+- keep all the same ui functionality, the end user should be able to do the same stuff but the experiance and design should be better.
 
-Goal: continuously improve production quality.
+Goal: continuously improve production quality. continuously improve front end quality and polish.
 
 Iteration:
 1) Run: cd backend && go test ./...
@@ -29,7 +30,7 @@ Iteration:
 Pick the highest-value improvement:
 A) Reliability/correctness: validation, error handling, run persistence, verify robustness
 B) Tests: add/strengthen tests for the change you made
-C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+C) upgrading the user interface so that it looks better.
 D) Maintainability: reduce duplication with tiny refactors
 E) UX: wizard/results/verify clarity (small, safe changes)
 F) Docs: README/DEPLOYMENT polish
@@ -41,993 +42,659 @@ Finish with:
 mcp startup: no servers
 
 thinking
-**Running go test**
-
-I'm running the Go tests using exec_command to check the current test results.
+**Running tests using exec**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 301ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 207ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
 ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
 
 thinking
-**Planning targeted improvement**
+**Preparing to explore front-end tests**
 
-Tests pass, so I'm reviewing the repo to pick a meaningful improvement affecting at most three files, considering TODOs and error handling as candidates.
+I'll inspect the repo, focusing on the internal/web directory via search to identify relevant front-end test files for targeted improvements.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME|panic|Must|nil" internal | head -100' in /Users/yani/Noema/backend succeeded in 51ms:
-internal/session/session.go:19:	sig := hex.EncodeToString(mac.Sum(nil))
-internal/session/session.go:32:	if err != nil || len(sig) != sha256.Size {
-internal/session/session.go:36:	if err != nil {
-internal/session/session.go:42:	expected := mac.Sum(nil)
-internal/evaluate/parse.go:18:	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
-internal/evaluate/parse.go:21:	return spec, nil
-internal/evaluate/parse.go:44:	return nil
-internal/evaluate/parse.go:50:		return nil, nil, fmt.Errorf("missing required file: dataset")
-internal/evaluate/parse.go:53:		return nil, nil, fmt.Errorf("only one dataset file allowed")
-internal/evaluate/parse.go:57:		return nil, nil, fmt.Errorf("dataset exceeds 50MB limit")
-internal/evaluate/parse.go:61:		return nil, nil, fmt.Errorf("maximum 10 images allowed")
-internal/evaluate/parse.go:66:			return nil, nil, fmt.Errorf("image filenames must be unique")
-internal/evaluate/parse.go:70:			return nil, nil, fmt.Errorf("each image must be at most 5MB")
-internal/evaluate/parse.go:73:	if err := validateDatasetJSON(datasetFile, imageFiles); err != nil {
-internal/evaluate/parse.go:74:		return nil, nil, err
-internal/evaluate/parse.go:76:	return datasetFile, imageFiles, nil
-internal/evaluate/parse.go:81:	if err != nil {
-internal/evaluate/parse.go:90:		return nil
-internal/evaluate/parse.go:104:	return nil
-internal/verify/handler_test.go:31:	if err != nil {
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 51ms:
+cmd
+data
+go.mod
+go.sum
+internal
+main
+web
 
 thinking
-**Inspecting evaluation handler for validation**
-
-I'm opening evaluate/handler.go to check for missing input validation or content-type handling that could cause bugs.
+**Confirming frontend location**
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package evaluate
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web' in /Users/yani/Noema/backend succeeded in 52ms:
+static
+templates
 
-import (
-	"encoding/json"
-	"log"
-	"mime/multipart"
-	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
-	"time"
-
-	"noema/internal/config"
-	"noema/internal/zk"
-
-	"github.com/gin-gonic/gin"
-)
-
-// EvaluateResponse is the JSON response for POST /api/evaluate.
+thinking
+**Reviewing UI templates**
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
-	if err != nil {
-		return EvalOutput{}, err
-	}
-	if err := validateEvalOutput(out, enabled); err != nil {
-		return EvalOutput{}, err
-	}
-	return out, nil
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/templates' in /Users/yani/Noema/backend succeeded in 52ms:
+app.html
+app_new.html
+app_results.html
+index.html
+partial_header_app.html
+partial_header_public.html
+partial_header_upload.html
+partial_orb.html
+upload.html
+verify.html
+verify_results.html
+
+thinking
+**Inspecting CSS directory**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/static' in /Users/yani/Noema/backend succeeded in 51ms:
+app.js
+constraints.js
+results.js
+styles.css
+upload.js
+verify.js
+wizard.js
+
+thinking
+**Opening stylesheet**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap');
+
+:root {
+  --bg: #05060a;
+  --bg-card: rgba(9, 12, 18, 0.9);
+  --text: #f4f6fb;
+  --text-muted: #9aa3b2;
+  --accent: #45d4ff;
+  --accent-strong: #2c7bff;
+  --accent-glow: rgba(69, 212, 255, 0.35);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(69, 212, 255, 0.4);
+  --error: #f87171;
+  --success: #22c55e;
+  --warning: #fbbf24;
+  --shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
 }
 
-func stubEvalOutput(enabled map[string]ConstraintRule) EvalOutput {
-	out := EvalOutput{
-		SchemaVersion: 1,
-		Constraints:   make([]EvalConstraintResult, 0, len(enabled)),
-		MaxSeverity:   0,
-	}
-	for id := range enabled {
-		out.Constraints = append(out.Constraints, EvalConstraintResult{
-			ID:        id,
-			Severity:  0,
-			Rationale: "stub",
-
-thinking
-**Considering parseUploads for improvement**
+*,
+*::before,
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package evaluate
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '200,400p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent-glow);
+  animation: pulse 1.2s ease-in-out infinite;
+}
 
-import (
-	"encoding/json"
-	"fmt"
-	"mime/multipart"
-	"strings"
+@keyframes pulse {
+  0% { transform: scale(0.7); opacity: 0.5; }
+  50% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(0.7); opacity: 0.5; }
+}
 
-	"noema/internal/config"
-)
-
-func parseSpec(form *multipart.Form) (Spec, error) {
-	specStrs := form.Value["spec"]
-	if len(specStrs) == 0 || specStrs[0] == "" {
-		return Spec{}, fmt.Errorf("missing field: spec")
-	}
-	var spec Spec
-	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
-		return Spec{}, fmt.Errorf("invalid spec JSON")
-	}
+.card-kicker {
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  letter-spacing: 0.2em;
+  color: rgba(255, 255, 255, 0.5);
 
 thinking
-**Reviewing evaluation output parsing**
+**Reviewing results page styling**
 
-I'm checking the evaluation output parsing in output.go to confirm how parseEvalOutput handles large eval_output and if it uses form.Value, aiming to spot potential issues or duplicate data handling.
+Planning to examine the results page files like app_results to identify styling improvements, including possible inline styles or layout adjustments.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/output.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '400,800p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
 
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-)
+.recent-run-link {
+  color: var(--text);
+  text-decoration: none;
+}
+.recent-run-link:hover { color: var(--accent); }
 
-type EvalConstraintResult struct {
-	ID        string `json:"id"`
-	Severity  int    `json:"severity"`
-	Rationale string `json:"rationale"`
+.recent-run-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
 }
 
-type EvalOutput struct {
-	SchemaVersion int                    `json:"schema_version"`
-	Constraints   []EvalConstraintResult `json:"constraints"`
-	MaxSeverity   int                    `json:"max_severity"`
-	Confidence    *float64               `json:"confidence,omitempty"`
+.recent-run-name {
+  font-weight: 500;
+  color: var(--text);
 }
+
+.recent-run-meta {
 
 thinking
-**Identifying validation gaps**
+**Examining results page template**
 
-Considering adding output size limits to prevent resource issues and exploring stricter JSON parsing to avoid unknown fields, but uncertain about schema flexibility. Noting lack of duplicate constraint ID checks across constraints and custom constraints, which could impact correctness and enabled constraint mapping; planning to inspect those areas next.
+I'm reviewing the app_results.html template to identify UX improvements like adding a sticky header for better readability while preserving functionality.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/constraints.go" in /Users/yani/Noema/backend exited 1 in 52ms:
-sed: internal/evaluate/constraints.go: No such file or directory
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/templates/app_results.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "app_results"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Results</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body data-run-id="{{.RunID}}">
+  {{template "header_app" .}}
+
+  <main class="main main-results">
+    {{template "orb" .}}
+    <div class="card results-card">
+      <div class="results-header">
+        <div>
+          <h1 class="card-title">Evaluation results</h1>
+          <div class="results-runline">
+            <p class="text-muted" id="results-run-id">Run ID: <span class="results-run-id">{{.RunID}}</span></p>
 
 thinking
-**Locating target file**
+**Searching CSS results**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "enabledConstraints|ConstraintRule" internal/evaluate' in /Users/yani/Noema/backend succeeded in 51ms:
-internal/evaluate/output.go:49:func validateEvalOutput(out EvalOutput, enabled map[string]ConstraintRule) error {
-internal/evaluate/handler_test.go:65:	enabled, err := enabledConstraints(spec)
-internal/evaluate/handler_test.go:67:		t.Fatalf("enabledConstraints error: %v", err)
-internal/evaluate/handler_test.go:108:	enabled, err := enabledConstraints(spec)
-internal/evaluate/handler_test.go:110:		t.Fatalf("enabledConstraints error: %v", err)
-internal/evaluate/handler_test.go:146:	enabled, err := enabledConstraints(spec)
-internal/evaluate/handler_test.go:148:		t.Fatalf("enabledConstraints error: %v", err)
-internal/evaluate/handler_test.go:170:	enabled := map[string]ConstraintRule{
-internal/evaluate/policy.go:5:type ConstraintRule struct {
-internal/evaluate/policy.go:10:func enabledConstraints(spec Spec) (map[string]ConstraintRule, error) {
-internal/evaluate/policy.go:11:	out := make(map[string]ConstraintRule)
-internal/evaluate/policy.go:19:		out[c.ID] = ConstraintRule{ID: c.ID, AllowedMaxSeverity: c.AllowedMaxSeverity}
-internal/evaluate/policy.go:28:		out[c.ID] = ConstraintRule{ID: c.ID, AllowedMaxSeverity: c.AllowedMaxSeverity}
-internal/evaluate/policy.go:36:func computePolicyResult(out EvalOutput, enabled map[string]ConstraintRule) (overallPass bool, maxSeverity int, policyThreshold int) {
-internal/evaluate/gemini_eval.go:15:func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
-internal/evaluate/gemini_eval.go:30:func evalWithGemini(ctx context.Context, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) EvalOutput {
-internal/evaluate/handler.go:88:		enabled, err := enabledConstraints(spec)
-internal/evaluate/handler.go:214:func parseEvalOutputOptional(form *multipart.Form, enabled map[string]ConstraintRule) (EvalOutput, error) {
-internal/evaluate/handler.go:229:func stubEvalOutput(enabled map[string]ConstraintRule) EvalOutput {
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "results-" -n web/static/styles.css' in /Users/yani/Noema/backend succeeded in 52ms:
+54:.results-pre {
+861:.results-card {
+865:.results-header {
+873:.results-actions {
+879:.results-summary {
+887:.results-runline {
+894:.results-run-id {
+904:.results-status {
+913:.results-status-pass {
+919:.results-status-fail {
+925:.results-status-unknown {
+931:.results-summary-meta {
+936:.results-section {
+942:.results-section-header {
+950:.results-section-title {
+955:.results-section-actions {
+961:.results-constraints-list {
+968:.results-constraint-card {
+975:.results-constraint-card[data-verdict="pass"] {
+981:.results-constraint-card[data-verdict="fail"] {
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,160p' internal/evaluate/policy.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '840,1120p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
 
-import "fmt"
-
-type ConstraintRule struct {
-	ID                 string
-	AllowedMaxSeverity int
+.review-label {
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  flex: 0 0 auto;
 }
 
-func enabledConstraints(spec Spec) (map[string]ConstraintRule, error) {
-	out := make(map[string]ConstraintRule)
-	for _, c := range spec.Constraints {
-		if !c.Enabled {
-			continue
-		}
-		if _, exists := out[c.ID]; exists {
-			return nil, fmt.Errorf("duplicate constraint id: %s", c.ID)
-		}
-		out[c.ID] = ConstraintRule{ID: c.ID, AllowedMaxSeverity: c.AllowedMaxSeverity}
-	}
+.review-value {
+  color: var(--text);
+  font-weight: 500;
+  text-align: right;
+}
+
+/* ===== Results ===== */
+.main-results {
+  align-items: flex-start;
+  justify-content: center;
+}
 
 thinking
-**Considering stricter spec validation**
+**Considering meaningful UI improvements**
 
-I'm thinking about using JSON decoding with strict unknown field checks in the spec to catch errors early, balancing reliability against client compatibility risks. Also considering enhanced duplicate ID checks across all constraints, not just enabled ones, to improve clarity.
+I'm focusing on adding a functional enhancement like "copy to clipboard" feedback rather than purely cosmetic changes, and will check results.js to confirm existing features before proceeding.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' web/static/results.js" in /Users/yani/Noema/backend succeeded in 52ms:
+(function() {
+  var runId = document.body.getAttribute('data-run-id') || document.getElementById('results-run-id').textContent.replace('Run ID: ', '').trim();
+  var key = 'noema_run_' + runId;
+  var data;
+  try {
+    var raw = localStorage.getItem(key);
+    data = raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    data = null;
+  }
 
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io"
-	"mime/multipart"
-)
-
-type Dataset struct {
-	Items []DatasetItem `json:"items"`
-}
-
-type DatasetItem struct {
-	ID       string         `json:"id"`
-	Text     string         `json:"text"`
-	Metadata map[string]any `json:"metadata,omitempty"`
-	ImageRef string         `json:"image_ref,omitempty"`
-}
-
+  function copyText(text, button) {
+    if (!text) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function() {
+        if (button) showCopied(button);
+      });
+    } else {
+      var temp = document.createElement('textarea');
+      temp.value = text;
 
 thinking
-**Considering stricter JSON decoding**
+**Considering UI and reliability improvements**
 
-I'm evaluating using DisallowUnknownFields in dataset decoding to catch unexpected top-level keys while allowing arbitrary fields inside metadata maps; this could improve schema validation but requires careful handling since current decoding is two-pass and metadata needs to permit unknown fields.
-thinking
-**Planning stricter spec and dataset validation**
-
-I'm leaning toward enforcing DisallowUnknownFields for both spec and dataset to ensure correctness under schema_version 1, acknowledging this might break clients sending extra fields. Next, I'll review existing tests to support adding this strict decoding and ensure parseSpec uses a decoder with DisallowUnknownFields.
+I'm evaluating enhancing empty result handling, adding error handling for large localStorage, and improving feedback for copied run IDs. Also considering richer results summary info, better "Run not found" messaging with direct action links, and mobile-friendlier buttons, plus reviewing verification page for possible upgrades.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package evaluate
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' web/templates/verify.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "verify"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Verify</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_public" .}}
 
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"mime/multipart"
-	"net/textproto"
-	"os"
-	"path/filepath"
-	"sort"
-	"testing"
-	"time"
-)
+  <main class="main main-verify">
+    {{template "orb" .}}
+    <div class="card verify-card">
+      <div class="verify-header">
+        <div>
+          <div class="card-kicker">Public</div>
+          <h1 class="card-title">Public verification</h1>
+          <p class="card-text">Verify recent proofs without revealing datasets. Recent runs are loaded from this browser.</p>
 
-type formFile struct {
-	field       string
-	filename    string
-	contentType string
-	content     []byte
+thinking
+**Reviewing verify list card styles**
+
+I'm checking the CSS related to the verify list cards to identify possible improvements in their appearance or usability.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
-	form := buildMultipartForm(t, []formFile{
-		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-	})
-	datasetFile := form.File["dataset"][0]
-	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-		t.Fatalf("expected error for duplicate dataset ids")
-	}
-}
-
-func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
-	dataset := `{"items":[{"id":"1","text":"hello"}]}`
-	form := buildMultipartForm(t, []formFile{
-		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-		{field: "dataset", filename: "dataset2.json", contentType: "application/json", content: []byte(dataset)},
-	})
-	if _, _, err := parseUploads(form); err == nil {
-		t.Fatalf("expected error for multiple dataset files")
-	}
-}
-
-
-
-thinking
-**Planning strict JSON validation**
-
-I'm updating spec parsing to use a JSON decoder with DisallowUnknownFields and EOF checks for stricter validation, replacing json.Unmarshal. For datasets, I'll apply similar stricter decoding to ensure valid JSON and a single value, aligning error messages while keeping changes within three files.
-thinking
-**Refining dataset JSON validation**
-
-I'm keeping a two-pass dataset decode: first generic to check valid JSON and single value, then strict decode with DisallowUnknownFields for schema validation. This preserves clear error distinctions while replacing json.Unmarshal with decoder use.
-
-**Planning strict spec field rejection test**
-
-I'll add a test crafting a multipart form with a spec JSON including an unknown field to verify parseSpec rejects it via DisallowUnknownFields, ensuring proper error handling for unexpected spec fields.
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "verify-" -n web/static/styles.css' in /Users/yani/Noema/backend succeeded in 52ms:
+351:.verify-run-id:focus-visible,
+1145:.verify-card {
+1151:.verify-header {
+1159:.verify-muted { color: var(--text-muted); }
+1161:.verify-controls {
+1169:.verify-controls .form-group {
+1175:.verify-controls .input {
+1180:.verify-meta {
+1187:.verify-list {
+1193:.verify-row {
+1205:.verify-row:hover:not([data-verify="ok"]):not([data-verify="fail"]):not([data-verify="pending"]) {
+1210:.verify-row[data-verify="ok"] {
+1216:.verify-row[data-verify="fail"] {
+1222:.verify-row[data-verify="pending"] {
+1228:.verify-row[data-verify="idle"] {
+1233:.verify-main { min-width: 0; }
+1235:.verify-runline {
+1242:.verify-run-id {
+1247:.verify-run-id:hover { color: var(--accent); }
+1249:.verify-run-name {
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/spec.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1120,1350p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 51ms:
+  }
 
-// Spec is the parsed evaluation spec (schema_version 1).
-type Spec struct {
-	SchemaVersion     int                `json:"schema_version"`
-	EvaluationName    string             `json:"evaluation_name"`
-	Policy            Policy             `json:"policy"`
-	Constraints       []Constraint       `json:"constraints"`
-	CustomConstraints []CustomConstraint `json:"custom_constraints"`
+  .results-pre,
+  .dataset-preview {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
 }
 
-type Policy struct {
-	Reveal RevealPolicy `json:"reveal"`
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }
 
-type RevealPolicy struct {
-	MaxSeverity bool `json:"max_severity"`
-	Commitment  bool `json:"commitment"`
-}
+/* ===== Public Verify ===== */
 
+thinking
+**Considering localStorage and UI enhancement**
+
+The function already handles missing localStorage data well; improving persistence by loading from the server could be too extensive now. Adding a "copy run id" feature to the verify list in verify.js is a manageable next step.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' web/static/verify.js" in /Users/yani/Noema/backend succeeded in 51ms:
+(function() {
+  var STORAGE_KEY = 'noema_recent_runs';
+  var MAX_RECENT = 20;
+  var listEl = document.getElementById('verify-list');
+  var emptyEl = document.getElementById('verify-empty');
+  var filterInput = document.getElementById('verify-filter');
+  var countEl = document.getElementById('verify-count');
+  var progressEl = document.getElementById('verify-progress');
+  var verifyAllBtn = document.getElementById('verify-all');
+  var clearBtn = document.getElementById('verify-clear');
+
+  function loadRecentRuns() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      var runs = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(runs)) return [];
+      return runs.slice().sort(function(a, b) {
+        return (b.ts || 0) - (a.ts || 0);
+      });
+    } catch (e) {
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '240,480p' web/static/verify.js" in /Users/yani/Noema/backend succeeded in 52ms:
+    var filtered = runs.filter(function(r) {
+      if (!q) return true;
+      var runId = (r.run_id || '').toLowerCase();
+      var runName = (r.name || '').toLowerCase();
+      return runId.indexOf(q) !== -1 || runName.indexOf(q) !== -1;
+    });
+
+    listEl.innerHTML = '';
+    if (filtered.length === 0) {
+      emptyEl.style.display = 'block';
+      listEl.appendChild(emptyEl);
+    } else {
+      emptyEl.style.display = 'none';
+      filtered.slice(0, MAX_RECENT).forEach(function(r) {
+        listEl.appendChild(buildRow(r));
+      });
+    }
+
+    if (filtered.length) {
+      countEl.textContent = 'Showing ' + Math.min(filtered.length, MAX_RECENT) + ' of ' + filtered.length + ' runs';
 
 
 thinking
-**Adding strict unknown field validation**
+**Identifying UX and reliability improvements**
 
-I'm updating spec and dataset parsing to reject unknown JSON fields using DisallowUnknownFields, adding tests that confirm errors occur when unexpected fields appear in specs and datasets. Parsing updates span parse.go, dataset.go, and handler_test.go.
+Considering UX clarity enhancements like tooltips and ARIA live for verification status, plus handling localStorage failures more gracefully or fetching from the server. Also noting potential UI tweaks like disabling copy buttons when no data, adding JSON download options, and refining verify-all behavior to ignore rows lacking proofs for cleaner progress feedback.
 thinking
-**Enhancing dataset decoding with strict validation**
+**Planning UX enhancements without adding features**
 
-I'm refining dataset file reading to first decode generically, then re-decode with DisallowUnknownFields to enforce schema adherence, while considering eliminating redundant EOF checks to balance strictness and efficiency.
+Prioritizing experience improvements like sticky summaries, disabled-copy indicators with explanations, and better JSON readability while avoiding feature changes beyond existing functionality. Next, preparing to review app.html or index for potential layout improvements.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/templates/index.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "index"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_public" .}}
+
+  <main class="main">
+    {{template "orb" .}}
+    <div class="card">
+      <div class="card-kicker">Secure access</div>
+      <h1 class="card-title">Judge Key</h1>
+      <p class="card-text">Evaluation and uploads are gated. Public verification is always open.</p>
+      <form action="/auth" method="post" class="form">
+        <input type="password" name="judge_key" id="judge_key" class="input" placeholder="Enter judge key" autocomplete="off" value="{{.JudgeKeyVal}}" autofocus>
+
+thinking
+**Considering UI improvement for judge key**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' web/templates/upload.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "upload"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Upload</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_upload" .}}
+
+  <main class="main">
+    {{template "orb" .}}
+    <div class="card">
+      <h1 class="card-title">Upload</h1>
+      <form id="upload-form" action="/upload" method="post" enctype="multipart/form-data">
+        <label class="upload-zone" for="file-input" id="drop-zone">
+          <input type="file" name="file" id="file-input" accept="*" data-max-bytes="{{.MaxBytes}}" data-max-bytes-label="{{.MaxBytesLabel}}" aria-describedby="upload-hint upload-client-error">
+          <span id="zone-text">Drag and drop a file here, or click to choose</span>
+
+thinking
+**Noting UI improvements**
+
+Submission is now disabled until a file is selected; considering adding max byte size and type display next, with focus shifting to "app_new.html".
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' web/templates/app_new.html" in /Users/yani/Noema/backend succeeded in 51ms:
+{{define "app_new"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — New Evaluation</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_app" .}}
+
+  <main class="main main-wizard">
+    {{template "orb" .}}
+    <div class="wizard-card card">
+      <h1 class="card-title">New Evaluation</h1>
+      <div class="stepper" role="tablist">
+        <button type="button" class="stepper-step active" data-step="1" aria-selected="true">Dataset</button>
+        <span class="stepper-sep"></span>
+        <button type="button" class="stepper-step" data-step="2">Policy</button>
+
+thinking
+**Evaluating UI polish and progress indicator**
+
+The UI looks polished but could benefit from adding a progress indicator on the "Review & Run" page alongside the existing running state text; next I'll check the dashboard and app.html for improvement opportunities.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' web/templates/app.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "app"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Dashboard</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_app" .}}
+
+  <main class="main main-dashboard">
+    {{template "orb" .}}
+    <div class="dashboard-content">
+      <section class="card dashboard-hero">
+        <div class="card-kicker">Dashboard</div>
+        <h1 class="card-title">Evaluations</h1>
+        <p class="card-text">Run policy evaluations on your datasets and publish verifiable results.</p>
+        <div class="form-actions">
+
+thinking
+**Exploring meaningful accessibility improvements**
+
+Considering adding aria labels and keyboard accessibility tweaks in the verify and results pages; also evaluating reliability messaging when localStorage JSON parsing fails to provide a clearer fallback.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "results" -n internal web/static web/templates | head -n 40' in /Users/yani/Noema/backend succeeded in 52ms:
+web/static/app.js:79:        name.href = '/app/results/' + r.run_id;
+web/templates/verify_results.html:1:{{define "verify_results"}}
+web/templates/verify_results.html:13:  <main class="main main-results">
+web/templates/verify_results.html:15:    <div class="card results-card">
+web/templates/verify_results.html:16:      <div class="results-header">
+web/templates/verify_results.html:18:          <h1 class="card-title">Public results</h1>
+web/templates/verify_results.html:19:          <p class="verify-muted" id="results-run-id">Run ID: {{.RunID}}</p>
+web/templates/verify_results.html:21:        <div class="results-actions">
+web/templates/verify_results.html:25:      <div id="results-content">
+web/templates/verify_results.html:26:        <p class="verify-muted" id="results-loading">Loading…</p>
+web/templates/verify_results.html:27:        <div id="results-body" style="display:none;">
+web/templates/verify_results.html:28:          <div class="results-summary">
+web/templates/verify_results.html:29:            <div id="results-status" class="results-status"></div>
+web/templates/verify_results.html:30:            <div class="results-summary-meta" id="results-summary-meta"></div>
+web/templates/verify_results.html:32:          <section class="results-section" id="results-constraints">
+web/templates/verify_results.html:33:            <div class="results-section-header">
+web/templates/verify_results.html:34:              <h2 class="results-section-title">Constraint summary</h2>
+web/templates/verify_results.html:36:            <div class="results-constraints-list" id="results-constraints-list"></div>
+web/templates/verify_results.html:38:          <section class="results-section" id="results-public-output">
+web/templates/verify_results.html:39:            <div class="results-section-header">
+
+thinking
+**Checking results page for run ID**
+
+I'm examining verify_results.html to see if it can be improved to display the run ID in the verify results page.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,120p' web/templates/verify_results.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "verify_results"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Verify Results</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body data-run-id="{{.RunID}}">
+  {{template "header_public" .}}
+
+  <main class="main main-results">
+    {{template "orb" .}}
+    <div class="card results-card">
+      <div class="results-header">
+        <div>
+          <h1 class="card-title">Public results</h1>
+          <p class="verify-muted" id="results-run-id">Run ID: {{.RunID}}</p>
+        </div>
+
+
+thinking
+**Planning run ID copy button addition**
+
+I'm preparing to add a copy-to-clipboard button for the run ID on verify_results to match app_results, improving UX by enabling easy copying. This will involve updating verify_results.html to include the button and a runline wrapper using the existing CSS class, while leveraging results.js's current copy handler.
+thinking
+**Detailing run ID copy button markup**
+
+I'll add a results-runline div with a styled run ID span and a copy button in verify_results.html to replicate app_results structure, ensuring existing results.js handles copying correctly without other file changes.
 file update
-M /Users/yani/Noema/backend/internal/evaluate/parse.go
-@@ -5,2 +5,3 @@
- 	"fmt"
-+	"io"
- 	"mime/multipart"
-@@ -17,3 +18,8 @@
- 	var spec Spec
--	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
-+	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
-+	dec.DisallowUnknownFields()
-+	if err := dec.Decode(&spec); err != nil {
-+		return Spec{}, fmt.Errorf("invalid spec JSON")
-+	}
-+	if err := dec.Decode(&struct{}{}); err != io.EOF {
- 		return Spec{}, fmt.Errorf("invalid spec JSON")
-apply_patch(auto_approved=true) exited 0 in 30ms:
+M /Users/yani/Noema/backend/web/templates/verify_results.html
+@@ -18,3 +18,6 @@
+           <h1 class="card-title">Public results</h1>
+-          <p class="verify-muted" id="results-run-id">Run ID: {{.RunID}}</p>
++          <div class="results-runline">
++            <p class="verify-muted" id="results-run-id">Run ID: <span class="results-run-id">{{.RunID}}</span></p>
++            <button type="button" class="btn btn-ghost btn-sm" id="copy-run-id">Copy Run ID</button>
++          </div>
+         </div>
+apply_patch(auto_approved=true) exited 0 in 27ms:
 Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/parse.go
+M /Users/yani/Noema/backend/web/templates/verify_results.html
 file update:
-diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
-index e0245ab5f0766803235fb31405e5c90a03ed180d..1bdabd2155f1907fa9725b41753a1d9e5c2f4250
---- a/backend/internal/evaluate/parse.go
-+++ b/backend/internal/evaluate/parse.go
-@@ -3,6 +3,7 @@
- import (
- 	"encoding/json"
- 	"fmt"
-+	"io"
- 	"mime/multipart"
- 	"strings"
- 
-@@ -15,7 +16,12 @@
- 		return Spec{}, fmt.Errorf("missing field: spec")
- 	}
- 	var spec Spec
--	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
-+	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
-+	dec.DisallowUnknownFields()
-+	if err := dec.Decode(&spec); err != nil {
-+		return Spec{}, fmt.Errorf("invalid spec JSON")
-+	}
-+	if err := dec.Decode(&struct{}{}); err != io.EOF {
- 		return Spec{}, fmt.Errorf("invalid spec JSON")
- 	}
- 	return spec, nil
+diff --git a/backend/web/templates/verify_results.html b/backend/web/templates/verify_results.html
+index 598f6948bded9e696ff5339d71f9b573184936ff..dc9fc2b046bb7ba209a63c154aa524c43484c567
+--- a/backend/web/templates/verify_results.html
++++ b/backend/web/templates/verify_results.html
+@@ -16,7 +16,10 @@
+       <div class="results-header">
+         <div>
+           <h1 class="card-title">Public results</h1>
+-          <p class="verify-muted" id="results-run-id">Run ID: {{.RunID}}</p>
++          <div class="results-runline">
++            <p class="verify-muted" id="results-run-id">Run ID: <span class="results-run-id">{{.RunID}}</span></p>
++            <button type="button" class="btn btn-ghost btn-sm" id="copy-run-id">Copy Run ID</button>
++          </div>
+         </div>
+         <div class="results-actions">
+           <a href="/verify" class="btn btn-ghost">Back to Verify</a>
 
 file update:
-diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
-index e0245ab5f0766803235fb31405e5c90a03ed180d..1bdabd2155f1907fa9725b41753a1d9e5c2f4250
---- a/backend/internal/evaluate/parse.go
-+++ b/backend/internal/evaluate/parse.go
-@@ -3,6 +3,7 @@
- import (
- 	"encoding/json"
- 	"fmt"
-+	"io"
- 	"mime/multipart"
- 	"strings"
- 
-@@ -15,7 +16,12 @@
- 		return Spec{}, fmt.Errorf("missing field: spec")
- 	}
- 	var spec Spec
--	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
-+	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
-+	dec.DisallowUnknownFields()
-+	if err := dec.Decode(&spec); err != nil {
-+		return Spec{}, fmt.Errorf("invalid spec JSON")
-+	}
-+	if err := dec.Decode(&struct{}{}); err != io.EOF {
- 		return Spec{}, fmt.Errorf("invalid spec JSON")
- 	}
- 	return spec, nil
+diff --git a/backend/web/templates/verify_results.html b/backend/web/templates/verify_results.html
+index 598f6948bded9e696ff5339d71f9b573184936ff..dc9fc2b046bb7ba209a63c154aa524c43484c567
+--- a/backend/web/templates/verify_results.html
++++ b/backend/web/templates/verify_results.html
+@@ -16,7 +16,10 @@
+       <div class="results-header">
+         <div>
+           <h1 class="card-title">Public results</h1>
+-          <p class="verify-muted" id="results-run-id">Run ID: {{.RunID}}</p>
++          <div class="results-runline">
++            <p class="verify-muted" id="results-run-id">Run ID: <span class="results-run-id">{{.RunID}}</span></p>
++            <button type="button" class="btn btn-ghost btn-sm" id="copy-run-id">Copy Run ID</button>
++          </div>
+         </div>
+         <div class="results-actions">
+           <a href="/verify" class="btn btn-ghost">Back to Verify</a>
 
 
 thinking
-**Updating dataset.go**
-file update
-M /Users/yani/Noema/backend/internal/evaluate/dataset.go
-@@ -43,3 +43,5 @@
- 	var ds Dataset
--	if err := json.Unmarshal(raw, &ds); err != nil {
-+	dec = json.NewDecoder(bytes.NewReader(raw))
-+	dec.DisallowUnknownFields()
-+	if err := dec.Decode(&ds); err != nil {
- 		return nil, Dataset{}, fmt.Errorf("dataset must match schema")
-apply_patch(auto_approved=true) exited 0 in 36ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/dataset.go
-file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 97fa69fff87ebf6b84ec903b2e8fa3cb8ae657a0..3c407a6426f3acc932c81e6750b6089793597e8d
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -41,7 +41,9 @@
- 	}
- 
- 	var ds Dataset
--	if err := json.Unmarshal(raw, &ds); err != nil {
-+	dec = json.NewDecoder(bytes.NewReader(raw))
-+	dec.DisallowUnknownFields()
-+	if err := dec.Decode(&ds); err != nil {
- 		return nil, Dataset{}, fmt.Errorf("dataset must match schema")
- 	}
- 	if len(ds.Items) == 0 {
-diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
-index e0245ab5f0766803235fb31405e5c90a03ed180d..1bdabd2155f1907fa9725b41753a1d9e5c2f4250
---- a/backend/internal/evaluate/parse.go
-+++ b/backend/internal/evaluate/parse.go
-@@ -3,6 +3,7 @@
- import (
- 	"encoding/json"
- 	"fmt"
-+	"io"
- 	"mime/multipart"
- 	"strings"
- 
-@@ -15,7 +16,12 @@
- 		return Spec{}, fmt.Errorf("missing field: spec")
- 	}
- 	var spec Spec
--	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
-+	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
-+	dec.DisallowUnknownFields()
-+	if err := dec.Decode(&spec); err != nil {
-+		return Spec{}, fmt.Errorf("invalid spec JSON")
-+	}
-+	if err := dec.Decode(&struct{}{}); err != io.EOF {
- 		return Spec{}, fmt.Errorf("invalid spec JSON")
- 	}
- 	return spec, nil
-
-file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 97fa69fff87ebf6b84ec903b2e8fa3cb8ae657a0..3c407a6426f3acc932c81e6750b6089793597e8d
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -41,7 +41,9 @@
- 	}
- 
- 	var ds Dataset
--	if err := json.Unmarshal(raw, &ds); err != nil {
-+	dec = json.NewDecoder(bytes.NewReader(raw))
-+	dec.DisallowUnknownFields()
-+	if err := dec.Decode(&ds); err != nil {
- 		return nil, Dataset{}, fmt.Errorf("dataset must match schema")
- 	}
- 	if len(ds.Items) == 0 {
-diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
-index e0245ab5f0766803235fb31405e5c90a03ed180d..1bdabd2155f1907fa9725b41753a1d9e5c2f4250
---- a/backend/internal/evaluate/parse.go
-+++ b/backend/internal/evaluate/parse.go
-@@ -3,6 +3,7 @@
- import (
- 	"encoding/json"
- 	"fmt"
-+	"io"
- 	"mime/multipart"
- 	"strings"
- 
-@@ -15,7 +16,12 @@
- 		return Spec{}, fmt.Errorf("missing field: spec")
- 	}
- 	var spec Spec
--	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
-+	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
-+	dec.DisallowUnknownFields()
-+	if err := dec.Decode(&spec); err != nil {
-+		return Spec{}, fmt.Errorf("invalid spec JSON")
-+	}
-+	if err := dec.Decode(&struct{}{}); err != io.EOF {
- 		return Spec{}, fmt.Errorf("invalid spec JSON")
- 	}
- 	return spec, nil
-
-
-thinking
-**Adding tests for parseSpec and dataset validation**
-
-I'm preparing to add tests in handler_test.go using multipart.Form for parseSpec with extra unknown fields to ensure it errors correctly without calling validate, and for dataset JSON with unknown fields to confirm schema validation fails as expected.
-file update
-M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
-@@ -228,2 +228,13 @@
- 
-+func TestValidateDatasetJSON_RejectsUnknownFields(t *testing.T) {
-+	dataset := `{"items":[{"id":"1","text":"hello","extra":"nope"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+	})
-+	datasetFile := form.File["dataset"][0]
-+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-+		t.Fatalf("expected error for unknown dataset fields")
-+	}
-+}
-+
- func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
-@@ -276,2 +287,13 @@
- 
-+func TestParseSpec_RejectsUnknownFields(t *testing.T) {
-+	form := &multipart.Form{
-+		Value: map[string][]string{
-+			"spec": {`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[],"extra":true}`},
-+		},
-+	}
-+	if _, err := parseSpec(form); err == nil {
-+		t.Fatalf("expected error for unknown spec fields")
-+	}
-+}
-+
- func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
-apply_patch(auto_approved=true) exited 0 in 43ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
-file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 97fa69fff87ebf6b84ec903b2e8fa3cb8ae657a0..3c407a6426f3acc932c81e6750b6089793597e8d
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -41,7 +41,9 @@
- 	}
- 
- 	var ds Dataset
--	if err := json.Unmarshal(raw, &ds); err != nil {
-+	dec = json.NewDecoder(bytes.NewReader(raw))
-+	dec.DisallowUnknownFields()
-+	if err := dec.Decode(&ds); err != nil {
- 		return nil, Dataset{}, fmt.Errorf("dataset must match schema")
- 	}
- 	if len(ds.Items) == 0 {
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index f456593dd1b6d6e8f1c6db2425313749347a13d3..fa17d3d6c8a1a5e7e04b55620d7e537c9af5cb1f
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -226,6 +226,17 @@
- 	}
- }
- 
-+func TestValidateDatasetJSON_RejectsUnknownFields(t *testing.T) {
-+	dataset := `{"items":[{"id":"1","text":"hello","extra":"nope"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+	})
-+	datasetFile := form.File["dataset"][0]
-+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-+		t.Fatalf("expected error for unknown dataset fields")
-+	}
-+}
-+
- func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
- 	dataset := `{"items":[{"id":"1","text":"hello"}]}`
- 	form := buildMultipartForm(t, []formFile{
-@@ -274,6 +285,17 @@
- 	}
- }
- 
-+func TestParseSpec_RejectsUnknownFields(t *testing.T) {
-+	form := &multipart.Form{
-+		Value: map[string][]string{
-+			"spec": {`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[],"extra":true}`},
-+		},
-+	}
-+	if _, err := parseSpec(form); err == nil {
-+		t.Fatalf("expected error for unknown spec fields")
-+	}
-+}
-+
- func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
- 	base := t.TempDir()
- 
-diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
-index e0245ab5f0766803235fb31405e5c90a03ed180d..1bdabd2155f1907fa9725b41753a1d9e5c2f4250
---- a/backend/internal/evaluate/parse.go
-+++ b/backend/internal/evaluate/parse.go
-@@ -3,6 +3,7 @@
- import (
- 	"encoding/json"
- 	"fmt"
-+	"io"
- 	"mime/multipart"
- 	"strings"
- 
-@@ -15,7 +16,12 @@
- 		return Spec{}, fmt.Errorf("missing field: spec")
- 	}
- 	var spec Spec
--	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
-+	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
-+	dec.DisallowUnknownFields()
-+	if err := dec.Decode(&spec); err != nil {
-+		return Spec{}, fmt.Errorf("invalid spec JSON")
-+	}
-+	if err := dec.Decode(&struct{}{}); err != io.EOF {
- 		return Spec{}, fmt.Errorf("invalid spec JSON")
- 	}
- 	return spec, nil
-
-file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 97fa69fff87ebf6b84ec903b2e8fa3cb8ae657a0..3c407a6426f3acc932c81e6750b6089793597e8d
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -41,7 +41,9 @@
- 	}
- 
- 	var ds Dataset
--	if err := json.Unmarshal(raw, &ds); err != nil {
-+	dec = json.NewDecoder(bytes.NewReader(raw))
-+	dec.DisallowUnknownFields()
-+	if err := dec.Decode(&ds); err != nil {
- 		return nil, Dataset{}, fmt.Errorf("dataset must match schema")
- 	}
- 	if len(ds.Items) == 0 {
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index f456593dd1b6d6e8f1c6db2425313749347a13d3..fa17d3d6c8a1a5e7e04b55620d7e537c9af5cb1f
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -226,6 +226,17 @@
- 	}
- }
- 
-+func TestValidateDatasetJSON_RejectsUnknownFields(t *testing.T) {
-+	dataset := `{"items":[{"id":"1","text":"hello","extra":"nope"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+	})
-+	datasetFile := form.File["dataset"][0]
-+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-+		t.Fatalf("expected error for unknown dataset fields")
-+	}
-+}
-+
- func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
- 	dataset := `{"items":[{"id":"1","text":"hello"}]}`
- 	form := buildMultipartForm(t, []formFile{
-@@ -274,6 +285,17 @@
- 	}
- }
- 
-+func TestParseSpec_RejectsUnknownFields(t *testing.T) {
-+	form := &multipart.Form{
-+		Value: map[string][]string{
-+			"spec": {`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[],"extra":true}`},
-+		},
-+	}
-+	if _, err := parseSpec(form); err == nil {
-+		t.Fatalf("expected error for unknown spec fields")
-+	}
-+}
-+
- func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
- 	base := t.TempDir()
- 
-diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
-index e0245ab5f0766803235fb31405e5c90a03ed180d..1bdabd2155f1907fa9725b41753a1d9e5c2f4250
---- a/backend/internal/evaluate/parse.go
-+++ b/backend/internal/evaluate/parse.go
-@@ -3,6 +3,7 @@
- import (
- 	"encoding/json"
- 	"fmt"
-+	"io"
- 	"mime/multipart"
- 	"strings"
- 
-@@ -15,7 +16,12 @@
- 		return Spec{}, fmt.Errorf("missing field: spec")
- 	}
- 	var spec Spec
--	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
-+	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
-+	dec.DisallowUnknownFields()
-+	if err := dec.Decode(&spec); err != nil {
-+		return Spec{}, fmt.Errorf("invalid spec JSON")
-+	}
-+	if err := dec.Decode(&struct{}{}); err != io.EOF {
- 		return Spec{}, fmt.Errorf("invalid spec JSON")
- 	}
- 	return spec, nil
-
-
-thinking
-**Rechecking Go tests**
-
-I'm preparing to run all Go tests again to verify formatting and correctness, noting that tabs are acceptable in the tests.
+**Running full Go test suite**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backendfile update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 97fa69fff87ebf6b84ec903b2e8fa3cb8ae657a0..3c407a6426f3acc932c81e6750b6089793597e8d
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -41,7 +41,9 @@
- 	}
- 
- 	var ds Dataset
--	if err := json.Unmarshal(raw, &ds); err != nil {
-+	dec = json.NewDecoder(bytes.NewReader(raw))
-+	dec.DisallowUnknownFields()
-+	if err := dec.Decode(&ds); err != nil {
- 		return nil, Dataset{}, fmt.Errorf("dataset must match schema")
- 	}
- 	if len(ds.Items) == 0 {
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index f456593dd1b6d6e8f1c6db2425313749347a13d3..fa17d3d6c8a1a5e7e04b55620d7e537c9af5cb1f
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -226,6 +226,17 @@
- 	}
- }
- 
-+func TestValidateDatasetJSON_RejectsUnknownFields(t *testing.T) {
-+	dataset := `{"items":[{"id":"1","text":"hello","extra":"nope"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+	})
-+	datasetFile := form.File["dataset"][0]
-+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-+		t.Fatalf("expected error for unknown dataset fields")
-+	}
-+}
-+
- func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
- 	dataset := `{"items":[{"id":"1","text":"hello"}]}`
- 	form := buildMultipartForm(t, []formFile{
-@@ -274,6 +285,17 @@
- 	}
- }
- 
-+func TestParseSpec_RejectsUnknownFields(t *testing.T) {
-+	form := &multipart.Form{
-+		Value: map[string][]string{
-+			"spec": {`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[],"extra":true}`},
-+		},
-+	}
-+	if _, err := parseSpec(form); err == nil {
-+		t.Fatalf("expected error for unknown spec fields")
-+	}
-+}
-+
- func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
- 	base := t.TempDir()
- 
-diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
-index e0245ab5f0766803235fb31405e5c90a03ed180d..1bdabd2155f1907fa9725b41753a1d9e5c2f4250
---- a/backend/internal/evaluate/parse.go
-+++ b/backend/internal/evaluate/parse.go
-@@ -3,6 +3,7 @@
- import (
- 	"encoding/json"
- 	"fmt"
-+	"io"
- 	"mime/multipart"
- 	"strings"
- 
-@@ -15,7 +16,12 @@
- 		return Spec{}, fmt.Errorf("missing field: spec")
- 	}
- 	var spec Spec
--	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
-+	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
-+	dec.DisallowUnknownFields()
-+	if err := dec.Decode(&spec); err != nil {
-+		return Spec{}, fmt.Errorf("invalid spec JSON")
-+	}
-+	if err := dec.Decode(&struct{}{}); err != io.EOF {
- 		return Spec{}, fmt.Errorf("invalid spec JSON")
- 	}
- 	return spec, nil
-
- succeeded in 1.96s:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 202ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	0.031s
+ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
 file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 97fa69fff87ebf6b84ec903b2e8fa3cb8ae657a0..3c407a6426f3acc932c81e6750b6089793597e8d
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -41,7 +41,9 @@
- 	}
- 
- 	var ds Dataset
--	if err := json.Unmarshal(raw, &ds); err != nil {
-+	dec = json.NewDecoder(bytes.NewReader(raw))
-+	dec.DisallowUnknownFields()
-+	if err := dec.Decode(&ds); err != nil {
- 		return nil, Dataset{}, fmt.Errorf("dataset must match schema")
- 	}
- 	if len(ds.Items) == 0 {
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index f456593dd1b6d6e8f1c6db2425313749347a13d3..fa17d3d6c8a1a5e7e04b55620d7e537c9af5cb1f
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -226,6 +226,17 @@
- 	}
- }
- 
-+func TestValidateDatasetJSON_RejectsUnknownFields(t *testing.T) {
-+	dataset := `{"items":[{"id":"1","text":"hello","extra":"nope"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+	})
-+	datasetFile := form.File["dataset"][0]
-+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-+		t.Fatalf("expected error for unknown dataset fields")
-+	}
-+}
-+
- func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
- 	dataset := `{"items":[{"id":"1","text":"hello"}]}`
- 	form := buildMultipartForm(t, []formFile{
-@@ -274,6 +285,17 @@
- 	}
- }
- 
-+func TestParseSpec_RejectsUnknownFields(t *testing.T) {
-+	form := &multipart.Form{
-+		Value: map[string][]string{
-+			"spec": {`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[],"extra":true}`},
-+		},
-+	}
-+	if _, err := parseSpec(form); err == nil {
-+		t.Fatalf("expected error for unknown spec fields")
-+	}
-+}
-+
- func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
- 	base := t.TempDir()
- 
-diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
-index e0245ab5f0766803235fb31405e5c90a03ed180d..1bdabd2155f1907fa9725b41753a1d9e5c2f4250
---- a/backend/internal/evaluate/parse.go
-+++ b/backend/internal/evaluate/parse.go
-@@ -3,6 +3,7 @@
- import (
- 	"encoding/json"
- 	"fmt"
-+	"io"
- 	"mime/multipart"
- 	"strings"
- 
-@@ -15,7 +16,12 @@
- 		return Spec{}, fmt.Errorf("missing field: spec")
- 	}
- 	var spec Spec
--	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
-+	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
-+	dec.DisallowUnknownFields()
-+	if err := dec.Decode(&spec); err != nil {
-+		return Spec{}, fmt.Errorf("invalid spec JSON")
-+	}
-+	if err := dec.Decode(&struct{}{}); err != io.EOF {
- 		return Spec{}, fmt.Errorf("invalid spec JSON")
- 	}
- 	return spec, nil
+diff --git a/backend/web/templates/verify_results.html b/backend/web/templates/verify_results.html
+index 598f6948bded9e696ff5339d71f9b573184936ff..dc9fc2b046bb7ba209a63c154aa524c43484c567
+--- a/backend/web/templates/verify_results.html
++++ b/backend/web/templates/verify_results.html
+@@ -16,7 +16,10 @@
+       <div class="results-header">
+         <div>
+           <h1 class="card-title">Public results</h1>
+-          <p class="verify-muted" id="results-run-id">Run ID: {{.RunID}}</p>
++          <div class="results-runline">
++            <p class="verify-muted" id="results-run-id">Run ID: <span class="results-run-id">{{.RunID}}</span></p>
++            <button type="button" class="btn btn-ghost btn-sm" id="copy-run-id">Copy Run ID</button>
++          </div>
+         </div>
+         <div class="results-actions">
+           <a href="/verify" class="btn btn-ghost">Back to Verify</a>
 
-
-thinking
-**Summarizing changes and tests**
-
-I've added strict JSON parsing for both spec and dataset inputs to improve robustness. The key files changed include the main parser handling these inputs and the tests covering edge cases for invalid JSON. Tests run verify correct parsing behavior and error handling on malformed data.
 codex
-What you changed
-- Enforced strict JSON decoding for `spec` (disallow unknown fields, single value) and dataset schema (disallow unknown fields).
-- Added tests to cover unknown fields in `spec` and dataset items.
+What you changed (short)
+- Added a Run ID copy button to public verify results to match the main results UX and make sharing/lookup faster. (`web/templates/verify_results.html`)
 
-Tests run
+Tests run (must include go test ./...)
 - `go test ./...`
+
+If you want another iteration, say the word and I’ll pick the next highest‑value improvement.
 file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 97fa69fff87ebf6b84ec903b2e8fa3cb8ae657a0..3c407a6426f3acc932c81e6750b6089793597e8d
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -41,7 +41,9 @@
- 	}
- 
- 	var ds Dataset
--	if err := json.Unmarshal(raw, &ds); err != nil {
-+	dec = json.NewDecoder(bytes.NewReader(raw))
-+	dec.DisallowUnknownFields()
-+	if err := dec.Decode(&ds); err != nil {
- 		return nil, Dataset{}, fmt.Errorf("dataset must match schema")
- 	}
- 	if len(ds.Items) == 0 {
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index f456593dd1b6d6e8f1c6db2425313749347a13d3..fa17d3d6c8a1a5e7e04b55620d7e537c9af5cb1f
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -226,6 +226,17 @@
- 	}
- }
- 
-+func TestValidateDatasetJSON_RejectsUnknownFields(t *testing.T) {
-+	dataset := `{"items":[{"id":"1","text":"hello","extra":"nope"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+	})
-+	datasetFile := form.File["dataset"][0]
-+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-+		t.Fatalf("expected error for unknown dataset fields")
-+	}
-+}
-+
- func TestParseUploads_RejectsMultipleDatasetFiles(t *testing.T) {
- 	dataset := `{"items":[{"id":"1","text":"hello"}]}`
- 	form := buildMultipartForm(t, []formFile{
-@@ -274,6 +285,17 @@
- 	}
- }
- 
-+func TestParseSpec_RejectsUnknownFields(t *testing.T) {
-+	form := &multipart.Form{
-+		Value: map[string][]string{
-+			"spec": {`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[],"extra":true}`},
-+		},
-+	}
-+	if _, err := parseSpec(form); err == nil {
-+		t.Fatalf("expected error for unknown spec fields")
-+	}
-+}
-+
- func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
- 	base := t.TempDir()
- 
-diff --git a/backend/internal/evaluate/parse.go b/backend/internal/evaluate/parse.go
-index e0245ab5f0766803235fb31405e5c90a03ed180d..1bdabd2155f1907fa9725b41753a1d9e5c2f4250
---- a/backend/internal/evaluate/parse.go
-+++ b/backend/internal/evaluate/parse.go
-@@ -3,6 +3,7 @@
- import (
- 	"encoding/json"
- 	"fmt"
-+	"io"
- 	"mime/multipart"
- 	"strings"
- 
-@@ -15,7 +16,12 @@
- 		return Spec{}, fmt.Errorf("missing field: spec")
- 	}
- 	var spec Spec
--	if err := json.Unmarshal([]byte(specStrs[0]), &spec); err != nil {
-+	dec := json.NewDecoder(strings.NewReader(specStrs[0]))
-+	dec.DisallowUnknownFields()
-+	if err := dec.Decode(&spec); err != nil {
-+		return Spec{}, fmt.Errorf("invalid spec JSON")
-+	}
-+	if err := dec.Decode(&struct{}{}); err != io.EOF {
- 		return Spec{}, fmt.Errorf("invalid spec JSON")
- 	}
- 	return spec, nil
+diff --git a/backend/web/templates/verify_results.html b/backend/web/templates/verify_results.html
+index 598f6948bded9e696ff5339d71f9b573184936ff..dc9fc2b046bb7ba209a63c154aa524c43484c567
+--- a/backend/web/templates/verify_results.html
++++ b/backend/web/templates/verify_results.html
+@@ -16,7 +16,10 @@
+       <div class="results-header">
+         <div>
+           <h1 class="card-title">Public results</h1>
+-          <p class="verify-muted" id="results-run-id">Run ID: {{.RunID}}</p>
++          <div class="results-runline">
++            <p class="verify-muted" id="results-run-id">Run ID: <span class="results-run-id">{{.RunID}}</span></p>
++            <button type="button" class="btn btn-ghost btn-sm" id="copy-run-id">Copy Run ID</button>
++          </div>
+         </div>
+         <div class="results-actions">
+           <a href="/verify" class="btn btn-ghost">Back to Verify</a>
 
 tokens used
-21,004
-What you changed
-- Enforced strict JSON decoding for `spec` (disallow unknown fields, single value) and dataset schema (disallow unknown fields).
-- Added tests to cover unknown fields in `spec` and dataset items.
+37,408
+What you changed (short)
+- Added a Run ID copy button to public verify results to match the main results UX and make sharing/lookup faster. (`web/templates/verify_results.html`)
 
-Tests run
+Tests run (must include go test ./...)
 - `go test ./...`
+
+If you want another iteration, say the word and I’ll pick the next highest‑value improvement.

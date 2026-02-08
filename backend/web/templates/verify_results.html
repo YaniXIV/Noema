@@ -16,7 +16,10 @@
       <div class="results-header">
         <div>
           <h1 class="card-title">Public results</h1>
-          <p class="verify-muted" id="results-run-id">Run ID: {{.RunID}}</p>
+          <div class="results-runline">
+            <p class="verify-muted" id="results-run-id">Run ID: <span class="results-run-id">{{.RunID}}</span></p>
+            <button type="button" class="btn btn-ghost btn-sm" id="copy-run-id">Copy Run ID</button>
+          </div>
         </div>
         <div class="results-actions">
           <a href="/verify" class="btn btn-ghost">Back to Verify</a>
