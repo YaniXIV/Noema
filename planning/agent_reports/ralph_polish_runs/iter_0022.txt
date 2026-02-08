@@ -7,7 +7,7 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3c90-7d18-7c00-ae77-e05d2a752d31
+session id: 019c3ed8-de75-7012-9b02-0efc74a28c46
 --------
 user
 You are an autonomous coding agent polishing the Noema repository.
@@ -18,8 +18,9 @@ Hard rules:
 - Keep changes small: max 3 files per iteration.
 - No cosmetic-only edits.
 - No new dependencies unless absolutely necessary.
+- keep all the same ui functionality, the end user should be able to do the same stuff but the experiance and design should be better.
 
-Goal: continuously improve production quality.
+Goal: continuously improve production quality. continuously improve front end quality and polish.
 
 Iteration:
 1) Run: cd backend && go test ./...
@@ -29,7 +30,7 @@ Iteration:
 Pick the highest-value improvement:
 A) Reliability/correctness: validation, error handling, run persistence, verify robustness
 B) Tests: add/strengthen tests for the change you made
-C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+C) upgrading the user interface so that it looks better.
 D) Maintainability: reduce duplication with tiny refactors
 E) UX: wizard/results/verify clarity (small, safe changes)
 F) Docs: README/DEPLOYMENT polish
@@ -39,34 +40,24 @@ Finish with:
 - What you changed (short)
 - Tests run (must include go test ./...)
 mcp startup: no servers
-
-thinking
-**Running tests**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 101ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 242ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
 ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
 
 thinking
-**Planning targeted improvement**
+**Listing frontend files**
 
-Tests pass, so now I'll use ripgrep to find TODOs or similar markers to identify one concise, meaningful improvement touching at most three files.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"TODO|FIXME|panic\\(|Assert\\(\" internal" in /Users/yani/Noema/backend exited 1 in 52ms:
-
-
-thinking
-**Checking for error handling**
-
-No matches found; planning to inspect code files to identify if error handling needs adding or improving.
+I'm planning to inspect the repo for UI improvement opportunities by listing files related to the web frontend, focusing on up to three files for meaningful changes.
 exec
 /bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
 cmd
@@ -75,472 +66,819 @@ go.mod
 go.sum
 internal
 main
-server
 web
-
-thinking
-**Inspecting improvement opportunities in internal/web**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "error" internal/web' in /Users/yani/Noema/backend succeeded in 51ms:
-internal/web/auth.go:25:// On success: set cookie, redirect 303 to /app. On failure: re-render index with inline error.
-internal/web/upload.go:48:		UploadGet(c, uploadTmpl, UploadData{Error: "Server error saving file."})
-internal/web/upload.go:75:		UploadGet(c, uploadTmpl, UploadData{Error: "Server error saving file."})
-internal/web/upload.go:81:		UploadGet(c, uploadTmpl, UploadData{Error: "Server error saving file."})
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web' in /Users/yani/Noema/backend succeeded in 52ms:
+static
+templates
 
 thinking
-**Planning validation by inspecting upload handler**
+**Checking UI templates for improvements**
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/web/upload.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package web
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/templates' in /Users/yani/Noema/backend succeeded in 51ms:
+app.html
+app_new.html
+app_results.html
+index.html
+partial_header_app.html
+partial_header_public.html
+partial_header_upload.html
+partial_orb.html
+upload.html
+verify.html
+verify_results.html
 
-import (
-	"fmt"
-	"io"
-	"net/http"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
+thinking
+**Checking UI options in static CSS**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/static' in /Users/yani/Noema/backend succeeded in 52ms:
+app.js
+constraints.js
+results.js
+styles.css
+upload.js
+verify.js
+wizard.js
 
-	"noema/internal/config"
+thinking
+**Planning meaningful UI style improvements**
 
-	"github.com/gin-gonic/gin"
-)
+Considering CSS tweaks focused on fonts and colors that enhance UX without altering functionality, aiming for meaningful UI polish rather than purely cosmetic changes. Next step is to inspect existing styles for impactful adjustments.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 51ms:
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap');
 
-// UploadData is passed to the upload template.
-type UploadData struct {
-	Error    string
-	Success  bool
+:root {
+  --bg: #05060a;
+  --bg-card: rgba(9, 12, 18, 0.9);
+  --text: #f4f6fb;
+  --text-muted: #9aa3b2;
+  --accent: #45d4ff;
+  --accent-strong: #2c7bff;
+  --accent-glow: rgba(69, 212, 255, 0.35);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(69, 212, 255, 0.4);
+  --error: #f87171;
+  --success: #22c55e;
+  --warning: #fbbf24;
+  --shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
+}
+
+*,
+*::before,
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '200,400p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent-glow);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0% { transform: scale(0.7); opacity: 0.5; }
+  50% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(0.7); opacity: 0.5; }
+}
+
+.card-kicker {
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  letter-spacing: 0.2em;
+  color: rgba(255, 255, 255, 0.5);
+
+thinking
+**Identifying upload drag area for improvement**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "upload-zone" -n web/static/styles.css web/templates' in /Users/yani/Noema/backend succeeded in 51ms:
+web/static/styles.css:348:.upload-zone:focus-visible,
+web/static/styles.css:463:.upload-zone {
+web/static/styles.css:477:.upload-zone:hover,
+web/static/styles.css:478:.upload-zone.dragover {
+web/static/styles.css:482:.upload-zone:focus-within {
+web/static/styles.css:487:.upload-zone input[type="file"] {
+web/templates/upload.html:18:        <label class="upload-zone" for="file-input" id="drop-zone">
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '430,520p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 51ms:
+.status-pill {
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.status-pill-pass {
+  color: #86efac;
+  border-color: rgba(34, 197, 94, 0.5);
+  background: rgba(34, 197, 94, 0.12);
+}
+.status-pill-fail {
+  color: #fca5a5;
+  border-color: rgba(248, 113, 113, 0.5);
+  background: rgba(248, 113, 113, 0.12);
+}
+
+thinking
+**Considering UI improvements**
+
+I'm reviewing the results pages and upload page, focusing on possible micro layout tweaks and enhancing file name display on upload, likely involving upload.js.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/static/upload.js" in /Users/yani/Noema/backend succeeded in 52ms:
+(function() {
+  var input = document.getElementById('file-input');
+  var zone = document.getElementById('drop-zone');
+  var zoneText = document.getElementById('zone-text');
+  var submitBtn = document.getElementById('submit-btn');
+  var details = document.getElementById('upload-details');
+  var fileName = document.getElementById('upload-file-name');
+  var fileSize = document.getElementById('upload-file-size');
+  var clearBtn = document.getElementById('clear-file');
+  var clientError = document.getElementById('upload-client-error');
+  var maxBytes = parseInt(input.dataset.maxBytes || '', 10);
+  var maxBytesLabel = input.dataset.maxBytesLabel || '';
+
+  function formatBytes(bytes) {
+    if (!bytes && bytes !== 0) return '';
+    if (bytes < 1024) return bytes + ' B';
+    var kb = bytes / 1024;
+    if (kb < 1024) return kb.toFixed(1) + ' KB';
+    var mb = kb / 1024;
+    if (mb < 1024) return mb.toFixed(1) + ' MB';
+
+thinking
+**Reviewing results display for clarity**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/templates/upload.html" in /Users/yani/Noema/backend succeeded in 51ms:
+{{define "upload"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Upload</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_upload" .}}
+
+  <main class="main">
+    {{template "orb" .}}
+    <div class="card">
+      <h1 class="card-title">Upload</h1>
+      <form id="upload-form" action="/upload" method="post" enctype="multipart/form-data">
+        <label class="upload-zone" for="file-input" id="drop-zone">
+          <input type="file" name="file" id="file-input" accept="*" data-max-bytes="{{.MaxBytes}}" data-max-bytes-label="{{.MaxBytesLabel}}" aria-describedby="upload-hint upload-client-error">
+          <span id="zone-text">Drag and drop a file here, or click to choose</span>
+
+thinking
+**Reviewing results page for improvements**
+
+Planning to check results page templates to identify opportunities for more informative displays or accessibility enhancements beyond cosmetic changes.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/templates/app_results.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "app_results"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Results</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body data-run-id="{{.RunID}}">
+  {{template "header_app" .}}
+
+  <main class="main main-results">
+    {{template "orb" .}}
+    <div class="card results-card">
+      <div class="results-header">
+        <div>
+          <h1 class="card-title">Evaluation results</h1>
+          <div class="results-runline">
+            <p class="text-muted" id="results-run-id">Run ID: <span class="results-run-id">{{.RunID}}</span></p>
+
+thinking
+**Checking verify results for enhancements**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/templates/verify_results.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "verify_results"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Verify Results</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body data-run-id="{{.RunID}}">
+  {{template "header_public" .}}
+
+  <main class="main main-results">
+    {{template "orb" .}}
+    <div class="card results-card">
+      <div class="results-header">
+        <div>
+          <h1 class="card-title">Public results</h1>
+          <div class="results-runline">
+            <p class="verify-muted" id="results-run-id">Run ID: <span class="results-run-id">{{.RunID}}</span></p>
+
+thinking
+**Reviewing results UI styling**
+
+Planning to improve readability by adding sticky headers and monospaced backgrounds in the results area while keeping changes minimal and functional; next step is inspecting the results-related CSS.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "results-" web/static/styles.css' in /Users/yani/Noema/backend succeeded in 52ms:
+54:.results-pre {
+861:.results-card {
+865:.results-header {
+873:.results-actions {
+879:.results-summary {
+892:.results-runline {
+899:.results-run-id {
+909:.results-status {
+918:.results-status-pass {
+924:.results-status-fail {
+930:.results-status-unknown {
+936:.results-summary-meta {
+941:.results-section {
+947:.results-section-header {
+955:.results-section-title {
+960:.results-section-actions {
+966:.results-constraints-list {
+973:.results-constraint-card {
+980:.results-constraint-card:hover {
+986:.results-constraint-card[data-verdict="pass"] {
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '820,1150p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 51ms:
+  margin-top: 1rem;
+}
+
+.review-summary {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1.1rem 1.2rem;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.3);
+  margin-bottom: 1rem;
+}
+
+.review-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  font-size: 0.95rem;
+}
+
+thinking
+**Considering UI enhancements for results**
+
+I'm exploring improvements like adding sticky summaries or copy feedback, focusing on showing line numbers and a "Copied" status via CSS and small JS in results.js. Next, I'll review results.js to assess feasibility.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' web/static/results.js" in /Users/yani/Noema/backend succeeded in 52ms:
+(function() {
+  var runId = document.body.getAttribute('data-run-id') || document.getElementById('results-run-id').textContent.replace('Run ID: ', '').trim();
+  var key = 'noema_run_' + runId;
+  var data;
+  try {
+    var raw = localStorage.getItem(key);
+    data = raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    data = null;
+  }
+
+  function copyText(text, button) {
+    if (!text) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function() {
+        if (button) showCopied(button);
+      });
+    } else {
+      var temp = document.createElement('textarea');
+      temp.value = text;
+
+thinking
+**Listing potential UI improvements**
+
+Considering adding copy-to-clipboard feedback, visual cues for unverified or missing data, clearer display of file info and validation in the upload UI, plus enhancing metadata display with chips. Next, inspecting main UI layout files to identify high-impact refinements.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/templates/index.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "index"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_public" .}}
+
+  <main class="main">
+    {{template "orb" .}}
+    <div class="card">
+      <div class="card-kicker">Secure access</div>
+      <h1 class="card-title">Judge Key</h1>
+      <p class="card-text">Evaluation and uploads are gated. Public verification is always open.</p>
+      <form action="/auth" method="post" class="form">
+        <input type="password" name="judge_key" id="judge_key" class="input" placeholder="Enter judge key" autocomplete="off" value="{{.JudgeKeyVal}}" autofocus>
 
 
 thinking
-**Planning request size limit enforcement**
+**Exploring UI and reliability improvements**
 
-I'm considering wrapping the request body with a max size limiter before parsing multipart form data in the upload handler to prevent large uploads from exhausting memory and handle oversize errors gracefully.
+Considering adding UX enhancements like "Copy" button tooltips and sticky headers for results, but keeping functionality stable; also reviewing reliability around run ID retrieval and localStorage handling with no immediate code changes planned.
 thinking
-**Refining max upload size enforcement**
+**Planning lightweight UI enhancements**
 
-I'm preparing to wrap the request body with MaxBytesReader using a slight overhead above the max file size to accommodate multipart metadata, then check MultipartForm errors precisely for body-too-large cases and verify actual file size afterward to enforce the strict limit cleanly.
+Focusing on adding collapsible result sections, soft-wrap toggles, and a clear button for uploads to improve usability with minimal file changes; also investigating timestamp availability in data for potential inclusion.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "created|timestamp|run" web/static' in /Users/yani/Noema/backend succeeded in 51ms:
+web/static/app.js:2:  var STORAGE_KEY = 'noema_recent_runs';
+web/static/app.js:3:  var listEl = document.getElementById('recent-runs-list');
+web/static/app.js:4:  var emptyEl = document.getElementById('recent-runs-empty');
+web/static/app.js:61:      var runs = raw ? JSON.parse(raw) : [];
+web/static/app.js:62:      if (!Array.isArray(runs)) runs = [];
+web/static/app.js:63:      runs = runs.filter(function(r) { return r && r.run_id; });
+web/static/app.js:64:      if (runs.length === 0) {
+web/static/app.js:70:      runs.sort(function(a, b) {
+web/static/app.js:79:      runs.slice(0, 10).forEach(function(r) {
+web/static/app.js:81:        item.className = 'recent-run-item';
+web/static/app.js:84:        header.className = 'recent-run-header';
+web/static/app.js:87:        name.className = 'recent-run-link recent-run-name';
+web/static/app.js:88:        name.href = '/app/results/' + r.run_id;
+web/static/app.js:89:        name.textContent = r.name || r.run_id;
+web/static/app.js:99:        meta.className = 'recent-run-meta';
+web/static/app.js:101:        var runId = document.createElement('span');
+web/static/app.js:102:        runId.textContent = 'Run ID: ' + r.run_id;
+web/static/app.js:103:        meta.appendChild(runId);
+web/static/app.js:115:        copyBtn.className = 'btn btn-ghost btn-sm recent-run-copy';
+web/static/app.js:118:          copyText(r.run_id, copyBtn);
+
+thinking
+**Reviewing verify page for improvements**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' web/static/verify.js" in /Users/yani/Noema/backend succeeded in 52ms:
+(function() {
+  var STORAGE_KEY = 'noema_recent_runs';
+  var MAX_RECENT = 20;
+  var listEl = document.getElementById('verify-list');
+  var emptyEl = document.getElementById('verify-empty');
+  var emptyTitleEl = emptyEl ? emptyEl.querySelector('.empty-state-title') : null;
+  var emptyTextEl = emptyEl ? emptyEl.querySelector('.empty-state-text') : null;
+  var emptyTitleDefault = emptyTitleEl ? emptyTitleEl.textContent : '';
+  var emptyTextDefault = emptyTextEl ? emptyTextEl.textContent : '';
+  var filterInput = document.getElementById('verify-filter');
+  var countEl = document.getElementById('verify-count');
+  var progressEl = document.getElementById('verify-progress');
+  var verifyAllBtn = document.getElementById('verify-all');
+  var clearBtn = document.getElementById('verify-clear');
+
+  function loadRecentRuns() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      var runs = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(runs)) return [];
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' web/static/verify.js" in /Users/yani/Noema/backend succeeded in 52ms:
+        setTimeout(function() { copyProof.textContent = 'Copy proof'; }, 1200);
+      });
+    });
+
+    copyInputs.addEventListener('click', function() {
+      copyToClipboard(inputsText, function(ok) {
+        copyInputs.textContent = ok ? 'Copied' : 'Copy public inputs';
+        setTimeout(function() { copyInputs.textContent = 'Copy public inputs'; }, 1200);
+      });
+    });
+
+    actions.appendChild(verifyBtn);
+    actions.appendChild(copyProof);
+    actions.appendChild(copyInputs);
+
+    row.appendChild(main);
+    row.appendChild(actions);
+
+    return row;
+  }
+
+
+thinking
+**Planning UI clarity improvements**
+
+I'm focusing on enhancing constraint cards by replacing the meta text with distinct severity and allowed badges styled via CSS grid. I'll update results.js to generate these badges for better readability and quick scanning.
+thinking
+**Detailing badge HTML and CSS structure**
+
+I'm refining the constraint meta section to include only severity and allowed badges in flex layout with styled pills. The verdict stays in the header to avoid redundancy. This update involves restructuring innerHTML in results.js and adding corresponding styles in styles.css.
 file update
-M /Users/yani/Noema/backend/internal/web/upload.go
-@@ -3,2 +3,3 @@
- import (
-+	"errors"
- 	"fmt"
-@@ -31,4 +32,10 @@
- func UploadPost(c *gin.Context, uploadTmpl string, uploadsDir string) {
-+	const multipartOverhead = 1 << 20 // allow small overhead for multipart headers
-+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
- 	form, err := c.MultipartForm()
- 	if err != nil {
-+		if errors.Is(err, http.ErrBodyTooLarge) {
-+			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
-+			return
-+		}
- 		UploadGet(c, uploadTmpl, UploadData{Error: "Invalid form."})
-apply_patch(auto_approved=true) exited 0 in 31ms:
+M /Users/yani/Noema/backend/web/static/results.js
+@@ -73,3 +73,12 @@
+         '</div>' +
+-        '<div class="results-constraint-meta">Severity: ' + severity + ' · Allowed: ' + allowed + ' · ' + verdict + '</div>';
++        '<div class="results-constraint-meta">' +
++          '<div class="results-constraint-pill">' +
++            '<span class="results-constraint-pill-label">Severity</span>' +
++            '<span class="results-constraint-pill-value">' + severity + '</span>' +
++          '</div>' +
++          '<div class="results-constraint-pill">' +
++            '<span class="results-constraint-pill-label">Allowed</span>' +
++            '<span class="results-constraint-pill-value">' + allowed + '</span>' +
++          '</div>' +
++        '</div>';
+       container.appendChild(card);
+apply_patch(auto_approved=true) exited 0 in 30ms:
 Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/web/upload.go
+M web/static/results.js
 file update:
-diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
-index b1a40a0c6e36dcb57fce145e1ee2e69343075f50..bbf609edf0ca89954f24a165768fe59099d49854
---- a/backend/internal/web/upload.go
-+++ b/backend/internal/web/upload.go
-@@ -1,6 +1,7 @@
- package web
- 
- import (
-+	"errors"
- 	"fmt"
- 	"io"
- 	"net/http"
-@@ -29,8 +30,14 @@
- 
- // UploadPost handles POST /upload (multipart form "file"). Saves to uploadsDir with a generated filename.
- func UploadPost(c *gin.Context, uploadTmpl string, uploadsDir string) {
-+	const multipartOverhead = 1 << 20 // allow small overhead for multipart headers
-+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
- 	form, err := c.MultipartForm()
- 	if err != nil {
-+		if errors.Is(err, http.ErrBodyTooLarge) {
-+			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
-+			return
-+		}
- 		UploadGet(c, uploadTmpl, UploadData{Error: "Invalid form."})
- 		return
- 	}
+diff --git a/backend/web/static/results.js b/backend/web/static/results.js
+index df3637250224dbec92b94428e4f3d90747cc4f0b..8611f5a6c5a003b74ca1758fba1759210ba1799f
+--- a/backend/web/static/results.js
++++ b/backend/web/static/results.js
+@@ -71,7 +71,16 @@
+           '<div class="results-constraint-title">' + title + '</div>' +
+           '<span class="results-constraint-verdict results-constraint-verdict-' + verdictClass + '">' + verdict + '</span>' +
+         '</div>' +
+-        '<div class="results-constraint-meta">Severity: ' + severity + ' · Allowed: ' + allowed + ' · ' + verdict + '</div>';
++        '<div class="results-constraint-meta">' +
++          '<div class="results-constraint-pill">' +
++            '<span class="results-constraint-pill-label">Severity</span>' +
++            '<span class="results-constraint-pill-value">' + severity + '</span>' +
++          '</div>' +
++          '<div class="results-constraint-pill">' +
++            '<span class="results-constraint-pill-label">Allowed</span>' +
++            '<span class="results-constraint-pill-value">' + allowed + '</span>' +
++          '</div>' +
++        '</div>';
+       container.appendChild(card);
+     });
+   }
 
 file update:
-diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
-index b1a40a0c6e36dcb57fce145e1ee2e69343075f50..bbf609edf0ca89954f24a165768fe59099d49854
---- a/backend/internal/web/upload.go
-+++ b/backend/internal/web/upload.go
-@@ -1,6 +1,7 @@
- package web
- 
- import (
-+	"errors"
- 	"fmt"
- 	"io"
- 	"net/http"
-@@ -29,8 +30,14 @@
- 
- // UploadPost handles POST /upload (multipart form "file"). Saves to uploadsDir with a generated filename.
- func UploadPost(c *gin.Context, uploadTmpl string, uploadsDir string) {
-+	const multipartOverhead = 1 << 20 // allow small overhead for multipart headers
-+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
- 	form, err := c.MultipartForm()
- 	if err != nil {
-+		if errors.Is(err, http.ErrBodyTooLarge) {
-+			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
-+			return
-+		}
- 		UploadGet(c, uploadTmpl, UploadData{Error: "Invalid form."})
- 		return
- 	}
+diff --git a/backend/web/static/results.js b/backend/web/static/results.js
+index df3637250224dbec92b94428e4f3d90747cc4f0b..8611f5a6c5a003b74ca1758fba1759210ba1799f
+--- a/backend/web/static/results.js
++++ b/backend/web/static/results.js
+@@ -71,7 +71,16 @@
+           '<div class="results-constraint-title">' + title + '</div>' +
+           '<span class="results-constraint-verdict results-constraint-verdict-' + verdictClass + '">' + verdict + '</span>' +
+         '</div>' +
+-        '<div class="results-constraint-meta">Severity: ' + severity + ' · Allowed: ' + allowed + ' · ' + verdict + '</div>';
++        '<div class="results-constraint-meta">' +
++          '<div class="results-constraint-pill">' +
++            '<span class="results-constraint-pill-label">Severity</span>' +
++            '<span class="results-constraint-pill-value">' + severity + '</span>' +
++          '</div>' +
++          '<div class="results-constraint-pill">' +
++            '<span class="results-constraint-pill-label">Allowed</span>' +
++            '<span class="results-constraint-pill-value">' + allowed + '</span>' +
++          '</div>' +
++        '</div>';
+       container.appendChild(card);
+     });
+   }
 
 
 thinking
-**Running tests again**
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend exited 1 in 103ms:
-# noema/internal/web
-internal/web/upload.go:37:26: undefined: http.ErrBodyTooLarge
-FAIL	noema/cmd/server [build failed]
-?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
-?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	(cached)
-?   	noema/internal/gemini	[no test files]
-ok  	noema/internal/session	(cached)
-ok  	noema/internal/verify	(cached)
-FAIL	noema/internal/web [build failed]
-ok  	noema/internal/zk	(cached)
-FAIL
-file update:
-diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
-index b1a40a0c6e36dcb57fce145e1ee2e69343075f50..bbf609edf0ca89954f24a165768fe59099d49854
---- a/backend/internal/web/upload.go
-+++ b/backend/internal/web/upload.go
-@@ -1,6 +1,7 @@
- package web
- 
- import (
-+	"errors"
- 	"fmt"
- 	"io"
- 	"net/http"
-@@ -29,8 +30,14 @@
- 
- // UploadPost handles POST /upload (multipart form "file"). Saves to uploadsDir with a generated filename.
- func UploadPost(c *gin.Context, uploadTmpl string, uploadsDir string) {
-+	const multipartOverhead = 1 << 20 // allow small overhead for multipart headers
-+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
- 	form, err := c.MultipartForm()
- 	if err != nil {
-+		if errors.Is(err, http.ErrBodyTooLarge) {
-+			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
-+			return
-+		}
- 		UploadGet(c, uploadTmpl, UploadData{Error: "Invalid form."})
- 		return
- 	}
-
-
-thinking
-**Replacing unavailable error check with string match**
-
-The code will remove use of `http.ErrBodyTooLarge` for compatibility and instead check error messages with a helper function using a string contains check for "request body too large".
+**Updating CSS classes and metadata**
 file update
-M /Users/yani/Noema/backend/internal/web/upload.go
-@@ -36,3 +36,3 @@
- 	if err != nil {
--		if errors.Is(err, http.ErrBodyTooLarge) {
-+		if isBodyTooLarge(err) {
- 			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
-@@ -106 +106,11 @@
- }
-+
-+func isBodyTooLarge(err error) bool {
-+	if err == nil {
-+		return false
-+	}
-+	if errors.Is(err, http.ErrContentLength) {
-+		return false
-+	}
-+	return strings.Contains(err.Error(), "request body too large")
+M /Users/yani/Noema/backend/web/static/styles.css
+@@ -1045,3 +1045,23 @@
+   margin-top: 0.35rem;
+-  font-size: 0.82rem;
++  display: flex;
++  flex-wrap: wrap;
++  gap: 0.5rem;
 +}
-apply_patch(auto_approved=true) exited 0 in 39ms:
++
++.results-constraint-pill {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.45rem;
++  padding: 0.25rem 0.6rem;
++  border-radius: 999px;
++  border: 1px solid rgba(255, 255, 255, 0.12);
++  background: rgba(0, 0, 0, 0.35);
++  font-size: 0.75rem;
++  color: var(--text);
++}
++
++.results-constraint-pill-label {
++  text-transform: uppercase;
++  letter-spacing: 0.08em;
++  font-size: 0.62rem;
+   color: var(--text-muted);
+@@ -1049,2 +1069,7 @@
+ 
++.results-constraint-pill-value {
++  font-weight: 600;
++  color: var(--text);
++}
++
+ .results-proof-meta {
+apply_patch(auto_approved=true) exited 0 in 41ms:
 Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/web/upload.go
+M web/static/styles.css
 file update:
-diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
-index b1a40a0c6e36dcb57fce145e1ee2e69343075f50..3adbc80b396a08dac3f597351efc719fb7df7387
---- a/backend/internal/web/upload.go
-+++ b/backend/internal/web/upload.go
-@@ -1,6 +1,7 @@
- package web
+diff --git a/backend/web/static/results.js b/backend/web/static/results.js
+index df3637250224dbec92b94428e4f3d90747cc4f0b..8611f5a6c5a003b74ca1758fba1759210ba1799f
+--- a/backend/web/static/results.js
++++ b/backend/web/static/results.js
+@@ -71,7 +71,16 @@
+           '<div class="results-constraint-title">' + title + '</div>' +
+           '<span class="results-constraint-verdict results-constraint-verdict-' + verdictClass + '">' + verdict + '</span>' +
+         '</div>' +
+-        '<div class="results-constraint-meta">Severity: ' + severity + ' · Allowed: ' + allowed + ' · ' + verdict + '</div>';
++        '<div class="results-constraint-meta">' +
++          '<div class="results-constraint-pill">' +
++            '<span class="results-constraint-pill-label">Severity</span>' +
++            '<span class="results-constraint-pill-value">' + severity + '</span>' +
++          '</div>' +
++          '<div class="results-constraint-pill">' +
++            '<span class="results-constraint-pill-label">Allowed</span>' +
++            '<span class="results-constraint-pill-value">' + allowed + '</span>' +
++          '</div>' +
++        '</div>';
+       container.appendChild(card);
+     });
+   }
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 9fc4cf353bdd0e233dad4ec25f4fb2dfb8be5e7f..8bbb7187a7a6d33dac814417a6f72d82667c0f77
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -1043,10 +1043,35 @@
  
- import (
-+	"errors"
- 	"fmt"
- 	"io"
- 	"net/http"
-@@ -29,8 +30,14 @@
- 
- // UploadPost handles POST /upload (multipart form "file"). Saves to uploadsDir with a generated filename.
- func UploadPost(c *gin.Context, uploadTmpl string, uploadsDir string) {
-+	const multipartOverhead = 1 << 20 // allow small overhead for multipart headers
-+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
- 	form, err := c.MultipartForm()
- 	if err != nil {
-+		if isBodyTooLarge(err) {
-+			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
-+			return
-+		}
- 		UploadGet(c, uploadTmpl, UploadData{Error: "Invalid form."})
- 		return
- 	}
-@@ -97,3 +104,13 @@
- 	}
- 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
- }
-+
-+func isBodyTooLarge(err error) bool {
-+	if err == nil {
-+		return false
-+	}
-+	if errors.Is(err, http.ErrContentLength) {
-+		return false
-+	}
-+	return strings.Contains(err.Error(), "request body too large")
+ .results-constraint-meta {
+   margin-top: 0.35rem;
+-  font-size: 0.82rem;
++  display: flex;
++  flex-wrap: wrap;
++  gap: 0.5rem;
 +}
++
++.results-constraint-pill {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.45rem;
++  padding: 0.25rem 0.6rem;
++  border-radius: 999px;
++  border: 1px solid rgba(255, 255, 255, 0.12);
++  background: rgba(0, 0, 0, 0.35);
++  font-size: 0.75rem;
++  color: var(--text);
++}
++
++.results-constraint-pill-label {
++  text-transform: uppercase;
++  letter-spacing: 0.08em;
++  font-size: 0.62rem;
+   color: var(--text-muted);
+ }
+ 
++.results-constraint-pill-value {
++  font-weight: 600;
++  color: var(--text);
++}
++
+ .results-proof-meta {
+   margin-top: 0.75rem;
+   font-size: 0.85rem;
 
 file update:
-diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
-index b1a40a0c6e36dcb57fce145e1ee2e69343075f50..3adbc80b396a08dac3f597351efc719fb7df7387
---- a/backend/internal/web/upload.go
-+++ b/backend/internal/web/upload.go
-@@ -1,6 +1,7 @@
- package web
+diff --git a/backend/web/static/results.js b/backend/web/static/results.js
+index df3637250224dbec92b94428e4f3d90747cc4f0b..8611f5a6c5a003b74ca1758fba1759210ba1799f
+--- a/backend/web/static/results.js
++++ b/backend/web/static/results.js
+@@ -71,7 +71,16 @@
+           '<div class="results-constraint-title">' + title + '</div>' +
+           '<span class="results-constraint-verdict results-constraint-verdict-' + verdictClass + '">' + verdict + '</span>' +
+         '</div>' +
+-        '<div class="results-constraint-meta">Severity: ' + severity + ' · Allowed: ' + allowed + ' · ' + verdict + '</div>';
++        '<div class="results-constraint-meta">' +
++          '<div class="results-constraint-pill">' +
++            '<span class="results-constraint-pill-label">Severity</span>' +
++            '<span class="results-constraint-pill-value">' + severity + '</span>' +
++          '</div>' +
++          '<div class="results-constraint-pill">' +
++            '<span class="results-constraint-pill-label">Allowed</span>' +
++            '<span class="results-constraint-pill-value">' + allowed + '</span>' +
++          '</div>' +
++        '</div>';
+       container.appendChild(card);
+     });
+   }
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 9fc4cf353bdd0e233dad4ec25f4fb2dfb8be5e7f..8bbb7187a7a6d33dac814417a6f72d82667c0f77
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -1043,10 +1043,35 @@
  
- import (
-+	"errors"
- 	"fmt"
- 	"io"
- 	"net/http"
-@@ -29,8 +30,14 @@
- 
- // UploadPost handles POST /upload (multipart form "file"). Saves to uploadsDir with a generated filename.
- func UploadPost(c *gin.Context, uploadTmpl string, uploadsDir string) {
-+	const multipartOverhead = 1 << 20 // allow small overhead for multipart headers
-+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
- 	form, err := c.MultipartForm()
- 	if err != nil {
-+		if isBodyTooLarge(err) {
-+			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
-+			return
-+		}
- 		UploadGet(c, uploadTmpl, UploadData{Error: "Invalid form."})
- 		return
- 	}
-@@ -97,3 +104,13 @@
- 	}
- 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
- }
-+
-+func isBodyTooLarge(err error) bool {
-+	if err == nil {
-+		return false
-+	}
-+	if errors.Is(err, http.ErrContentLength) {
-+		return false
-+	}
-+	return strings.Contains(err.Error(), "request body too large")
+ .results-constraint-meta {
+   margin-top: 0.35rem;
+-  font-size: 0.82rem;
++  display: flex;
++  flex-wrap: wrap;
++  gap: 0.5rem;
 +}
++
++.results-constraint-pill {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.45rem;
++  padding: 0.25rem 0.6rem;
++  border-radius: 999px;
++  border: 1px solid rgba(255, 255, 255, 0.12);
++  background: rgba(0, 0, 0, 0.35);
++  font-size: 0.75rem;
++  color: var(--text);
++}
++
++.results-constraint-pill-label {
++  text-transform: uppercase;
++  letter-spacing: 0.08em;
++  font-size: 0.62rem;
+   color: var(--text-muted);
+ }
+ 
++.results-constraint-pill-value {
++  font-weight: 600;
++  color: var(--text);
++}
++
+ .results-proof-meta {
+   margin-top: 0.75rem;
+   font-size: 0.85rem;
 
 
 thinking
-**Removing invalid error check and simplifying**
-
-Removed the nonexistent `http.ErrContentLength` check and replaced it with a simple string containment check for "request body too large." Also cleaned up imports by removing the unused errors package.
-file update
-M /Users/yani/Noema/backend/internal/web/upload.go
-@@ -3,3 +3,2 @@
- import (
--	"errors"
- 	"fmt"
-@@ -109,5 +108,2 @@
- 	if err == nil {
--		return false
--	}
--	if errors.Is(err, http.ErrContentLength) {
- 		return false
-apply_patch(auto_approved=true) exited 0 in 39ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/web/upload.go
-file update:
-diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
-index b1a40a0c6e36dcb57fce145e1ee2e69343075f50..370ad45c6877ac5f4a28aa180184bdadf32bafad
---- a/backend/internal/web/upload.go
-+++ b/backend/internal/web/upload.go
-@@ -29,8 +29,14 @@
- 
- // UploadPost handles POST /upload (multipart form "file"). Saves to uploadsDir with a generated filename.
- func UploadPost(c *gin.Context, uploadTmpl string, uploadsDir string) {
-+	const multipartOverhead = 1 << 20 // allow small overhead for multipart headers
-+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
- 	form, err := c.MultipartForm()
- 	if err != nil {
-+		if isBodyTooLarge(err) {
-+			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
-+			return
-+		}
- 		UploadGet(c, uploadTmpl, UploadData{Error: "Invalid form."})
- 		return
- 	}
-@@ -97,3 +103,10 @@
- 	}
- 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
- }
-+
-+func isBodyTooLarge(err error) bool {
-+	if err == nil {
-+		return false
-+	}
-+	return strings.Contains(err.Error(), "request body too large")
-+}
-
-file update:
-diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
-index b1a40a0c6e36dcb57fce145e1ee2e69343075f50..370ad45c6877ac5f4a28aa180184bdadf32bafad
---- a/backend/internal/web/upload.go
-+++ b/backend/internal/web/upload.go
-@@ -29,8 +29,14 @@
- 
- // UploadPost handles POST /upload (multipart form "file"). Saves to uploadsDir with a generated filename.
- func UploadPost(c *gin.Context, uploadTmpl string, uploadsDir string) {
-+	const multipartOverhead = 1 << 20 // allow small overhead for multipart headers
-+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
- 	form, err := c.MultipartForm()
- 	if err != nil {
-+		if isBodyTooLarge(err) {
-+			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
-+			return
-+		}
- 		UploadGet(c, uploadTmpl, UploadData{Error: "Invalid form."})
- 		return
- 	}
-@@ -97,3 +103,10 @@
- 	}
- 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
- }
-+
-+func isBodyTooLarge(err error) bool {
-+	if err == nil {
-+		return false
-+	}
-+	return strings.Contains(err.Error(), "request body too large")
-+}
-
-
-thinking
-**Starting test implementation**
+**Running Go tests again**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 125ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 428ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
 ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
 file update:
-diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
-index b1a40a0c6e36dcb57fce145e1ee2e69343075f50..370ad45c6877ac5f4a28aa180184bdadf32bafad
---- a/backend/internal/web/upload.go
-+++ b/backend/internal/web/upload.go
-@@ -29,8 +29,14 @@
+diff --git a/backend/web/static/results.js b/backend/web/static/results.js
+index df3637250224dbec92b94428e4f3d90747cc4f0b..8611f5a6c5a003b74ca1758fba1759210ba1799f
+--- a/backend/web/static/results.js
++++ b/backend/web/static/results.js
+@@ -71,7 +71,16 @@
+           '<div class="results-constraint-title">' + title + '</div>' +
+           '<span class="results-constraint-verdict results-constraint-verdict-' + verdictClass + '">' + verdict + '</span>' +
+         '</div>' +
+-        '<div class="results-constraint-meta">Severity: ' + severity + ' · Allowed: ' + allowed + ' · ' + verdict + '</div>';
++        '<div class="results-constraint-meta">' +
++          '<div class="results-constraint-pill">' +
++            '<span class="results-constraint-pill-label">Severity</span>' +
++            '<span class="results-constraint-pill-value">' + severity + '</span>' +
++          '</div>' +
++          '<div class="results-constraint-pill">' +
++            '<span class="results-constraint-pill-label">Allowed</span>' +
++            '<span class="results-constraint-pill-value">' + allowed + '</span>' +
++          '</div>' +
++        '</div>';
+       container.appendChild(card);
+     });
+   }
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 9fc4cf353bdd0e233dad4ec25f4fb2dfb8be5e7f..8bbb7187a7a6d33dac814417a6f72d82667c0f77
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -1043,10 +1043,35 @@
  
- // UploadPost handles POST /upload (multipart form "file"). Saves to uploadsDir with a generated filename.
- func UploadPost(c *gin.Context, uploadTmpl string, uploadsDir string) {
-+	const multipartOverhead = 1 << 20 // allow small overhead for multipart headers
-+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
- 	form, err := c.MultipartForm()
- 	if err != nil {
-+		if isBodyTooLarge(err) {
-+			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
-+			return
-+		}
- 		UploadGet(c, uploadTmpl, UploadData{Error: "Invalid form."})
- 		return
- 	}
-@@ -97,3 +103,10 @@
- 	}
- 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
- }
-+
-+func isBodyTooLarge(err error) bool {
-+	if err == nil {
-+		return false
-+	}
-+	return strings.Contains(err.Error(), "request body too large")
+ .results-constraint-meta {
+   margin-top: 0.35rem;
+-  font-size: 0.82rem;
++  display: flex;
++  flex-wrap: wrap;
++  gap: 0.5rem;
 +}
++
++.results-constraint-pill {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.45rem;
++  padding: 0.25rem 0.6rem;
++  border-radius: 999px;
++  border: 1px solid rgba(255, 255, 255, 0.12);
++  background: rgba(0, 0, 0, 0.35);
++  font-size: 0.75rem;
++  color: var(--text);
++}
++
++.results-constraint-pill-label {
++  text-transform: uppercase;
++  letter-spacing: 0.08em;
++  font-size: 0.62rem;
+   color: var(--text-muted);
+ }
+ 
++.results-constraint-pill-value {
++  font-weight: 600;
++  color: var(--text);
++}
++
+ .results-proof-meta {
+   margin-top: 0.75rem;
+   font-size: 0.85rem;
 
 
 thinking
-**Summarizing changes and tests**
+**Summarizing final changes and tests**
 
-I'm preparing a summary that highlights the implemented changes along with the added tests, ensuring the explanation is clear and free of nested bullet points.
+Added feature X and updated related logic in file A and B. Ran tests with `pytest tests/` confirming all pass.
 codex
-What I changed (short)
-- Added a MaxBytesReader guard for uploads and a dedicated “file too large” path before multipart parsing in `internal/web/upload.go`.
+What you changed (short)
+1. Restructured constraint summary metadata into pill-style badges for clearer scanning in results cards.
+2. Added corresponding styling for the new metadata pills.
 
-Tests run
-- `go test ./...`
-
-If you want, I can add a small unit test for the “too large” path next.
+Tests run (must include `go test ./...`)
+1. `go test ./...`
 file update:
-diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
-index b1a40a0c6e36dcb57fce145e1ee2e69343075f50..370ad45c6877ac5f4a28aa180184bdadf32bafad
---- a/backend/internal/web/upload.go
-+++ b/backend/internal/web/upload.go
-@@ -29,8 +29,14 @@
+diff --git a/backend/web/static/results.js b/backend/web/static/results.js
+index df3637250224dbec92b94428e4f3d90747cc4f0b..8611f5a6c5a003b74ca1758fba1759210ba1799f
+--- a/backend/web/static/results.js
++++ b/backend/web/static/results.js
+@@ -71,7 +71,16 @@
+           '<div class="results-constraint-title">' + title + '</div>' +
+           '<span class="results-constraint-verdict results-constraint-verdict-' + verdictClass + '">' + verdict + '</span>' +
+         '</div>' +
+-        '<div class="results-constraint-meta">Severity: ' + severity + ' · Allowed: ' + allowed + ' · ' + verdict + '</div>';
++        '<div class="results-constraint-meta">' +
++          '<div class="results-constraint-pill">' +
++            '<span class="results-constraint-pill-label">Severity</span>' +
++            '<span class="results-constraint-pill-value">' + severity + '</span>' +
++          '</div>' +
++          '<div class="results-constraint-pill">' +
++            '<span class="results-constraint-pill-label">Allowed</span>' +
++            '<span class="results-constraint-pill-value">' + allowed + '</span>' +
++          '</div>' +
++        '</div>';
+       container.appendChild(card);
+     });
+   }
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 9fc4cf353bdd0e233dad4ec25f4fb2dfb8be5e7f..8bbb7187a7a6d33dac814417a6f72d82667c0f77
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -1043,10 +1043,35 @@
  
- // UploadPost handles POST /upload (multipart form "file"). Saves to uploadsDir with a generated filename.
- func UploadPost(c *gin.Context, uploadTmpl string, uploadsDir string) {
-+	const multipartOverhead = 1 << 20 // allow small overhead for multipart headers
-+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
- 	form, err := c.MultipartForm()
- 	if err != nil {
-+		if isBodyTooLarge(err) {
-+			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
-+			return
-+		}
- 		UploadGet(c, uploadTmpl, UploadData{Error: "Invalid form."})
- 		return
- 	}
-@@ -97,3 +103,10 @@
- 	}
- 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
- }
-+
-+func isBodyTooLarge(err error) bool {
-+	if err == nil {
-+		return false
-+	}
-+	return strings.Contains(err.Error(), "request body too large")
+ .results-constraint-meta {
+   margin-top: 0.35rem;
+-  font-size: 0.82rem;
++  display: flex;
++  flex-wrap: wrap;
++  gap: 0.5rem;
 +}
++
++.results-constraint-pill {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.45rem;
++  padding: 0.25rem 0.6rem;
++  border-radius: 999px;
++  border: 1px solid rgba(255, 255, 255, 0.12);
++  background: rgba(0, 0, 0, 0.35);
++  font-size: 0.75rem;
++  color: var(--text);
++}
++
++.results-constraint-pill-label {
++  text-transform: uppercase;
++  letter-spacing: 0.08em;
++  font-size: 0.62rem;
+   color: var(--text-muted);
+ }
+ 
++.results-constraint-pill-value {
++  font-weight: 600;
++  color: var(--text);
++}
++
+ .results-proof-meta {
+   margin-top: 0.75rem;
+   font-size: 0.85rem;
 
 tokens used
-11,263
-What I changed (short)
-- Added a MaxBytesReader guard for uploads and a dedicated “file too large” path before multipart parsing in `internal/web/upload.go`.
+29,700
+What you changed (short)
+1. Restructured constraint summary metadata into pill-style badges for clearer scanning in results cards.
+2. Added corresponding styling for the new metadata pills.
 
-Tests run
-- `go test ./...`
-
-If you want, I can add a small unit test for the “too large” path next.
+Tests run (must include `go test ./...`)
+1. `go test ./...`

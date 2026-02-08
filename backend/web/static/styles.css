@@ -1043,8 +1043,33 @@ pre,
 
 .results-constraint-meta {
   margin-top: 0.35rem;
-  font-size: 0.82rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.results-constraint-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.35);
+  font-size: 0.75rem;
+  color: var(--text);
+}
+
+.results-constraint-pill-label {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.62rem;
   color: var(--text-muted);
+}
+
+.results-constraint-pill-value {
+  font-weight: 600;
+  color: var(--text);
 }
 
 .results-proof-meta {

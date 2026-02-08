@@ -71,7 +71,16 @@
           '<div class="results-constraint-title">' + title + '</div>' +
           '<span class="results-constraint-verdict results-constraint-verdict-' + verdictClass + '">' + verdict + '</span>' +
         '</div>' +
-        '<div class="results-constraint-meta">Severity: ' + severity + ' · Allowed: ' + allowed + ' · ' + verdict + '</div>';
+        '<div class="results-constraint-meta">' +
+          '<div class="results-constraint-pill">' +
+            '<span class="results-constraint-pill-label">Severity</span>' +
+            '<span class="results-constraint-pill-value">' + severity + '</span>' +
+          '</div>' +
+          '<div class="results-constraint-pill">' +
+            '<span class="results-constraint-pill-label">Allowed</span>' +
+            '<span class="results-constraint-pill-value">' + allowed + '</span>' +
+          '</div>' +
+        '</div>';
       container.appendChild(card);
     });
   }
