@@ -323,6 +323,17 @@ func TestValidateDatasetJSON_RejectsUnknownFields(t *testing.T) {
 	}
 }
 
+func TestValidateDatasetJSON_RejectsWhitespaceFields(t *testing.T) {
+	dataset := `{"items":[{"id":"   ","text":"hello"},{"id":"2","text":"   "}]}`
+	form := buildMultipartForm(t, []formFile{
+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
+	})
+	datasetFile := form.File["dataset"][0]
+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
+		t.Fatalf("expected error for whitespace dataset fields")
+	}
+}
+
 func TestValidateDatasetJSON_RejectsEmptyFile(t *testing.T) {
 	form := buildMultipartForm(t, []formFile{
 		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte{}},

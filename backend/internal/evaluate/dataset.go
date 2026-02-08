@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"strings"
 )
 
 type Dataset struct {
@@ -54,10 +55,10 @@ func readDatasetFile(fh *multipart.FileHeader) ([]byte, Dataset, error) {
 	}
 	seenIDs := make(map[string]struct{}, len(ds.Items))
 	for i, item := range ds.Items {
-		if item.ID == "" {
+		if strings.TrimSpace(item.ID) == "" {
 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
 		}
-		if item.Text == "" {
+		if strings.TrimSpace(item.Text) == "" {
 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
 		}
 		if _, exists := seenIDs[item.ID]; exists {
