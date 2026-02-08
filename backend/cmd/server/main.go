@@ -26,6 +26,13 @@ func main() {
 	if os.Getenv("NOEMA_COOKIE_SECRET") == "" {
 		log.Println("warning: NOEMA_COOKIE_SECRET not set; using dev default")
 	}
+	ensureDir := func(path string) {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			log.Fatalf("failed to create %s: %v", path, err)
+		}
+	}
+	ensureDir(config.UploadsDir())
+	ensureDir(config.RunsDir())
 
 	// Paths relative to working directory — run from backend/
 	r := gin.Default()
