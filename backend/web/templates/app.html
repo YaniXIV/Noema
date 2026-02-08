@@ -27,7 +27,11 @@
         <section class="card recent-runs-card">
           <h2 class="card-title card-title-sm">Recent runs</h2>
           <div id="recent-runs-list" class="recent-runs-list">
-            <p class="text-muted" id="recent-runs-empty">No runs yet. Start a new evaluation.</p>
+            <div id="recent-runs-empty" class="empty-state">
+              <div class="empty-state-title">No runs yet</div>
+              <p class="empty-state-text">Start a new evaluation to see results here.</p>
+              <a href="/app/new" class="btn btn-ghost btn-sm">New Evaluation</a>
+            </div>
           </div>
         </section>
 

@@ -7,7 +7,7 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3c81-b523-7b70-bc1c-6da960bc8048
+session id: 019c3ec7-c7b6-7dd2-9a8e-09a0e9c2d128
 --------
 user
 You are an autonomous coding agent polishing the Noema repository.
@@ -18,8 +18,9 @@ Hard rules:
 - Keep changes small: max 3 files per iteration.
 - No cosmetic-only edits.
 - No new dependencies unless absolutely necessary.
+- keep all the same ui functionality, the end user should be able to do the same stuff but the experiance and design should be better.
 
-Goal: continuously improve production quality.
+Goal: continuously improve production quality. continuously improve front end quality and polish.
 
 Iteration:
 1) Run: cd backend && go test ./...
@@ -29,7 +30,7 @@ Iteration:
 Pick the highest-value improvement:
 A) Reliability/correctness: validation, error handling, run persistence, verify robustness
 B) Tests: add/strengthen tests for the change you made
-C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+C) upgrading the user interface so that it looks better.
 D) Maintainability: reduce duplication with tiny refactors
 E) UX: wizard/results/verify clarity (small, safe changes)
 F) Docs: README/DEPLOYMENT polish
@@ -41,762 +42,1039 @@ Finish with:
 mcp startup: no servers
 
 thinking
-**Preparing to run tests**
+**Preparing to run Go tests**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 215ms:
+/bin/zsh -lc 'go test ./...' in /Users/yani/Noema/backend succeeded in 186ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
 ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
-?   	noema/internal/verify	[no test files]
+ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
 
 thinking
-**Searching for improvement targets**
+**Preparing to inspect frontend for improvements**
 
-I'm scanning the repo for TODOs and areas flagged for reliability or maintainability improvements to identify up to three non-cosmetic files to focus on.
+Tests pass, now I’m focusing on a single improvement affecting up to three files, likely in the frontend. Next, I’ll locate and list relevant web/frontend files to inspect.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME|panic|fatal" .' in /Users/yani/Noema/backend exited 1 in 52ms:
-
+/bin/zsh -lc 'rg -n "<title>|stylesheet|css" -S .' in /Users/yani/Noema/backend succeeded in 52ms:
+./web/templates/app_results.html:7:  <title>Noema — Results</title>
+./web/templates/app_results.html:8:  <link rel="stylesheet" href="/static/styles.css">
+./web/templates/app_new.html:7:  <title>Noema — New Evaluation</title>
+./web/templates/app_new.html:8:  <link rel="stylesheet" href="/static/styles.css">
+./web/templates/verify_results.html:7:  <title>Noema — Verify Results</title>
+./web/templates/verify_results.html:8:  <link rel="stylesheet" href="/static/styles.css">
+./web/templates/index.html:7:  <title>Noema</title>
+./web/templates/index.html:8:  <link rel="stylesheet" href="/static/styles.css">
+./web/static/styles.css:1:@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap');
+./web/templates/verify.html:7:  <title>Noema — Verify</title>
+./web/templates/verify.html:8:  <link rel="stylesheet" href="/static/styles.css">
+./web/templates/upload.html:7:  <title>Noema — Upload</title>
+./web/templates/upload.html:8:  <link rel="stylesheet" href="/static/styles.css">
+./web/templates/app.html:7:  <title>Noema — Dashboard</title>
+./web/templates/app.html:8:  <link rel="stylesheet" href="/static/styles.css">
 
 thinking
-**Checking error handling in internal/web**
+**Planning CSS inspection for improvements**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
-cmd
-data
-go.mod
-go.sum
-internal
-main
-server
-web
+/bin/zsh -lc "sed -n '1,220p' /Users/yani/Noema/backend/web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap');
 
-thinking
-**Scanning for error handling and improvement spots**
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"fmt\\.Errorf|errors\\.New|return nil|return err\" internal | head -n 200" in /Users/yani/Noema/backend succeeded in 52ms:
-internal/evaluate/parse.go:15:		return Spec{}, fmt.Errorf("missing field: spec")
-internal/evaluate/parse.go:19:		return Spec{}, fmt.Errorf("invalid spec JSON")
-internal/evaluate/parse.go:26:		return fmt.Errorf("unsupported schema_version")
-internal/evaluate/parse.go:30:			return fmt.Errorf("constraint id must be non-empty")
-internal/evaluate/parse.go:33:			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
-internal/evaluate/parse.go:38:			return fmt.Errorf("custom_constraint id must be non-empty")
-internal/evaluate/parse.go:41:			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
-internal/evaluate/parse.go:44:	return nil
-internal/evaluate/parse.go:50:		return nil, nil, fmt.Errorf("missing required file: dataset")
-internal/evaluate/parse.go:54:		return nil, nil, fmt.Errorf("dataset exceeds 50MB limit")
-internal/evaluate/parse.go:58:		return nil, nil, fmt.Errorf("maximum 10 images allowed")
-internal/evaluate/parse.go:62:			return nil, nil, fmt.Errorf("each image must be at most 5MB")
-internal/evaluate/parse.go:66:		return nil, nil, err
-internal/evaluate/parse.go:74:		return err
-internal/evaluate/parse.go:79:				return fmt.Errorf("dataset.items[%d].image_ref provided but no images uploaded", i)
-internal/evaluate/parse.go:82:		return nil
-internal/evaluate/parse.go:93:			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
-internal/evaluate/parse.go:96:	return nil
-internal/evaluate/output.go:27:		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
-internal/evaluate/output.go:30:		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
-
-thinking
-**Inspecting evaluation storage code**
-
-I'm opening the evaluation storage implementation to assess its robustness and identify potential areas for improving the picking logic.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package evaluate
-
-import (
-	"crypto/rand"
-	"encoding/json"
-	"fmt"
-	"io"
-	"math/big"
-	"mime/multipart"
-	"os"
-	"path/filepath"
-	"strconv"
-	"sync/atomic"
-	"time"
-)
-
-var runIDCounter uint64
-
-func genRunID() string {
-	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
-
-thinking
-**Assessing data persistence and error handling**
-
-I'm noting that the saveUpload function lacks fsync, risking data loss, and saveRunFiles returns generic errors that lose context but might be acceptable. Next, I'll check the evaluate/cache code for potential instability.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/cache.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package evaluate
-
-import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
-	"fmt"
-	"os"
-	"path/filepath"
-	"time"
-)
-
-type CachedGeminiOutput struct {
-	Model         string       `json:"model"`
-	PromptVersion string       `json:"prompt_version"`
-	Output        EvalOutput   `json:"output"`
-	RawText       string       `json:"raw_text"`
-	Usage         *GeminiUsage `json:"usage,omitempty"`
-	CachedAt      string       `json:"cached_at"`
+:root {
+  --bg: #05060a;
+  --bg-card: rgba(9, 12, 18, 0.9);
+  --text: #f4f6fb;
+  --text-muted: #9aa3b2;
+  --accent: #45d4ff;
+  --accent-strong: #2c7bff;
+  --accent-glow: rgba(69, 212, 255, 0.35);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(69, 212, 255, 0.4);
+  --error: #f87171;
+  --success: #22c55e;
+  --warning: #fbbf24;
+  --shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
 }
 
+*,
+*::before,
+
 thinking
-**Planning cache corruption handling**
+**Identifying UI improvement opportunity**
 
-I'm considering verifying that loadCache properly handles corrupted JSON by removing it if needed, and planning to inspect internal/evaluate/output.go for evaluation and output validation.
+Considering adding a responsive header to enhance the UI; next step is to explore the existing UI components more thoroughly.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/output.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
+/bin/zsh -lc "sed -n '220,520p' /Users/yani/Noema/backend/web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
 
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-)
-
-type EvalConstraintResult struct {
-	ID        string `json:"id"`
-	Severity  int    `json:"severity"`
-	Rationale string `json:"rationale"`
+.input.is-invalid {
+  border-color: rgba(248, 113, 113, 0.65);
+  box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.2);
 }
 
-type EvalOutput struct {
-	SchemaVersion int                    `json:"schema_version"`
-	Constraints   []EvalConstraintResult `json:"constraints"`
-	MaxSeverity   int                    `json:"max_severity"`
-	Confidence    *float64               `json:"confidence,omitempty"`
+.textarea { min-height: 160px; resize: vertical; }
+
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
 }
 
-thinking
-**Noticing potential error handling issues**
-
-I see updateRunsIndex might report errors after successfully saving, which could mistakenly mark a run as errored; next, I'll verify if this behavior is intended in evaluate/handler. Also, saveUpload lacks fsync which could risk data integrity, worth considering stronger non-cosmetic error messages.
+.policy-reveal {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem 1.2rem;
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"encoding/json"
-	"log"
-	"mime/multipart"
-	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
-	"time"
-
-	"noema/internal/config"
-	"noema/internal/zk"
-
-	"github.com/gin-gonic/gin"
-)
-
-// EvaluateResponse is the JSON response for POST /api/evaluate.
-type EvaluateResponse struct {
-
-thinking
-**Identifying bug in run pruning logic**
-
-Noticed pruneRuns treats cache directory as a run and might wrongly delete it; planning to fix by filtering run directories to those with the "run_" prefix and to add tests to validate this change.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
-cache.go
-commitment.go
-dataset.go
-gemini_eval.go
-handler.go
-handler_integration_test.go
-handler_test.go
-images.go
-output.go
-parse.go
-policy.go
-prompt.go
-schema.go
-spec.go
-storage.go
-
-thinking
-**Adding test for pruneRuns**
-
-I'm preparing to add a test for pruneRuns in handler.go by updating handler_test.go to ensure this function's behavior is covered.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package evaluate
-
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"mime/multipart"
-	"net/textproto"
-	"sort"
-	"testing"
-)
-
-type formFile struct {
-	field       string
-	filename    string
-	contentType string
-	content     []byte
+/bin/zsh -lc "sed -n '520,1040p' /Users/yani/Noema/backend/web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+  display: inline-flex;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border);
+  padding: 0.35rem;
+  border-radius: 999px;
+  gap: 0.35rem;
+  margin-bottom: 1.4rem;
 }
 
-func buildMultipartForm(t *testing.T, files []formFile) *multipart.Form {
+.segmented-btn {
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  padding: 0.4rem 0.9rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.segmented-btn.active {
+exec
+/bin/zsh -lc "sed -n '1040,1560p' /Users/yani/Noema/backend/web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+  margin: 1rem 0 1.25rem;
+  flex-wrap: wrap;
+}
+
+.verify-controls .input {
+  min-width: 240px;
+  flex: 1;
+}
+
+.verify-meta {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-size: 0.85rem;
+}
+
+.verify-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 
 thinking
-**Adding selective pruning with tests**
+**Reviewing UI improvement options**
 
-I'm updating pruneRuns to only consider directories prefixed with "run_" for removal, preserving the cache directory. I'll add tests that create sample run and cache dirs with controlled mod times to verify only older run dirs are pruned and cache stays intact.
+I'm considering adding better empty states or subtle animations to enhance usability without altering core functionality, focusing next on inspecting templates like app.html to identify the best visual improvements.
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/yani/Noema/backend/web/templates/app.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "app"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Dashboard</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  {{template "header_app" .}}
+
+  <main class="main main-dashboard">
+    {{template "orb" .}}
+    <div class="dashboard-content">
+      <section class="card dashboard-hero">
+        <div class="card-kicker">Dashboard</div>
+        <h1 class="card-title">Evaluations</h1>
+        <p class="card-text">Run policy evaluations on your datasets and publish verifiable results.</p>
+        <div class="form-actions">
+
+thinking
+**Considering UI improvements**
+
+Evaluating adding meaningful CSS enhancements like card hover effects or animations for empty and loading states, without introducing JavaScript or functional changes; next step is inspecting the results template layout.
+exec
+/bin/zsh -lc "sed -n '1,240p' /Users/yani/Noema/backend/web/templates/app_results.html" in /Users/yani/Noema/backend succeeded in 52ms:
+{{define "app_results"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noema — Results</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body data-run-id="{{.RunID}}">
+  {{template "header_app" .}}
+
+  <main class="main main-results">
+    {{template "orb" .}}
+    <div class="card results-card">
+      <div class="results-header">
+        <div>
+          <h1 class="card-title">Evaluation results</h1>
+          <div class="results-runline">
+            <p class="text-muted" id="results-run-id">Run ID: <span class="results-run-id">{{.RunID}}</span></p>
+
+
+thinking
+**Planning UI/UX improvements**
+
+I'm focusing on enhancing empty and loading states with subtle styling and text hierarchy to improve user clarity without adding new assets or changing functionality, targeting CSS and template updates.
+thinking
+**Planning accessibility and markup tweaks**
+
+I'm preparing to enhance loading text with a `role="status"` for accessibility and verify that changing loading and empty state elements to divs with classes won't break existing JS that relies on their IDs.
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/yani/Noema/backend/web/static/app.js" in /Users/yani/Noema/backend succeeded in 52ms:
+(function() {
+  var STORAGE_KEY = 'noema_recent_runs';
+  var listEl = document.getElementById('recent-runs-list');
+  var emptyEl = document.getElementById('recent-runs-empty');
+
+  function statusClass(status) {
+    if (!status) return 'status-pill-unknown';
+    var normalized = String(status).toUpperCase();
+    if (normalized === 'PASS') return 'status-pill-pass';
+    if (normalized === 'FAIL') return 'status-pill-fail';
+    return 'status-pill-unknown';
+  }
+
+  function formatTimestamp(ts) {
+    if (!ts) return null;
+    var date = new Date(ts);
+    if (Number.isNaN(date.getTime())) return null;
+    var diffMs = Math.abs(Date.now() - date.getTime());
+    var minutes = Math.round(diffMs / 60000);
+    var label = '';
+
+thinking
+**Deciding container element type**
+
+Planning to switch the empty element from a paragraph to a div while preserving its ID and wrapping it with a class; next step is to verify loading element usage in results.js.
+exec
+/bin/zsh -lc "sed -n '1,240p' /Users/yani/Noema/backend/web/static/results.js" in /Users/yani/Noema/backend succeeded in 52ms:
+(function() {
+  var runId = document.body.getAttribute('data-run-id') || document.getElementById('results-run-id').textContent.replace('Run ID: ', '').trim();
+  var key = 'noema_run_' + runId;
+  var data;
+  try {
+    var raw = localStorage.getItem(key);
+    data = raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    data = null;
+  }
+
+  function copyText(text, button) {
+    if (!text) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function() {
+        if (button) showCopied(button);
+      });
+    } else {
+      var temp = document.createElement('textarea');
+      temp.value = text;
+
+
+thinking
+**Implementing empty and loading states**
+
+Planning to replace empty and loading paragraphs with semantically structured divs using `empty-state` and `loading-state` classes, adding a clear title, text, and a button link for starting a new evaluation to improve UX and accessibility in two HTML files plus CSS.
+thinking
+**Adding CSS for empty and loading states**
+
+Drafting styling for `.empty-state` with subtle border and background, and `.loading-state` with a pulsing dot animation for loading indication; these styles will be added near `.card-text` in CSS and the two HTML templates updated accordingly.
 file update
-M /Users/yani/Noema/backend/internal/evaluate/handler.go
-@@ -173,2 +173,5 @@
- 		}
-+		if !strings.HasPrefix(entry.Name(), "run_") {
-+			continue
-+		}
- 		info, err := entry.Info()
+M /Users/yani/Noema/backend/web/static/styles.css
+@@ -164,2 +164,52 @@
+ 
++.empty-state {
++  border: 1px dashed rgba(255, 255, 255, 0.14);
++  border-radius: 14px;
++  padding: 1.1rem 1.2rem;
++  background: rgba(255, 255, 255, 0.02);
++  display: flex;
++  flex-direction: column;
++  gap: 0.6rem;
++}
++
++.empty-state-title {
++  font-size: 0.95rem;
++  font-weight: 600;
++  color: var(--text);
++}
++
++.empty-state-text {
++  font-size: 0.88rem;
++  color: var(--text-muted);
++  margin: 0;
++}
++
++.loading-state {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.6rem;
++  padding: 0.6rem 0.95rem;
++  border-radius: 999px;
++  border: 1px solid var(--border);
++  background: rgba(0, 0, 0, 0.35);
++  color: var(--text-muted);
++  font-size: 0.9rem;
++}
++
++.loading-state::before {
++  content: "";
++  width: 8px;
++  height: 8px;
++  border-radius: 50%;
++  background: var(--accent);
++  box-shadow: 0 0 10px var(--accent-glow);
++  animation: pulse 1.2s ease-in-out infinite;
++}
++
++@keyframes pulse {
++  0% { transform: scale(0.7); opacity: 0.5; }
++  50% { transform: scale(1); opacity: 1; }
++  100% { transform: scale(0.7); opacity: 0.5; }
++}
++
+ .card-kicker {
 apply_patch(auto_approved=true) exited 0 in 31ms:
 Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/handler.go
+M /Users/yani/Noema/backend/web/static/styles.css
 file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 2a1ce76ddca85f88fe5ec497a0c9245f35546956..df8dd8f88bb72325c4a9997c15993f2e86fe6b47
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -171,6 +171,9 @@
- 		if !entry.IsDir() {
- 			continue
- 		}
-+		if !strings.HasPrefix(entry.Name(), "run_") {
-+			continue
-+		}
- 		info, err := entry.Info()
- 		if err != nil {
- 			continue
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 3ddf30086be9d99f6e7aa2e2f22912b7f9f162f0..42da648819203a38c22a0ccd39064b66c4a5706a
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -162,6 +162,56 @@
+   line-height: 1.6;
+ }
+ 
++.empty-state {
++  border: 1px dashed rgba(255, 255, 255, 0.14);
++  border-radius: 14px;
++  padding: 1.1rem 1.2rem;
++  background: rgba(255, 255, 255, 0.02);
++  display: flex;
++  flex-direction: column;
++  gap: 0.6rem;
++}
++
++.empty-state-title {
++  font-size: 0.95rem;
++  font-weight: 600;
++  color: var(--text);
++}
++
++.empty-state-text {
++  font-size: 0.88rem;
++  color: var(--text-muted);
++  margin: 0;
++}
++
++.loading-state {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.6rem;
++  padding: 0.6rem 0.95rem;
++  border-radius: 999px;
++  border: 1px solid var(--border);
++  background: rgba(0, 0, 0, 0.35);
++  color: var(--text-muted);
++  font-size: 0.9rem;
++}
++
++.loading-state::before {
++  content: "";
++  width: 8px;
++  height: 8px;
++  border-radius: 50%;
++  background: var(--accent);
++  box-shadow: 0 0 10px var(--accent-glow);
++  animation: pulse 1.2s ease-in-out infinite;
++}
++
++@keyframes pulse {
++  0% { transform: scale(0.7); opacity: 0.5; }
++  50% { transform: scale(1); opacity: 1; }
++  100% { transform: scale(0.7); opacity: 0.5; }
++}
++
+ .card-kicker {
+   text-transform: uppercase;
+   font-size: 0.72rem;
 
 file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 2a1ce76ddca85f88fe5ec497a0c9245f35546956..df8dd8f88bb72325c4a9997c15993f2e86fe6b47
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -171,6 +171,9 @@
- 		if !entry.IsDir() {
- 			continue
- 		}
-+		if !strings.HasPrefix(entry.Name(), "run_") {
-+			continue
-+		}
- 		info, err := entry.Info()
- 		if err != nil {
- 			continue
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 3ddf30086be9d99f6e7aa2e2f22912b7f9f162f0..42da648819203a38c22a0ccd39064b66c4a5706a
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -162,6 +162,56 @@
+   line-height: 1.6;
+ }
+ 
++.empty-state {
++  border: 1px dashed rgba(255, 255, 255, 0.14);
++  border-radius: 14px;
++  padding: 1.1rem 1.2rem;
++  background: rgba(255, 255, 255, 0.02);
++  display: flex;
++  flex-direction: column;
++  gap: 0.6rem;
++}
++
++.empty-state-title {
++  font-size: 0.95rem;
++  font-weight: 600;
++  color: var(--text);
++}
++
++.empty-state-text {
++  font-size: 0.88rem;
++  color: var(--text-muted);
++  margin: 0;
++}
++
++.loading-state {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.6rem;
++  padding: 0.6rem 0.95rem;
++  border-radius: 999px;
++  border: 1px solid var(--border);
++  background: rgba(0, 0, 0, 0.35);
++  color: var(--text-muted);
++  font-size: 0.9rem;
++}
++
++.loading-state::before {
++  content: "";
++  width: 8px;
++  height: 8px;
++  border-radius: 50%;
++  background: var(--accent);
++  box-shadow: 0 0 10px var(--accent-glow);
++  animation: pulse 1.2s ease-in-out infinite;
++}
++
++@keyframes pulse {
++  0% { transform: scale(0.7); opacity: 0.5; }
++  50% { transform: scale(1); opacity: 1; }
++  100% { transform: scale(0.7); opacity: 0.5; }
++}
++
+ .card-kicker {
+   text-transform: uppercase;
+   font-size: 0.72rem;
 
 
 thinking
-**Adding missing strings import**
+**Updating templates**
 file update
-M /Users/yani/Noema/backend/internal/evaluate/handler.go
-@@ -10,2 +10,3 @@
- 	"sort"
-+	"strings"
- 	"time"
-apply_patch(auto_approved=true) exited 0 in 40ms:
+M /Users/yani/Noema/backend/web/templates/app.html
+@@ -29,3 +29,7 @@
+           <div id="recent-runs-list" class="recent-runs-list">
+-            <p class="text-muted" id="recent-runs-empty">No runs yet. Start a new evaluation.</p>
++            <div id="recent-runs-empty" class="empty-state">
++              <div class="empty-state-title">No runs yet</div>
++              <p class="empty-state-text">Start a new evaluation to see results here.</p>
++              <a href="/app/new" class="btn btn-ghost btn-sm">New Evaluation</a>
++            </div>
+           </div>
+apply_patch(auto_approved=true) exited 0 in 41ms:
 Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/handler.go
+M /Users/yani/Noema/backend/web/templates/app.html
 file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 2a1ce76ddca85f88fe5ec497a0c9245f35546956..1dd54b55b6f8a4ce47e0087d8f4fbfa2c005eb12
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -8,6 +8,7 @@
- 	"os"
- 	"path/filepath"
- 	"sort"
-+	"strings"
- 	"time"
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 3ddf30086be9d99f6e7aa2e2f22912b7f9f162f0..42da648819203a38c22a0ccd39064b66c4a5706a
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -162,6 +162,56 @@
+   line-height: 1.6;
+ }
  
- 	"noema/internal/config"
-@@ -171,6 +172,9 @@
- 		if !entry.IsDir() {
- 			continue
- 		}
-+		if !strings.HasPrefix(entry.Name(), "run_") {
-+			continue
-+		}
- 		info, err := entry.Info()
- 		if err != nil {
- 			continue
++.empty-state {
++  border: 1px dashed rgba(255, 255, 255, 0.14);
++  border-radius: 14px;
++  padding: 1.1rem 1.2rem;
++  background: rgba(255, 255, 255, 0.02);
++  display: flex;
++  flex-direction: column;
++  gap: 0.6rem;
++}
++
++.empty-state-title {
++  font-size: 0.95rem;
++  font-weight: 600;
++  color: var(--text);
++}
++
++.empty-state-text {
++  font-size: 0.88rem;
++  color: var(--text-muted);
++  margin: 0;
++}
++
++.loading-state {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.6rem;
++  padding: 0.6rem 0.95rem;
++  border-radius: 999px;
++  border: 1px solid var(--border);
++  background: rgba(0, 0, 0, 0.35);
++  color: var(--text-muted);
++  font-size: 0.9rem;
++}
++
++.loading-state::before {
++  content: "";
++  width: 8px;
++  height: 8px;
++  border-radius: 50%;
++  background: var(--accent);
++  box-shadow: 0 0 10px var(--accent-glow);
++  animation: pulse 1.2s ease-in-out infinite;
++}
++
++@keyframes pulse {
++  0% { transform: scale(0.7); opacity: 0.5; }
++  50% { transform: scale(1); opacity: 1; }
++  100% { transform: scale(0.7); opacity: 0.5; }
++}
++
+ .card-kicker {
+   text-transform: uppercase;
+   font-size: 0.72rem;
+diff --git a/backend/web/templates/app.html b/backend/web/templates/app.html
+index 60ef6a53c1cc3782f781f6442fa65a9af81d39da..da4e4475ce5217f72bbf2871aab82bc8a3acf3ab
+--- a/backend/web/templates/app.html
++++ b/backend/web/templates/app.html
+@@ -27,7 +27,11 @@
+         <section class="card recent-runs-card">
+           <h2 class="card-title card-title-sm">Recent runs</h2>
+           <div id="recent-runs-list" class="recent-runs-list">
+-            <p class="text-muted" id="recent-runs-empty">No runs yet. Start a new evaluation.</p>
++            <div id="recent-runs-empty" class="empty-state">
++              <div class="empty-state-title">No runs yet</div>
++              <p class="empty-state-text">Start a new evaluation to see results here.</p>
++              <a href="/app/new" class="btn btn-ghost btn-sm">New Evaluation</a>
++            </div>
+           </div>
+         </section>
+ 
 
 file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 2a1ce76ddca85f88fe5ec497a0c9245f35546956..1dd54b55b6f8a4ce47e0087d8f4fbfa2c005eb12
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -8,6 +8,7 @@
- 	"os"
- 	"path/filepath"
- 	"sort"
-+	"strings"
- 	"time"
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 3ddf30086be9d99f6e7aa2e2f22912b7f9f162f0..42da648819203a38c22a0ccd39064b66c4a5706a
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -162,6 +162,56 @@
+   line-height: 1.6;
+ }
  
- 	"noema/internal/config"
-@@ -171,6 +172,9 @@
- 		if !entry.IsDir() {
- 			continue
- 		}
-+		if !strings.HasPrefix(entry.Name(), "run_") {
-+			continue
-+		}
- 		info, err := entry.Info()
- 		if err != nil {
- 			continue
++.empty-state {
++  border: 1px dashed rgba(255, 255, 255, 0.14);
++  border-radius: 14px;
++  padding: 1.1rem 1.2rem;
++  background: rgba(255, 255, 255, 0.02);
++  display: flex;
++  flex-direction: column;
++  gap: 0.6rem;
++}
++
++.empty-state-title {
++  font-size: 0.95rem;
++  font-weight: 600;
++  color: var(--text);
++}
++
++.empty-state-text {
++  font-size: 0.88rem;
++  color: var(--text-muted);
++  margin: 0;
++}
++
++.loading-state {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.6rem;
++  padding: 0.6rem 0.95rem;
++  border-radius: 999px;
++  border: 1px solid var(--border);
++  background: rgba(0, 0, 0, 0.35);
++  color: var(--text-muted);
++  font-size: 0.9rem;
++}
++
++.loading-state::before {
++  content: "";
++  width: 8px;
++  height: 8px;
++  border-radius: 50%;
++  background: var(--accent);
++  box-shadow: 0 0 10px var(--accent-glow);
++  animation: pulse 1.2s ease-in-out infinite;
++}
++
++@keyframes pulse {
++  0% { transform: scale(0.7); opacity: 0.5; }
++  50% { transform: scale(1); opacity: 1; }
++  100% { transform: scale(0.7); opacity: 0.5; }
++}
++
+ .card-kicker {
+   text-transform: uppercase;
+   font-size: 0.72rem;
+diff --git a/backend/web/templates/app.html b/backend/web/templates/app.html
+index 60ef6a53c1cc3782f781f6442fa65a9af81d39da..da4e4475ce5217f72bbf2871aab82bc8a3acf3ab
+--- a/backend/web/templates/app.html
++++ b/backend/web/templates/app.html
+@@ -27,7 +27,11 @@
+         <section class="card recent-runs-card">
+           <h2 class="card-title card-title-sm">Recent runs</h2>
+           <div id="recent-runs-list" class="recent-runs-list">
+-            <p class="text-muted" id="recent-runs-empty">No runs yet. Start a new evaluation.</p>
++            <div id="recent-runs-empty" class="empty-state">
++              <div class="empty-state-title">No runs yet</div>
++              <p class="empty-state-text">Start a new evaluation to see results here.</p>
++              <a href="/app/new" class="btn btn-ghost btn-sm">New Evaluation</a>
++            </div>
+           </div>
+         </section>
+ 
 
 
 thinking
-**Adding test for patch application**
+**Updating app_results.html**
 file update
-M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
-@@ -8,4 +8,7 @@
- 	"net/textproto"
-+	"os"
-+	"path/filepath"
- 	"sort"
- 	"testing"
-+	"time"
- )
-@@ -238 +241,42 @@
- }
-+
-+func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
-+	base := t.TempDir()
-+
-+	runOld := filepath.Join(base, "run_old")
-+	runNew := filepath.Join(base, "run_new")
-+	cacheDir := filepath.Join(base, "cache")
-+	otherDir := filepath.Join(base, "misc")
-+
-+	for _, dir := range []string{runOld, runNew, cacheDir, otherDir} {
-+		if err := os.MkdirAll(dir, 0755); err != nil {
-+			t.Fatalf("mkdir %s: %v", dir, err)
-+		}
-+	}
-+
-+	oldTime := time.Now().Add(-2 * time.Hour)
-+	newTime := time.Now().Add(-1 * time.Hour)
-+	if err := os.Chtimes(runOld, oldTime, oldTime); err != nil {
-+		t.Fatalf("chtimes run_old: %v", err)
-+	}
-+	if err := os.Chtimes(runNew, newTime, newTime); err != nil {
-+		t.Fatalf("chtimes run_new: %v", err)
-+	}
-+
-+	if err := pruneRuns(base, 1); err != nil {
-+		t.Fatalf("pruneRuns error: %v", err)
-+	}
-+
-+	if _, err := os.Stat(runOld); err == nil {
-+		t.Fatalf("expected run_old to be pruned")
-+	}
-+	if _, err := os.Stat(runNew); err != nil {
-+		t.Fatalf("expected run_new to remain, got err: %v", err)
-+	}
-+	if _, err := os.Stat(cacheDir); err != nil {
-+		t.Fatalf("expected cache dir to remain, got err: %v", err)
-+	}
-+	if _, err := os.Stat(otherDir); err != nil {
-+		t.Fatalf("expected misc dir to remain, got err: %v", err)
-+	}
-+}
-apply_patch(auto_approved=true) exited 0 in 40ms:
+M /Users/yani/Noema/backend/web/templates/app_results.html
+@@ -29,3 +29,3 @@
+       <div id="results-content">
+-        <p class="text-muted" id="results-loading">Loading…</p>
++        <div class="loading-state" id="results-loading" role="status" aria-live="polite">Loading results…</div>
+         <div id="results-body" style="display:none;">
+apply_patch(auto_approved=true) exited 0 in 52ms:
 Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
+M /Users/yani/Noema/backend/web/templates/app_results.html
 file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 2a1ce76ddca85f88fe5ec497a0c9245f35546956..1dd54b55b6f8a4ce47e0087d8f4fbfa2c005eb12
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -8,6 +8,7 @@
- 	"os"
- 	"path/filepath"
- 	"sort"
-+	"strings"
- 	"time"
- 
- 	"noema/internal/config"
-@@ -171,6 +172,9 @@
- 		if !entry.IsDir() {
- 			continue
- 		}
-+		if !strings.HasPrefix(entry.Name(), "run_") {
-+			continue
-+		}
- 		info, err := entry.Info()
- 		if err != nil {
- 			continue
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 51b2b30093747df682b1379eff8e6012b3acffe9..8228bf435f0da3463cf3b975e968e91a3909086e
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -6,8 +6,11 @@
- 	"fmt"
- 	"mime/multipart"
- 	"net/textproto"
-+	"os"
-+	"path/filepath"
- 	"sort"
- 	"testing"
-+	"time"
- )
- 
- type formFile struct {
-@@ -236,3 +239,44 @@
- 		t.Fatalf("expected error for empty custom constraint id")
- 	}
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 3ddf30086be9d99f6e7aa2e2f22912b7f9f162f0..42da648819203a38c22a0ccd39064b66c4a5706a
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -162,6 +162,56 @@
+   line-height: 1.6;
  }
-+
-+func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
-+	base := t.TempDir()
-+
-+	runOld := filepath.Join(base, "run_old")
-+	runNew := filepath.Join(base, "run_new")
-+	cacheDir := filepath.Join(base, "cache")
-+	otherDir := filepath.Join(base, "misc")
-+
-+	for _, dir := range []string{runOld, runNew, cacheDir, otherDir} {
-+		if err := os.MkdirAll(dir, 0755); err != nil {
-+			t.Fatalf("mkdir %s: %v", dir, err)
-+		}
-+	}
-+
-+	oldTime := time.Now().Add(-2 * time.Hour)
-+	newTime := time.Now().Add(-1 * time.Hour)
-+	if err := os.Chtimes(runOld, oldTime, oldTime); err != nil {
-+		t.Fatalf("chtimes run_old: %v", err)
-+	}
-+	if err := os.Chtimes(runNew, newTime, newTime); err != nil {
-+		t.Fatalf("chtimes run_new: %v", err)
-+	}
-+
-+	if err := pruneRuns(base, 1); err != nil {
-+		t.Fatalf("pruneRuns error: %v", err)
-+	}
-+
-+	if _, err := os.Stat(runOld); err == nil {
-+		t.Fatalf("expected run_old to be pruned")
-+	}
-+	if _, err := os.Stat(runNew); err != nil {
-+		t.Fatalf("expected run_new to remain, got err: %v", err)
-+	}
-+	if _, err := os.Stat(cacheDir); err != nil {
-+		t.Fatalf("expected cache dir to remain, got err: %v", err)
-+	}
-+	if _, err := os.Stat(otherDir); err != nil {
-+		t.Fatalf("expected misc dir to remain, got err: %v", err)
-+	}
+ 
++.empty-state {
++  border: 1px dashed rgba(255, 255, 255, 0.14);
++  border-radius: 14px;
++  padding: 1.1rem 1.2rem;
++  background: rgba(255, 255, 255, 0.02);
++  display: flex;
++  flex-direction: column;
++  gap: 0.6rem;
 +}
++
++.empty-state-title {
++  font-size: 0.95rem;
++  font-weight: 600;
++  color: var(--text);
++}
++
++.empty-state-text {
++  font-size: 0.88rem;
++  color: var(--text-muted);
++  margin: 0;
++}
++
++.loading-state {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.6rem;
++  padding: 0.6rem 0.95rem;
++  border-radius: 999px;
++  border: 1px solid var(--border);
++  background: rgba(0, 0, 0, 0.35);
++  color: var(--text-muted);
++  font-size: 0.9rem;
++}
++
++.loading-state::before {
++  content: "";
++  width: 8px;
++  height: 8px;
++  border-radius: 50%;
++  background: var(--accent);
++  box-shadow: 0 0 10px var(--accent-glow);
++  animation: pulse 1.2s ease-in-out infinite;
++}
++
++@keyframes pulse {
++  0% { transform: scale(0.7); opacity: 0.5; }
++  50% { transform: scale(1); opacity: 1; }
++  100% { transform: scale(0.7); opacity: 0.5; }
++}
++
+ .card-kicker {
+   text-transform: uppercase;
+   font-size: 0.72rem;
+diff --git a/backend/web/templates/app.html b/backend/web/templates/app.html
+index 60ef6a53c1cc3782f781f6442fa65a9af81d39da..da4e4475ce5217f72bbf2871aab82bc8a3acf3ab
+--- a/backend/web/templates/app.html
++++ b/backend/web/templates/app.html
+@@ -27,7 +27,11 @@
+         <section class="card recent-runs-card">
+           <h2 class="card-title card-title-sm">Recent runs</h2>
+           <div id="recent-runs-list" class="recent-runs-list">
+-            <p class="text-muted" id="recent-runs-empty">No runs yet. Start a new evaluation.</p>
++            <div id="recent-runs-empty" class="empty-state">
++              <div class="empty-state-title">No runs yet</div>
++              <p class="empty-state-text">Start a new evaluation to see results here.</p>
++              <a href="/app/new" class="btn btn-ghost btn-sm">New Evaluation</a>
++            </div>
+           </div>
+         </section>
+ 
+diff --git a/backend/web/templates/app_results.html b/backend/web/templates/app_results.html
+index 599cf4c073c026caf3062098c6f8b19b770baa91..9a8fd012bfb0dee866b6cb638ed22c33cdd06f5c
+--- a/backend/web/templates/app_results.html
++++ b/backend/web/templates/app_results.html
+@@ -27,7 +27,7 @@
+         </div>
+       </div>
+       <div id="results-content">
+-        <p class="text-muted" id="results-loading">Loading…</p>
++        <div class="loading-state" id="results-loading" role="status" aria-live="polite">Loading results…</div>
+         <div id="results-body" style="display:none;">
+           <div class="results-summary">
+             <div id="results-status" class="results-status"></div>
 
 file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 2a1ce76ddca85f88fe5ec497a0c9245f35546956..1dd54b55b6f8a4ce47e0087d8f4fbfa2c005eb12
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -8,6 +8,7 @@
- 	"os"
- 	"path/filepath"
- 	"sort"
-+	"strings"
- 	"time"
- 
- 	"noema/internal/config"
-@@ -171,6 +172,9 @@
- 		if !entry.IsDir() {
- 			continue
- 		}
-+		if !strings.HasPrefix(entry.Name(), "run_") {
-+			continue
-+		}
- 		info, err := entry.Info()
- 		if err != nil {
- 			continue
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 51b2b30093747df682b1379eff8e6012b3acffe9..8228bf435f0da3463cf3b975e968e91a3909086e
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -6,8 +6,11 @@
- 	"fmt"
- 	"mime/multipart"
- 	"net/textproto"
-+	"os"
-+	"path/filepath"
- 	"sort"
- 	"testing"
-+	"time"
- )
- 
- type formFile struct {
-@@ -236,3 +239,44 @@
- 		t.Fatalf("expected error for empty custom constraint id")
- 	}
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 3ddf30086be9d99f6e7aa2e2f22912b7f9f162f0..42da648819203a38c22a0ccd39064b66c4a5706a
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -162,6 +162,56 @@
+   line-height: 1.6;
  }
-+
-+func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
-+	base := t.TempDir()
-+
-+	runOld := filepath.Join(base, "run_old")
-+	runNew := filepath.Join(base, "run_new")
-+	cacheDir := filepath.Join(base, "cache")
-+	otherDir := filepath.Join(base, "misc")
-+
-+	for _, dir := range []string{runOld, runNew, cacheDir, otherDir} {
-+		if err := os.MkdirAll(dir, 0755); err != nil {
-+			t.Fatalf("mkdir %s: %v", dir, err)
-+		}
-+	}
-+
-+	oldTime := time.Now().Add(-2 * time.Hour)
-+	newTime := time.Now().Add(-1 * time.Hour)
-+	if err := os.Chtimes(runOld, oldTime, oldTime); err != nil {
-+		t.Fatalf("chtimes run_old: %v", err)
-+	}
-+	if err := os.Chtimes(runNew, newTime, newTime); err != nil {
-+		t.Fatalf("chtimes run_new: %v", err)
-+	}
-+
-+	if err := pruneRuns(base, 1); err != nil {
-+		t.Fatalf("pruneRuns error: %v", err)
-+	}
-+
-+	if _, err := os.Stat(runOld); err == nil {
-+		t.Fatalf("expected run_old to be pruned")
-+	}
-+	if _, err := os.Stat(runNew); err != nil {
-+		t.Fatalf("expected run_new to remain, got err: %v", err)
-+	}
-+	if _, err := os.Stat(cacheDir); err != nil {
-+		t.Fatalf("expected cache dir to remain, got err: %v", err)
-+	}
-+	if _, err := os.Stat(otherDir); err != nil {
-+		t.Fatalf("expected misc dir to remain, got err: %v", err)
-+	}
+ 
++.empty-state {
++  border: 1px dashed rgba(255, 255, 255, 0.14);
++  border-radius: 14px;
++  padding: 1.1rem 1.2rem;
++  background: rgba(255, 255, 255, 0.02);
++  display: flex;
++  flex-direction: column;
++  gap: 0.6rem;
 +}
++
++.empty-state-title {
++  font-size: 0.95rem;
++  font-weight: 600;
++  color: var(--text);
++}
++
++.empty-state-text {
++  font-size: 0.88rem;
++  color: var(--text-muted);
++  margin: 0;
++}
++
++.loading-state {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.6rem;
++  padding: 0.6rem 0.95rem;
++  border-radius: 999px;
++  border: 1px solid var(--border);
++  background: rgba(0, 0, 0, 0.35);
++  color: var(--text-muted);
++  font-size: 0.9rem;
++}
++
++.loading-state::before {
++  content: "";
++  width: 8px;
++  height: 8px;
++  border-radius: 50%;
++  background: var(--accent);
++  box-shadow: 0 0 10px var(--accent-glow);
++  animation: pulse 1.2s ease-in-out infinite;
++}
++
++@keyframes pulse {
++  0% { transform: scale(0.7); opacity: 0.5; }
++  50% { transform: scale(1); opacity: 1; }
++  100% { transform: scale(0.7); opacity: 0.5; }
++}
++
+ .card-kicker {
+   text-transform: uppercase;
+   font-size: 0.72rem;
+diff --git a/backend/web/templates/app.html b/backend/web/templates/app.html
+index 60ef6a53c1cc3782f781f6442fa65a9af81d39da..da4e4475ce5217f72bbf2871aab82bc8a3acf3ab
+--- a/backend/web/templates/app.html
++++ b/backend/web/templates/app.html
+@@ -27,7 +27,11 @@
+         <section class="card recent-runs-card">
+           <h2 class="card-title card-title-sm">Recent runs</h2>
+           <div id="recent-runs-list" class="recent-runs-list">
+-            <p class="text-muted" id="recent-runs-empty">No runs yet. Start a new evaluation.</p>
++            <div id="recent-runs-empty" class="empty-state">
++              <div class="empty-state-title">No runs yet</div>
++              <p class="empty-state-text">Start a new evaluation to see results here.</p>
++              <a href="/app/new" class="btn btn-ghost btn-sm">New Evaluation</a>
++            </div>
+           </div>
+         </section>
+ 
+diff --git a/backend/web/templates/app_results.html b/backend/web/templates/app_results.html
+index 599cf4c073c026caf3062098c6f8b19b770baa91..9a8fd012bfb0dee866b6cb638ed22c33cdd06f5c
+--- a/backend/web/templates/app_results.html
++++ b/backend/web/templates/app_results.html
+@@ -27,7 +27,7 @@
+         </div>
+       </div>
+       <div id="results-content">
+-        <p class="text-muted" id="results-loading">Loading…</p>
++        <div class="loading-state" id="results-loading" role="status" aria-live="polite">Loading results…</div>
+         <div id="results-body" style="display:none;">
+           <div class="results-summary">
+             <div id="results-status" class="results-status"></div>
 
 
 thinking
 **Running tests**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 936ms:
+/bin/zsh -lc 'go test ./...' in /Users/yani/Noema/backend succeeded in 318ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	0.033s
+ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
-?   	noema/internal/verify	[no test files]
+ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
 file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 2a1ce76ddca85f88fe5ec497a0c9245f35546956..1dd54b55b6f8a4ce47e0087d8f4fbfa2c005eb12
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -8,6 +8,7 @@
- 	"os"
- 	"path/filepath"
- 	"sort"
-+	"strings"
- 	"time"
- 
- 	"noema/internal/config"
-@@ -171,6 +172,9 @@
- 		if !entry.IsDir() {
- 			continue
- 		}
-+		if !strings.HasPrefix(entry.Name(), "run_") {
-+			continue
-+		}
- 		info, err := entry.Info()
- 		if err != nil {
- 			continue
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 51b2b30093747df682b1379eff8e6012b3acffe9..8228bf435f0da3463cf3b975e968e91a3909086e
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -6,8 +6,11 @@
- 	"fmt"
- 	"mime/multipart"
- 	"net/textproto"
-+	"os"
-+	"path/filepath"
- 	"sort"
- 	"testing"
-+	"time"
- )
- 
- type formFile struct {
-@@ -236,3 +239,44 @@
- 		t.Fatalf("expected error for empty custom constraint id")
- 	}
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 3ddf30086be9d99f6e7aa2e2f22912b7f9f162f0..42da648819203a38c22a0ccd39064b66c4a5706a
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -162,6 +162,56 @@
+   line-height: 1.6;
  }
-+
-+func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
-+	base := t.TempDir()
-+
-+	runOld := filepath.Join(base, "run_old")
-+	runNew := filepath.Join(base, "run_new")
-+	cacheDir := filepath.Join(base, "cache")
-+	otherDir := filepath.Join(base, "misc")
-+
-+	for _, dir := range []string{runOld, runNew, cacheDir, otherDir} {
-+		if err := os.MkdirAll(dir, 0755); err != nil {
-+			t.Fatalf("mkdir %s: %v", dir, err)
-+		}
-+	}
-+
-+	oldTime := time.Now().Add(-2 * time.Hour)
-+	newTime := time.Now().Add(-1 * time.Hour)
-+	if err := os.Chtimes(runOld, oldTime, oldTime); err != nil {
-+		t.Fatalf("chtimes run_old: %v", err)
-+	}
-+	if err := os.Chtimes(runNew, newTime, newTime); err != nil {
-+		t.Fatalf("chtimes run_new: %v", err)
-+	}
-+
-+	if err := pruneRuns(base, 1); err != nil {
-+		t.Fatalf("pruneRuns error: %v", err)
-+	}
-+
-+	if _, err := os.Stat(runOld); err == nil {
-+		t.Fatalf("expected run_old to be pruned")
-+	}
-+	if _, err := os.Stat(runNew); err != nil {
-+		t.Fatalf("expected run_new to remain, got err: %v", err)
-+	}
-+	if _, err := os.Stat(cacheDir); err != nil {
-+		t.Fatalf("expected cache dir to remain, got err: %v", err)
-+	}
-+	if _, err := os.Stat(otherDir); err != nil {
-+		t.Fatalf("expected misc dir to remain, got err: %v", err)
-+	}
+ 
++.empty-state {
++  border: 1px dashed rgba(255, 255, 255, 0.14);
++  border-radius: 14px;
++  padding: 1.1rem 1.2rem;
++  background: rgba(255, 255, 255, 0.02);
++  display: flex;
++  flex-direction: column;
++  gap: 0.6rem;
 +}
++
++.empty-state-title {
++  font-size: 0.95rem;
++  font-weight: 600;
++  color: var(--text);
++}
++
++.empty-state-text {
++  font-size: 0.88rem;
++  color: var(--text-muted);
++  margin: 0;
++}
++
++.loading-state {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.6rem;
++  padding: 0.6rem 0.95rem;
++  border-radius: 999px;
++  border: 1px solid var(--border);
++  background: rgba(0, 0, 0, 0.35);
++  color: var(--text-muted);
++  font-size: 0.9rem;
++}
++
++.loading-state::before {
++  content: "";
++  width: 8px;
++  height: 8px;
++  border-radius: 50%;
++  background: var(--accent);
++  box-shadow: 0 0 10px var(--accent-glow);
++  animation: pulse 1.2s ease-in-out infinite;
++}
++
++@keyframes pulse {
++  0% { transform: scale(0.7); opacity: 0.5; }
++  50% { transform: scale(1); opacity: 1; }
++  100% { transform: scale(0.7); opacity: 0.5; }
++}
++
+ .card-kicker {
+   text-transform: uppercase;
+   font-size: 0.72rem;
+diff --git a/backend/web/templates/app.html b/backend/web/templates/app.html
+index 60ef6a53c1cc3782f781f6442fa65a9af81d39da..da4e4475ce5217f72bbf2871aab82bc8a3acf3ab
+--- a/backend/web/templates/app.html
++++ b/backend/web/templates/app.html
+@@ -27,7 +27,11 @@
+         <section class="card recent-runs-card">
+           <h2 class="card-title card-title-sm">Recent runs</h2>
+           <div id="recent-runs-list" class="recent-runs-list">
+-            <p class="text-muted" id="recent-runs-empty">No runs yet. Start a new evaluation.</p>
++            <div id="recent-runs-empty" class="empty-state">
++              <div class="empty-state-title">No runs yet</div>
++              <p class="empty-state-text">Start a new evaluation to see results here.</p>
++              <a href="/app/new" class="btn btn-ghost btn-sm">New Evaluation</a>
++            </div>
+           </div>
+         </section>
+ 
+diff --git a/backend/web/templates/app_results.html b/backend/web/templates/app_results.html
+index 599cf4c073c026caf3062098c6f8b19b770baa91..9a8fd012bfb0dee866b6cb638ed22c33cdd06f5c
+--- a/backend/web/templates/app_results.html
++++ b/backend/web/templates/app_results.html
+@@ -27,7 +27,7 @@
+         </div>
+       </div>
+       <div id="results-content">
+-        <p class="text-muted" id="results-loading">Loading…</p>
++        <div class="loading-state" id="results-loading" role="status" aria-live="polite">Loading results…</div>
+         <div id="results-body" style="display:none;">
+           <div class="results-summary">
+             <div id="results-status" class="results-status"></div>
 
 codex
-What you changed (short)
-- Prevented `pruneRuns` from deleting non-run directories like `cache`, and added a test to cover this case.
+What I changed (short)
+- Improved empty/loading states on the dashboard and results pages with clearer hierarchy, CTA, and a subtle animated loading badge.
+- Added supporting styles for those new UI elements.
 
-Tests run (must include go test ./...)
+Tests run
 - `go test ./...`
 
-If you want a next step, pick one:
-1. Add a small regression test for `updateRunsIndex` when index is corrupted.  
-2. Tighten error reporting in `saveRunFiles` to include the specific file that failed.
+If you want, I can follow up with a second UI pass on results cards or the verify list.
 file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 2a1ce76ddca85f88fe5ec497a0c9245f35546956..1dd54b55b6f8a4ce47e0087d8f4fbfa2c005eb12
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -8,6 +8,7 @@
- 	"os"
- 	"path/filepath"
- 	"sort"
-+	"strings"
- 	"time"
- 
- 	"noema/internal/config"
-@@ -171,6 +172,9 @@
- 		if !entry.IsDir() {
- 			continue
- 		}
-+		if !strings.HasPrefix(entry.Name(), "run_") {
-+			continue
-+		}
- 		info, err := entry.Info()
- 		if err != nil {
- 			continue
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 51b2b30093747df682b1379eff8e6012b3acffe9..8228bf435f0da3463cf3b975e968e91a3909086e
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -6,8 +6,11 @@
- 	"fmt"
- 	"mime/multipart"
- 	"net/textproto"
-+	"os"
-+	"path/filepath"
- 	"sort"
- 	"testing"
-+	"time"
- )
- 
- type formFile struct {
-@@ -236,3 +239,44 @@
- 		t.Fatalf("expected error for empty custom constraint id")
- 	}
+diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
+index 3ddf30086be9d99f6e7aa2e2f22912b7f9f162f0..42da648819203a38c22a0ccd39064b66c4a5706a
+--- a/backend/web/static/styles.css
++++ b/backend/web/static/styles.css
+@@ -162,6 +162,56 @@
+   line-height: 1.6;
  }
-+
-+func TestPruneRuns_IgnoresNonRunDirectories(t *testing.T) {
-+	base := t.TempDir()
-+
-+	runOld := filepath.Join(base, "run_old")
-+	runNew := filepath.Join(base, "run_new")
-+	cacheDir := filepath.Join(base, "cache")
-+	otherDir := filepath.Join(base, "misc")
-+
-+	for _, dir := range []string{runOld, runNew, cacheDir, otherDir} {
-+		if err := os.MkdirAll(dir, 0755); err != nil {
-+			t.Fatalf("mkdir %s: %v", dir, err)
-+		}
-+	}
-+
-+	oldTime := time.Now().Add(-2 * time.Hour)
-+	newTime := time.Now().Add(-1 * time.Hour)
-+	if err := os.Chtimes(runOld, oldTime, oldTime); err != nil {
-+		t.Fatalf("chtimes run_old: %v", err)
-+	}
-+	if err := os.Chtimes(runNew, newTime, newTime); err != nil {
-+		t.Fatalf("chtimes run_new: %v", err)
-+	}
-+
-+	if err := pruneRuns(base, 1); err != nil {
-+		t.Fatalf("pruneRuns error: %v", err)
-+	}
-+
-+	if _, err := os.Stat(runOld); err == nil {
-+		t.Fatalf("expected run_old to be pruned")
-+	}
-+	if _, err := os.Stat(runNew); err != nil {
-+		t.Fatalf("expected run_new to remain, got err: %v", err)
-+	}
-+	if _, err := os.Stat(cacheDir); err != nil {
-+		t.Fatalf("expected cache dir to remain, got err: %v", err)
-+	}
-+	if _, err := os.Stat(otherDir); err != nil {
-+		t.Fatalf("expected misc dir to remain, got err: %v", err)
-+	}
+ 
++.empty-state {
++  border: 1px dashed rgba(255, 255, 255, 0.14);
++  border-radius: 14px;
++  padding: 1.1rem 1.2rem;
++  background: rgba(255, 255, 255, 0.02);
++  display: flex;
++  flex-direction: column;
++  gap: 0.6rem;
 +}
++
++.empty-state-title {
++  font-size: 0.95rem;
++  font-weight: 600;
++  color: var(--text);
++}
++
++.empty-state-text {
++  font-size: 0.88rem;
++  color: var(--text-muted);
++  margin: 0;
++}
++
++.loading-state {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.6rem;
++  padding: 0.6rem 0.95rem;
++  border-radius: 999px;
++  border: 1px solid var(--border);
++  background: rgba(0, 0, 0, 0.35);
++  color: var(--text-muted);
++  font-size: 0.9rem;
++}
++
++.loading-state::before {
++  content: "";
++  width: 8px;
++  height: 8px;
++  border-radius: 50%;
++  background: var(--accent);
++  box-shadow: 0 0 10px var(--accent-glow);
++  animation: pulse 1.2s ease-in-out infinite;
++}
++
++@keyframes pulse {
++  0% { transform: scale(0.7); opacity: 0.5; }
++  50% { transform: scale(1); opacity: 1; }
++  100% { transform: scale(0.7); opacity: 0.5; }
++}
++
+ .card-kicker {
+   text-transform: uppercase;
+   font-size: 0.72rem;
+diff --git a/backend/web/templates/app.html b/backend/web/templates/app.html
+index 60ef6a53c1cc3782f781f6442fa65a9af81d39da..da4e4475ce5217f72bbf2871aab82bc8a3acf3ab
+--- a/backend/web/templates/app.html
++++ b/backend/web/templates/app.html
+@@ -27,7 +27,11 @@
+         <section class="card recent-runs-card">
+           <h2 class="card-title card-title-sm">Recent runs</h2>
+           <div id="recent-runs-list" class="recent-runs-list">
+-            <p class="text-muted" id="recent-runs-empty">No runs yet. Start a new evaluation.</p>
++            <div id="recent-runs-empty" class="empty-state">
++              <div class="empty-state-title">No runs yet</div>
++              <p class="empty-state-text">Start a new evaluation to see results here.</p>
++              <a href="/app/new" class="btn btn-ghost btn-sm">New Evaluation</a>
++            </div>
+           </div>
+         </section>
+ 
+diff --git a/backend/web/templates/app_results.html b/backend/web/templates/app_results.html
+index 599cf4c073c026caf3062098c6f8b19b770baa91..9a8fd012bfb0dee866b6cb638ed22c33cdd06f5c
+--- a/backend/web/templates/app_results.html
++++ b/backend/web/templates/app_results.html
+@@ -27,7 +27,7 @@
+         </div>
+       </div>
+       <div id="results-content">
+-        <p class="text-muted" id="results-loading">Loading…</p>
++        <div class="loading-state" id="results-loading" role="status" aria-live="polite">Loading results…</div>
+         <div id="results-body" style="display:none;">
+           <div class="results-summary">
+             <div id="results-status" class="results-status"></div>
 
 tokens used
-24,227
-What you changed (short)
-- Prevented `pruneRuns` from deleting non-run directories like `cache`, and added a test to cover this case.
+20,537
+What I changed (short)
+- Improved empty/loading states on the dashboard and results pages with clearer hierarchy, CTA, and a subtle animated loading badge.
+- Added supporting styles for those new UI elements.
 
-Tests run (must include go test ./...)
+Tests run
 - `go test ./...`
 
-If you want a next step, pick one:
-1. Add a small regression test for `updateRunsIndex` when index is corrupted.  
-2. Tighten error reporting in `saveRunFiles` to include the specific file that failed.
+If you want, I can follow up with a second UI pass on results cards or the verify list.
