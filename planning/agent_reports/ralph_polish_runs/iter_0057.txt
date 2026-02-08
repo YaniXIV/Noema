@@ -1,0 +1,665 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3cbe-5c05-7b02-8dea-15bb6f0562f7
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Preparing to run tests**
+
+I'm setting up to execute the tests using a direct command without involving web interactions.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 98ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+ok  	noema/internal/config	(cached)
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Starting repo inspection**
+
+I'm planning to use ripgrep to find TODOs and check error handling or Gemini integration for meaningful improvements across a few files.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && rg --files -g '*.go'" in /Users/yani/Noema/backend succeeded in 52ms:
+internal/session/session_test.go
+internal/session/session.go
+internal/evaluate/prompt.go
+internal/evaluate/parse.go
+internal/evaluate/output.go
+internal/evaluate/handler_test.go
+internal/evaluate/schema.go
+internal/evaluate/dataset.go
+internal/evaluate/storage.go
+internal/evaluate/storage_test.go
+internal/evaluate/images.go
+internal/evaluate/handler_integration_test.go
+internal/evaluate/cache.go
+internal/evaluate/commitment.go
+internal/evaluate/policy.go
+internal/evaluate/spec.go
+internal/evaluate/gemini_eval.go
+internal/evaluate/handler.go
+internal/web/auth.go
+internal/web/upload.go
+
+thinking
+**Considering upload validation**
+
+I'm planning to inspect the upload functionality for possible validation improvements before proceeding.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/web/upload.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package web
+
+import (
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+
+	"github.com/gin-gonic/gin"
+)
+
+// UploadData is passed to the upload template.
+type UploadData struct {
+	Error    string
+
+thinking
+**Reviewing file upload validations**
+
+I'm considering adding checks for missing or zero file size, normalizing file extensions to lowercase, and ensuring content length isn't negative before inspecting evaluate/output.go.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/output.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+)
+
+type EvalConstraintResult struct {
+	ID        string `json:"id"`
+	Severity  int    `json:"severity"`
+	Rationale string `json:"rationale"`
+}
+
+type EvalOutput struct {
+	SchemaVersion int                    `json:"schema_version"`
+	Constraints   []EvalConstraintResult `json:"constraints"`
+	MaxSeverity   int                    `json:"max_severity"`
+	Confidence    *float64               `json:"confidence,omitempty"`
+
+thinking
+**Considering error handling improvements**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/httputil/body.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package httputil
+
+import (
+	"errors"
+	"net/http"
+	"strings"
+)
+
+// IsBodyTooLarge reports whether the error indicates the request body exceeded MaxBytesReader.
+func IsBodyTooLarge(err error) bool {
+	if err == nil {
+		return false
+	}
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "request body too large") ||
+		strings.Contains(msg, "multipart: message too large")
+
+thinking
+**Considering robustness improvement**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"path/filepath"
+	"strings"
+
+	"noema/internal/config"
+)
+
+func parseSpec(form *multipart.Form) (Spec, error) {
+	specStrs := form.Value["spec"]
+	if len(specStrs) == 0 || specStrs[0] == "" {
+		return Spec{}, fmt.Errorf("missing field: spec")
+	}
+	if len(specStrs) > 1 {
+		return Spec{}, fmt.Errorf("only one spec value allowed")
+
+thinking
+**Identifying validation and session areas**
+
+I'm noting potential improvements by restricting uploads to expected file extensions and checking session persistence implementation next in the session management code.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/session/session.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package session
+
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"strings"
+)
+
+const CookieName = "noema_judge"
+
+// Sign produces a signed cookie value for the given payload (e.g. judge key).
+// Format: base64(payload) + "." + hex(HMAC-SHA256(secret, payload)).
+func Sign(secret, payload string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(payload))
+	sig := hex.EncodeToString(mac.Sum(nil))
+	encoded := base64.StdEncoding.EncodeToString([]byte(payload))
+
+thinking
+**Identifying potential data encoding and validation improvements**
+
+I'm noting Base64 encoding should be URL-safe to prevent cookie issues, though changing might break existing cookies. Also considering stricter multipart form content checks and better error cause propagation in eval parsing, with a plan to inspect internal verification handlers next.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/verify/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package verify
+
+import (
+	"encoding/base64"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+// VerifyRequest is the JSON body for POST /api/verify.
+type VerifyRequest struct {
+	RunID           string `json:"run_id"`
+	ProofB64        string `json:"proof_b64"`
+	PublicInputsB64 string `json:"public_inputs_b64"`
+
+thinking
+**Reviewing input validation possibilities**
+
+Considering adding runID length validation to avoid large inputs and checking runID format, with reference to existing MaxVerifyBytes limits; next step is inspecting evaluate handler code for further improvements.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '200,400p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	var runs []runEntry
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if !strings.HasPrefix(entry.Name(), "run_") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		runs = append(runs, runEntry{
+			path:    filepath.Join(runsDir, entry.Name()),
+
+thinking
+**Considering error handling improvements**
+
+I'm evaluating whether to provide more meaningful user errors from parseEvalOutput beyond the current generic messages and checking related saveRunFiles logic for potential bugs or enhancements.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math/big"
+	"mime/multipart"
+	"os"
+	"path/filepath"
+	"strconv"
+	"sync/atomic"
+	"time"
+)
+
+var runIDCounter uint64
+
+func genRunID() string {
+	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
+
+thinking
+**Noticing minor upload handling improvements**
+
+Identified some possible refinements in upload filename and extension safety and dataset file validation but concluded current safeguards (like using filepath.Base for names and DisallowUnknownFields in parsing) are adequate; next, I’ll check dataset JSON validation closely.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"path/filepath"
+	"strings"
+
+	"noema/internal/config"
+)
+
+type Dataset struct {
+	Items []DatasetItem `json:"items"`
+}
+
+type DatasetItem struct {
+	ID       string         `json:"id"`
+
+thinking
+**Identifying test opportunities and potential bug**
+
+I'm verifying if the parseEvalOutputOptional function is unused or superseded by resolveEvalOutput in evaluate/handler, focusing on internal/evaluate/gemini_eval.go to find a small meaningful improvement and add tests accordingly.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/gemini_eval.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"context"
+	"log"
+	"mime/multipart"
+	"os"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/gemini"
+)
+
+const geminiEvalTimeout = 45 * time.Second
+
+func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
+	if out, provided, err := parseEvalOutputProvided(form, enabled); err != nil {
+		return EvalOutput{}, err
+	} else if provided {
+		return out, nil
+
+thinking
+**Checking existing tests for eval output parsing**
+
+I'm verifying if tests already cover parseEvalOutput before adding new ones to avoid redundancy.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "parseEvalOutput" -n internal/evaluate' in /Users/yani/Noema/backend succeeded in 51ms:
+internal/evaluate/output.go:23:func parseEvalOutput(raw string) (EvalOutput, error) {
+internal/evaluate/handler_test.go:72:	out, err := parseEvalOutputOptional(form, enabled)
+internal/evaluate/handler_test.go:74:		t.Fatalf("parseEvalOutputOptional error: %v", err)
+internal/evaluate/handler_test.go:170:	out, err := parseEvalOutputOptional(form, enabled)
+internal/evaluate/handler_test.go:172:		t.Fatalf("parseEvalOutputOptional error: %v", err)
+internal/evaluate/handler_test.go:207:	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
+internal/evaluate/handler_test.go:237:	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
+internal/evaluate/handler_test.go:267:	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
+internal/evaluate/handler_test.go:286:	out, err := parseEvalOutputOptional(form, enabled)
+internal/evaluate/handler_test.go:288:		t.Fatalf("parseEvalOutputOptional error: %v", err)
+internal/evaluate/gemini_eval.go:17:	if out, provided, err := parseEvalOutputProvided(form, enabled); err != nil {
+internal/evaluate/gemini_eval.go:84:	out, err := parseEvalOutput(resp.Text)
+internal/evaluate/handler.go:240:func parseEvalOutputOptional(form *multipart.Form, enabled map[string]ConstraintRule) (EvalOutput, error) {
+internal/evaluate/handler.go:241:	out, provided, err := parseEvalOutputProvided(form, enabled)
+internal/evaluate/handler.go:274:func parseEvalOutputProvided(form *multipart.Form, enabled map[string]ConstraintRule) (EvalOutput, bool, error) {
+internal/evaluate/handler.go:285:	out, err := parseEvalOutput(raw)
+
+thinking
+**Inspecting results handling for XSS**
+
+I'm checking internal/web/results.go to verify if output uses safe templating that prevents XSS, aiming to confirm or improve parseEvalOutputOptional tests.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/web/results.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package web
+
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+)
+
+// ResultsData is passed to the results template.
+type ResultsData struct {
+	RunID string
+}
+
+// ResultsPage renders GET /app/results/:id.
+func ResultsPage(c *gin.Context, tmpl string, runID string) {
+	c.HTML(http.StatusOK, tmpl, ResultsData{RunID: runID})
+}
+
+thinking
+**Flagging auth middleware for review**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/auth/middleware.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package auth
+
+import (
+	"crypto/subtle"
+	"net/http"
+	"net/url"
+	"strings"
+
+	"noema/internal/config"
+	"noema/internal/session"
+
+	"github.com/gin-gonic/gin"
+)
+
+// JudgeKey checks the request for a valid judge key (header or query).
+// Use for API routes only. Expects X-Judge-Key header or judge_key query param to match JUDGE_KEY in .env.
+func JudgeKey() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		expect := config.JudgeKey()
+		if expect == "" {
+
+thinking
+**Noting potential payload issue in CookieAuth**
+
+The session verification payload might be empty if encoded empty, which could cause problems if non-empty is expected; considering an improvement in the web/auth handling.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/web/auth.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package web
+
+import (
+	"net/http"
+
+	"noema/internal/config"
+	"noema/internal/session"
+
+	"github.com/gin-gonic/gin"
+)
+
+// IndexData is passed to the landing template.
+type IndexData struct {
+	Error        string
+	JudgeKeyVal  string
+	ServerNotCfg bool
+}
+
+// Index renders the landing page (GET /).
+func Index(c *gin.Context, tmpl string, data IndexData) {
+
+
+thinking
+**Planning constant-time key comparison**
+
+Adding constant-time comparison in AuthPost improves security by mitigating timing attacks; I'll implement this using crypto/subtle's ConstantTimeCompare while accepting minor length-based timing differences as acceptable.
+thinking
+**Adding local constant-time compare helper**
+
+I'll add a helper using crypto/subtle in web/auth.go for constant-time key comparison and apply it in AuthPost to improve security in a single meaningful file change.
+file update
+M /Users/yani/Noema/backend/internal/web/auth.go
+@@ -3,2 +3,3 @@
+ import (
++	"crypto/subtle"
+ 	"net/http"
+@@ -36,3 +37,3 @@
+ 	}
+-	if key != expect {
++	if !constantTimeEqual(key, expect) {
+ 		Index(c, indexTmpl, IndexData{Error: "Invalid judge key.", JudgeKeyVal: key})
+@@ -51 +52,5 @@
+ }
++
++func constantTimeEqual(a, b string) bool {
++	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
++}
+apply_patch(auto_approved=true) exited 0 in 31ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/web/auth.go
+file update:
+diff --git a/backend/internal/web/auth.go b/backend/internal/web/auth.go
+index 90cf0ff5baa1105b8845865df21cb66d05487805..45ba9c6a86084a1a902e2368edbe1b32d560a376
+--- a/backend/internal/web/auth.go
++++ b/backend/internal/web/auth.go
+@@ -1,6 +1,7 @@
+ package web
+ 
+ import (
++	"crypto/subtle"
+ 	"net/http"
+ 
+ 	"noema/internal/config"
+@@ -34,7 +35,7 @@
+ 		Index(c, indexTmpl, IndexData{Error: "Please enter a judge key.", JudgeKeyVal: key})
+ 		return
+ 	}
+-	if key != expect {
++	if !constantTimeEqual(key, expect) {
+ 		Index(c, indexTmpl, IndexData{Error: "Invalid judge key.", JudgeKeyVal: key})
+ 		return
+ 	}
+@@ -49,3 +50,7 @@
+ 	c.SetCookie(session.CookieName, "", -1, "/", "", config.SecureCookies(), true)
+ 	c.Redirect(http.StatusSeeOther, "/")
+ }
++
++func constantTimeEqual(a, b string) bool {
++	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
++}
+
+file update:
+diff --git a/backend/internal/web/auth.go b/backend/internal/web/auth.go
+index 90cf0ff5baa1105b8845865df21cb66d05487805..45ba9c6a86084a1a902e2368edbe1b32d560a376
+--- a/backend/internal/web/auth.go
++++ b/backend/internal/web/auth.go
+@@ -1,6 +1,7 @@
+ package web
+ 
+ import (
++	"crypto/subtle"
+ 	"net/http"
+ 
+ 	"noema/internal/config"
+@@ -34,7 +35,7 @@
+ 		Index(c, indexTmpl, IndexData{Error: "Please enter a judge key.", JudgeKeyVal: key})
+ 		return
+ 	}
+-	if key != expect {
++	if !constantTimeEqual(key, expect) {
+ 		Index(c, indexTmpl, IndexData{Error: "Invalid judge key.", JudgeKeyVal: key})
+ 		return
+ 	}
+@@ -49,3 +50,7 @@
+ 	c.SetCookie(session.CookieName, "", -1, "/", "", config.SecureCookies(), true)
+ 	c.Redirect(http.StatusSeeOther, "/")
+ }
++
++func constantTimeEqual(a, b string) bool {
++	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
++}
+
+
+thinking
+**Rerunning Go tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 153ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+ok  	noema/internal/config	(cached)
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/web/auth.go b/backend/internal/web/auth.go
+index 90cf0ff5baa1105b8845865df21cb66d05487805..45ba9c6a86084a1a902e2368edbe1b32d560a376
+--- a/backend/internal/web/auth.go
++++ b/backend/internal/web/auth.go
+@@ -1,6 +1,7 @@
+ package web
+ 
+ import (
++	"crypto/subtle"
+ 	"net/http"
+ 
+ 	"noema/internal/config"
+@@ -34,7 +35,7 @@
+ 		Index(c, indexTmpl, IndexData{Error: "Please enter a judge key.", JudgeKeyVal: key})
+ 		return
+ 	}
+-	if key != expect {
++	if !constantTimeEqual(key, expect) {
+ 		Index(c, indexTmpl, IndexData{Error: "Invalid judge key.", JudgeKeyVal: key})
+ 		return
+ 	}
+@@ -49,3 +50,7 @@
+ 	c.SetCookie(session.CookieName, "", -1, "/", "", config.SecureCookies(), true)
+ 	c.Redirect(http.StatusSeeOther, "/")
+ }
++
++func constantTimeEqual(a, b string) bool {
++	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
++}
+
+
+thinking
+**Recapping summary and tests run**
+codex
+What you changed (short)
+- Made judge key comparison constant-time in `internal/web/auth.go` to reduce timing leak risk in the login flow.
+
+Tests run (must include go test ./...)
+- `go test ./...`
+
+Next steps (pick one)
+1. Add a small auth test to cover timing-safe comparison behavior in the login handler.
+file update:
+diff --git a/backend/internal/web/auth.go b/backend/internal/web/auth.go
+index 90cf0ff5baa1105b8845865df21cb66d05487805..45ba9c6a86084a1a902e2368edbe1b32d560a376
+--- a/backend/internal/web/auth.go
++++ b/backend/internal/web/auth.go
+@@ -1,6 +1,7 @@
+ package web
+ 
+ import (
++	"crypto/subtle"
+ 	"net/http"
+ 
+ 	"noema/internal/config"
+@@ -34,7 +35,7 @@
+ 		Index(c, indexTmpl, IndexData{Error: "Please enter a judge key.", JudgeKeyVal: key})
+ 		return
+ 	}
+-	if key != expect {
++	if !constantTimeEqual(key, expect) {
+ 		Index(c, indexTmpl, IndexData{Error: "Invalid judge key.", JudgeKeyVal: key})
+ 		return
+ 	}
+@@ -49,3 +50,7 @@
+ 	c.SetCookie(session.CookieName, "", -1, "/", "", config.SecureCookies(), true)
+ 	c.Redirect(http.StatusSeeOther, "/")
+ }
++
++func constantTimeEqual(a, b string) bool {
++	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
++}
+
+tokens used
+21,704
+What you changed (short)
+- Made judge key comparison constant-time in `internal/web/auth.go` to reduce timing leak risk in the login flow.
+
+Tests run (must include go test ./...)
+- `go test ./...`
+
+Next steps (pick one)
+1. Add a small auth test to cover timing-safe comparison behavior in the login handler.

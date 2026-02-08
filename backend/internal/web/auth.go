@@ -1,6 +1,7 @@
 package web
 
 import (
+	"crypto/subtle"
 	"net/http"
 
 	"noema/internal/config"
@@ -34,7 +35,7 @@ func AuthPost(c *gin.Context, indexTmpl string) {
 		Index(c, indexTmpl, IndexData{Error: "Please enter a judge key.", JudgeKeyVal: key})
 		return
 	}
-	if key != expect {
+	if !constantTimeEqual(key, expect) {
 		Index(c, indexTmpl, IndexData{Error: "Invalid judge key.", JudgeKeyVal: key})
 		return
 	}
@@ -48,4 +49,8 @@ func AuthPost(c *gin.Context, indexTmpl string) {
 func Logout(c *gin.Context) {
 	c.SetCookie(session.CookieName, "", -1, "/", "", config.SecureCookies(), true)
 	c.Redirect(http.StatusSeeOther, "/")
+}
+
+func constantTimeEqual(a, b string) bool {
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
