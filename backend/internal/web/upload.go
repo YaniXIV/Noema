@@ -17,14 +17,22 @@ import (
 
 // UploadData is passed to the upload template.
 type UploadData struct {
-	Error    string
-	Success  bool
-	FileName string
-	FileSize string
+	Error         string
+	Success       bool
+	FileName      string
+	FileSize      string
+	MaxBytes      int64
+	MaxBytesLabel string
 }
 
 // UploadGet renders the upload page (GET /upload).
 func UploadGet(c *gin.Context, tmpl string, data UploadData) {
+	if data.MaxBytes == 0 {
+		data.MaxBytes = config.MaxUploadBytes
+	}
+	if data.MaxBytesLabel == "" {
+		data.MaxBytesLabel = formatSize(data.MaxBytes)
+	}
 	c.HTML(http.StatusOK, tmpl, data)
 }
 

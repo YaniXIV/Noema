@@ -16,7 +16,7 @@
       <h1 class="card-title">Upload</h1>
       <form id="upload-form" action="/upload" method="post" enctype="multipart/form-data">
         <label class="upload-zone" for="file-input" id="drop-zone">
-          <input type="file" name="file" id="file-input" accept="*">
+          <input type="file" name="file" id="file-input" accept="*" data-max-bytes="{{.MaxBytes}}" data-max-bytes-label="{{.MaxBytesLabel}}" aria-describedby="upload-hint upload-client-error">
           <span id="zone-text">Drag and drop a file here, or click to choose</span>
         </label>
         <div class="upload-details" id="upload-details" aria-live="polite" style="display:none;">
@@ -26,7 +26,8 @@
           </div>
           <button type="button" class="btn btn-ghost btn-sm" id="clear-file">Clear</button>
         </div>
-        <p class="form-hint upload-hint" id="upload-hint">CSV, JSON, or text files recommended.</p>
+        <p class="form-hint upload-hint" id="upload-hint">CSV, JSON, or text files recommended. Max {{.MaxBytesLabel}}.</p>
+        <div class="upload-result error" id="upload-client-error" aria-live="polite" style="display:none;"></div>
         <button type="submit" class="btn" id="submit-btn" style="margin-top: 1rem;" disabled>Upload</button>
       </form>
       {{if .Error}}
