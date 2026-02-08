@@ -1,0 +1,339 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3cb1-634c-7602-858c-edda6cc9695d
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Running Go tests**
+
+Preparing to run `go test` using exec_command to verify tests pass as required.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 269ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+ok  	noema/internal/config	(cached)
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Planning targeted repo improvements**
+
+I'm preparing to inspect the repo using TODO comments to identify quick wins, focusing on improving error handling or other clear issues within a limit of three files and one meaningful change.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME|panic|Must|must" internal' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/parse.go:43:		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
+internal/evaluate/parse.go:49:			return fmt.Errorf("constraint id must be non-empty")
+internal/evaluate/parse.go:52:			return fmt.Errorf("constraint id must not include leading/trailing whitespace")
+internal/evaluate/parse.go:59:			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
+internal/evaluate/parse.go:65:			return fmt.Errorf("custom_constraint id must be non-empty")
+internal/evaluate/parse.go:68:			return fmt.Errorf("custom_constraint id must not include leading/trailing whitespace")
+internal/evaluate/parse.go:75:			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
+internal/evaluate/parse.go:101:			return nil, nil, fmt.Errorf("image filename must be non-empty")
+internal/evaluate/parse.go:104:			return nil, nil, fmt.Errorf("image filename must not include leading/trailing whitespace")
+internal/evaluate/parse.go:107:			return nil, nil, fmt.Errorf("image filename must not include path separators")
+internal/evaluate/parse.go:110:			return nil, nil, fmt.Errorf("image filenames must be unique")
+internal/evaluate/parse.go:114:			return nil, nil, fmt.Errorf("each image must be at most %s", formatBytes(int64(config.MaxImageBytes)))
+internal/evaluate/parse.go:145:			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
+internal/evaluate/dataset.go:46:		return nil, Dataset{}, fmt.Errorf("dataset must be valid JSON")
+internal/evaluate/dataset.go:49:		return nil, Dataset{}, fmt.Errorf("dataset must be a single JSON value")
+internal/evaluate/dataset.go:56:		return nil, Dataset{}, fmt.Errorf("dataset must match schema")
+internal/evaluate/dataset.go:59:		return nil, Dataset{}, fmt.Errorf("dataset.items must be a non-empty array")
+internal/evaluate/dataset.go:68:			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must not include leading/trailing whitespace", i)
+internal/evaluate/dataset.go:76:				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must be non-empty", i)
+internal/evaluate/dataset.go:79:				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must not include leading/trailing whitespace", i)
+
+thinking
+**Inspecting for error handling improvements**
+
+I'm checking the httputil module and file handling code to identify opportunities for better error handling or robustness enhancements.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME|panic" internal -g"*.go"' in /Users/yani/Noema/backend exited 1 in 52ms:
+
+
+thinking
+**Identifying potential validation improvements**
+
+Considering adding validation to prevent empty image MIME types and exploring related parsing or dataset code for meaningful improvements, while also planning to check error handling in http/util or web modules.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"TODO|FIXME|panic|log\\.Fatal|os\\.Exit\" internal" in /Users/yani/Noema/backend exited 1 in 52ms:
+
+
+thinking
+**Inspecting dataset item ID uniqueness**
+
+I'm checking the dataset parsing and evaluation to verify if item IDs remain unique after trimming, starting with inspecting dataset.go.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"strings"
+
+	"noema/internal/config"
+)
+
+type Dataset struct {
+	Items []DatasetItem `json:"items"`
+}
+
+type DatasetItem struct {
+	ID       string         `json:"id"`
+	Text     string         `json:"text"`
+
+thinking
+**Considering whitespace checks**
+
+Noticing the current validation trims empty text but doesn't forbid leading/trailing whitespace; considering whether to enforce stricter whitespace rules in text inputs and next checking evaluation/parsing code for related concerns.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"path/filepath"
+	"strings"
+
+	"noema/internal/config"
+)
+
+func parseSpec(form *multipart.Form) (Spec, error) {
+	specStrs := form.Value["spec"]
+	if len(specStrs) == 0 || specStrs[0] == "" {
+		return Spec{}, fmt.Errorf("missing field: spec")
+	}
+	if len(specStrs) > 1 {
+		return Spec{}, fmt.Errorf("only one spec value allowed")
+
+thinking
+**Evaluating error handling improvements**
+
+Considering adding error wrapping in dataset file reading for better context, but noting it might be intentional; next, planning to check error handling in the httputil package.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/httputil/httputil.go" in /Users/yani/Noema/backend exited 1 in 52ms:
+sed: internal/httputil/httputil.go: No such file or directory
+
+thinking
+**Listing files**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/httputil' in /Users/yani/Noema/backend succeeded in 51ms:
+body.go
+body_test.go
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/httputil/body.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package httputil
+
+import (
+	"errors"
+	"net/http"
+	"strings"
+)
+
+// IsBodyTooLarge reports whether the error indicates the request body exceeded MaxBytesReader.
+func IsBodyTooLarge(err error) bool {
+	if err == nil {
+		return false
+	}
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "request body too large") ||
+		strings.Contains(msg, "multipart: message too large")
+
+thinking
+**Considering multipart handling**
+
+I'm checking if multipart handling with NextPart might exceed size limits and planning to inspect internal/web handlers next to clarify how this is managed.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/web' in /Users/yani/Noema/backend succeeded in 52ms:
+auth.go
+results.go
+upload.go
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/web/upload.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package web
+
+import (
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+
+	"github.com/gin-gonic/gin"
+)
+
+// UploadData is passed to the upload template.
+type UploadData struct {
+	Error    string
+
+thinking
+**Adding single-file upload validation**
+
+I'm adding a check to error if multiple files are uploaded, enforcing the intended one-file semantics and improving correctness.
+file update
+M /Users/yani/Noema/backend/internal/web/upload.go
+@@ -49,2 +49,6 @@
+ 	}
++	if len(files) > 1 {
++		UploadGet(c, uploadTmpl, UploadData{Error: "Only one file allowed."})
++		return
++	}
+ 	file := files[0]
+apply_patch(auto_approved=true) exited 0 in 30ms:
+Success. Updated the following files:
+M /Users/yani/Noema/backend/internal/web/upload.go
+file update:
+diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
+index 2ff8f3cc2f0c76330bab8df960459ca9cb205f92..2c0427c7ad0a38e766c6223fcf315f768bbef174
+--- a/backend/internal/web/upload.go
++++ b/backend/internal/web/upload.go
+@@ -47,6 +47,10 @@
+ 		UploadGet(c, uploadTmpl, UploadData{Error: "No file selected."})
+ 		return
+ 	}
++	if len(files) > 1 {
++		UploadGet(c, uploadTmpl, UploadData{Error: "Only one file allowed."})
++		return
++	}
+ 	file := files[0]
+ 	if file.Size > config.MaxUploadBytes {
+ 		UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
+
+file update:
+diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
+index 2ff8f3cc2f0c76330bab8df960459ca9cb205f92..2c0427c7ad0a38e766c6223fcf315f768bbef174
+--- a/backend/internal/web/upload.go
++++ b/backend/internal/web/upload.go
+@@ -47,6 +47,10 @@
+ 		UploadGet(c, uploadTmpl, UploadData{Error: "No file selected."})
+ 		return
+ 	}
++	if len(files) > 1 {
++		UploadGet(c, uploadTmpl, UploadData{Error: "Only one file allowed."})
++		return
++	}
+ 	file := files[0]
+ 	if file.Size > config.MaxUploadBytes {
+ 		UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
+
+
+thinking
+**Running tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 293ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+ok  	noema/internal/config	(cached)
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
+index 2ff8f3cc2f0c76330bab8df960459ca9cb205f92..2c0427c7ad0a38e766c6223fcf315f768bbef174
+--- a/backend/internal/web/upload.go
++++ b/backend/internal/web/upload.go
+@@ -47,6 +47,10 @@
+ 		UploadGet(c, uploadTmpl, UploadData{Error: "No file selected."})
+ 		return
+ 	}
++	if len(files) > 1 {
++		UploadGet(c, uploadTmpl, UploadData{Error: "Only one file allowed."})
++		return
++	}
+ 	file := files[0]
+ 	if file.Size > config.MaxUploadBytes {
+ 		UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
+
+codex
+What I changed (short)
+- Enforced single-file uploads in `internal/web/upload.go` to match the endpoint’s intended semantics and avoid silently ignoring extra files.
+
+Tests run
+- `go test ./...`
+file update:
+diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
+index 2ff8f3cc2f0c76330bab8df960459ca9cb205f92..2c0427c7ad0a38e766c6223fcf315f768bbef174
+--- a/backend/internal/web/upload.go
++++ b/backend/internal/web/upload.go
+@@ -47,6 +47,10 @@
+ 		UploadGet(c, uploadTmpl, UploadData{Error: "No file selected."})
+ 		return
+ 	}
++	if len(files) > 1 {
++		UploadGet(c, uploadTmpl, UploadData{Error: "Only one file allowed."})
++		return
++	}
+ 	file := files[0]
+ 	if file.Size > config.MaxUploadBytes {
+ 		UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
+
+tokens used
+16,261
+What I changed (short)
+- Enforced single-file uploads in `internal/web/upload.go` to match the endpoint’s intended semantics and avoid silently ignoring extra files.
+
+Tests run
+- `go test ./...`

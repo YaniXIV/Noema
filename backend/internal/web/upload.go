@@ -47,6 +47,10 @@ func UploadPost(c *gin.Context, uploadTmpl string, uploadsDir string) {
 		UploadGet(c, uploadTmpl, UploadData{Error: "No file selected."})
 		return
 	}
+	if len(files) > 1 {
+		UploadGet(c, uploadTmpl, UploadData{Error: "Only one file allowed."})
+		return
+	}
 	file := files[0]
 	if file.Size > config.MaxUploadBytes {
 		UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
