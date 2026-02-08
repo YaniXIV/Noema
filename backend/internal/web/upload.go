@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -107,6 +108,10 @@ func formatSize(n int64) string {
 func isBodyTooLarge(err error) bool {
 	if err == nil {
 		return false
+	}
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		return true
 	}
 	return strings.Contains(err.Error(), "request body too large")
 }

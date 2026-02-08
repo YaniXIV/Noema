@@ -2,6 +2,7 @@ package evaluate
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"mime/multipart"
@@ -278,6 +279,10 @@ func parseEvalOutputProvided(form *multipart.Form, enabled map[string]Constraint
 func isBodyTooLarge(err error) bool {
 	if err == nil {
 		return false
+	}
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		return true
 	}
 	return strings.Contains(err.Error(), "request body too large")
 }
