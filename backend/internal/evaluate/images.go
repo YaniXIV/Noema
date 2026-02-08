@@ -20,12 +20,12 @@ func readImages(files []*multipart.FileHeader) ([]ImageInfo, error) {
 	for _, fh := range files {
 		src, err := fh.Open()
 		if err != nil {
-			return nil, fmt.Errorf("could not read image")
+			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
 		}
+		defer src.Close()
 		data, err := io.ReadAll(src)
-		src.Close()
 		if err != nil {
-			return nil, fmt.Errorf("could not read image")
+			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
 		}
 		mimeType := strings.TrimSpace(fh.Header.Get("Content-Type"))
 		if mimeType == "" {
