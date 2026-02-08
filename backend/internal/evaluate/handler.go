@@ -77,9 +77,8 @@ func Handler(runsDir string, maxRuns int) gin.HandlerFunc {
 			return
 		}
 
-		runID := genRunID()
-		runPath := filepath.Join(runsDir, runID)
-		if err := ensureRunDir(runPath); err != nil {
+		runID, runPath, err := createRunDir(runsDir)
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create run directory"})
 			return
 		}

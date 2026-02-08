@@ -1,0 +1,1180 @@
+OpenAI Codex v0.98.0 (research preview)
+--------
+workdir: /Users/yani/Noema/backend
+model: gpt-5.2-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c3cbb-d2f1-7a03-98bb-45684bde0d5e
+--------
+user
+You are an autonomous coding agent polishing the Noema repository.
+
+Hard rules:
+- DO NOT run git commit, git reset, git clean, or anything that modifies git history.
+- I will run git commits outside of you.
+- Keep changes small: max 3 files per iteration.
+- No cosmetic-only edits.
+- No new dependencies unless absolutely necessary.
+
+Goal: continuously improve production quality.
+
+Iteration:
+1) Run: cd backend && go test ./...
+2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
+3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+
+Pick the highest-value improvement:
+A) Reliability/correctness: validation, error handling, run persistence, verify robustness
+B) Tests: add/strengthen tests for the change you made
+C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
+D) Maintainability: reduce duplication with tiny refactors
+E) UX: wizard/results/verify clarity (small, safe changes)
+F) Docs: README/DEPLOYMENT polish
+G) Performance: safe wins only
+
+Finish with:
+- What you changed (short)
+- Tests run (must include go test ./...)
+mcp startup: no servers
+
+thinking
+**Running Go tests**
+
+I'm preparing to run Go tests using exec_command to verify the current code functionality.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 102ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+ok  	noema/internal/config	(cached)
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	(cached)
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+
+thinking
+**Planning test reliability improvements**
+
+I'm focusing on improving reliability in up to three files by searching for TODOs and potential error handling issues using keywords like "panic" or "TODO" to identify weak points.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && rg \"TODO|FIXME|panic\\(\" -n internal" in /Users/yani/Noema/backend exited 1 in 52ms:
+
+
+thinking
+**Checking HTTP utility for timeouts**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal' in /Users/yani/Noema/backend succeeded in 51ms:
+auth
+config
+crypto
+evaluate
+gemini
+httputil
+session
+verify
+web
+zk
+
+thinking
+**Examining HTTP utility module**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/httputil' in /Users/yani/Noema/backend succeeded in 51ms:
+body.go
+body_test.go
+
+thinking
+**Opening body.go**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && cat internal/httputil/body.go' in /Users/yani/Noema/backend succeeded in 52ms:
+package httputil
+
+import (
+	"errors"
+	"net/http"
+	"strings"
+)
+
+// IsBodyTooLarge reports whether the error indicates the request body exceeded MaxBytesReader.
+func IsBodyTooLarge(err error) bool {
+	if err == nil {
+		return false
+	}
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "request body too large") ||
+		strings.Contains(msg, "multipart: message too large")
+
+thinking
+**Checking body read error handling**
+
+I'm searching for usages of the body size error to assess how the code handles requests with overly large bodies and whether improvements are needed in the handlers.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "IsBodyTooLarge" -n' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/handler.go:55:			if httputil.IsBodyTooLarge(err) {
+internal/web/upload.go:37:		if httputil.IsBodyTooLarge(err) {
+internal/verify/handler.go:37:			if httputil.IsBodyTooLarge(err) {
+internal/httputil/body_test.go:9:func TestIsBodyTooLarge(t *testing.T) {
+internal/httputil/body_test.go:24:			if got := IsBodyTooLarge(tc.err); got != tc.want {
+internal/httputil/body_test.go:25:				t.Fatalf("IsBodyTooLarge(%v) = %v, want %v", tc.err, got, tc.want)
+internal/httputil/body.go:9:// IsBodyTooLarge reports whether the error indicates the request body exceeded MaxBytesReader.
+internal/httputil/body.go:10:func IsBodyTooLarge(err error) bool {
+
+thinking
+**Reviewing handler for validation gaps**
+
+I'm scanning the evaluate handler to identify potential missing context checks or validation that might improve error handling and overall reliability.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+thinking
+**Reviewing multipart form handling**
+
+Noticing potential reliability issues around MultipartForm, especially with gin's default 32MB limit and MaxBytesReader usage; considering whether to handle form removal errors and checking the upload-related code for robustness.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/web/upload.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package web
+
+import (
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+
+	"github.com/gin-gonic/gin"
+)
+
+// UploadData is passed to the upload template.
+type UploadData struct {
+	Error    string
+
+thinking
+**Reviewing filename extension sanitization**
+
+I'm verifying that extracting the file extension from the sanitized base filename is safe despite possible path separators and considering adding a size check after copying as well as overwrite prevention; next, I'll inspect the parseUploads code for further validation.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "parseUploads" -n internal/evaluate' in /Users/yani/Noema/backend succeeded in 51ms:
+internal/evaluate/parse.go:81:func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.FileHeader, error) {
+internal/evaluate/handler_test.go:118:	if _, _, err := parseUploads(form); err == nil {
+internal/evaluate/handler_test.go:430:	if _, _, err := parseUploads(form); err == nil {
+internal/evaluate/handler_test.go:442:	if _, _, err := parseUploads(form); err == nil {
+internal/evaluate/handler.go:74:		datasetFile, imageFiles, err := parseUploads(form)
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"path/filepath"
+	"strings"
+
+	"noema/internal/config"
+)
+
+func parseSpec(form *multipart.Form) (Spec, error) {
+	specStrs := form.Value["spec"]
+	if len(specStrs) == 0 || specStrs[0] == "" {
+		return Spec{}, fmt.Errorf("missing field: spec")
+	}
+	if len(specStrs) > 1 {
+		return Spec{}, fmt.Errorf("only one spec value allowed")
+
+thinking
+**Checking dataset file reading for resource handling**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "readDatasetFile" -n internal/evaluate' in /Users/yani/Noema/backend succeeded in 51ms:
+internal/evaluate/parse.go:124:	_, ds, err := readDatasetFile(fh)
+internal/evaluate/dataset.go:25:func readDatasetFile(fh *multipart.FileHeader) ([]byte, Dataset, error) {
+internal/evaluate/gemini_eval.go:30:	rawDataset, ds, err := readDatasetFile(datasetFile)
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"strings"
+
+	"noema/internal/config"
+)
+
+type Dataset struct {
+	Items []DatasetItem `json:"items"`
+}
+
+type DatasetItem struct {
+	ID       string         `json:"id"`
+	Text     string         `json:"text"`
+
+thinking
+**Noting potential validation and error handling improvements**
+
+I've identified possible enhancements: reducing redundant dataset reads during validation, relying on existing empty item checks, and improving error returns in evaluate and verify handlers. These areas merit refinement but are currently acceptable.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/verify/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package verify
+
+import (
+	"encoding/base64"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"noema/internal/config"
+	"noema/internal/httputil"
+	"noema/internal/zk"
+
+	"github.com/gin-gonic/gin"
+)
+
+// VerifyRequest is the JSON body for POST /api/verify.
+type VerifyRequest struct {
+	RunID           string `json:"run_id"`
+	ProofB64        string `json:"proof_b64"`
+	PublicInputsB64 string `json:"public_inputs_b64"`
+
+thinking
+**Reviewing potential validation gaps**
+
+Noticed validateDatasetJSON tracks image references but doesn't reject duplicates; this might allow duplicate image_ref in dataset items. Considering whether duplicates should be disallowed for correctness. Also flagged error messages lack detail and noted other minor potential improvements, but no critical issues yet.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "genRunID" -n internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/storage.go:19:func genRunID() string {
+internal/evaluate/handler.go:80:		runID := genRunID()
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math/big"
+	"mime/multipart"
+	"os"
+	"path/filepath"
+	"strconv"
+	"sync/atomic"
+	"time"
+)
+
+var runIDCounter uint64
+
+func genRunID() string {
+	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
+
+
+thinking
+**Noting upload size safety improvement**
+
+Identified that relying solely on FileHeader.Size could allow oversized uploads if spoofed, so adding an io.LimitReader in saveUpload would ensure reliable size enforcement. Also considering uniqueness checks for dataset image refs and sanity checks on dataset filename, though these may have less impact given current handling.
+thinking
+**Reviewing upload handling and error wrapping**
+
+Considering adding content-type checks and reinforcing write limits with io.LimitReader despite MaxBytesReader presence. Also exploring wrapping large upload errors more explicitly for clarity during evaluation steps.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "error" internal/evaluate -n' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/prompt.go:160:func marshalSampledDataset(ds Dataset) ([]byte, error) {
+internal/evaluate/parse.go:14:func parseSpec(form *multipart.Form) (Spec, error) {
+internal/evaluate/parse.go:34:func validateSpec(spec Spec) error {
+internal/evaluate/parse.go:81:func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.FileHeader, error) {
+internal/evaluate/parse.go:123:func validateDatasetJSON(fh *multipart.FileHeader, imageFiles []*multipart.FileHeader) error {
+internal/evaluate/output.go:23:func parseEvalOutput(raw string) (EvalOutput, error) {
+internal/evaluate/output.go:50:func validateEvalOutput(out EvalOutput, enabled map[string]ConstraintRule) error {
+internal/evaluate/handler_test.go:68:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:74:		t.Fatalf("parseEvalOutputOptional error: %v", err)
+internal/evaluate/handler_test.go:119:		t.Fatalf("expected error for image filename with whitespace")
+internal/evaluate/handler_test.go:121:		t.Fatalf("unexpected error: %v", err)
+internal/evaluate/handler_test.go:135:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:154:		t.Fatalf("parseEvalOutputOptional error: %v", err)
+internal/evaluate/handler_test.go:173:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:190:		t.Fatalf("expected validation error for unknown constraint")
+internal/evaluate/handler_test.go:203:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:220:		t.Fatalf("expected error for trailing garbage")
+internal/evaluate/handler_test.go:233:		t.Fatalf("enabledConstraints error: %v", err)
+internal/evaluate/handler_test.go:250:		t.Fatalf("expected error for multiple eval_output values")
+internal/evaluate/handler_test.go:264:		t.Fatalf("enabledConstraints error: %v", err)
+
+thinking
+**Checking cache implementation**
+
+I'm examining the cache logic in internal/evaluate/cache.go to identify opportunities for performance improvements or better caching strategies.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/cache.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package evaluate
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+type CachedGeminiOutput struct {
+	Model         string       `json:"model"`
+	PromptVersion string       `json:"prompt_version"`
+	Output        EvalOutput   `json:"output"`
+	RawText       string       `json:"raw_text"`
+	Usage         *GeminiUsage `json:"usage,omitempty"`
+	CachedAt      string       `json:"cached_at"`
+}
+
+thinking
+**Checking cache key usage**
+
+Noticed the cache key relies on a global promptVersion; I'll verify its reliability by reviewing evaluate/gemini_eval.go next.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/gemini_eval.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package evaluate
+
+import (
+	"context"
+	"log"
+	"mime/multipart"
+	"os"
+	"time"
+
+	"noema/internal/config"
+	"noema/internal/gemini"
+)
+
+const geminiEvalTimeout = 45 * time.Second
+
+func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
+	if out, provided, err := parseEvalOutputProvided(form, enabled); err != nil {
+		return EvalOutput{}, err
+	} else if provided {
+		return out, nil
+
+thinking
+**Evaluating minor reliability improvements**
+
+Considering adding stricter validation for Metadata keys as strings and enforcing base64 size limits during verification; also pondering content-type checks on uploads and enhancing error handling for oversized request bodies and JSON parsing in specs.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '200,340p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	var runs []runEntry
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if !strings.HasPrefix(entry.Name(), "run_") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		runs = append(runs, runEntry{
+
+
+thinking
+**Reviewing upload validation and error handling**
+
+I’m confirming that file size limits are already enforced but considering adding safety caps on reads. Also noting that multipart form errors on oversized uploads may need careful detection. Validation currently errors if uploaded images aren’t referenced, which seems intentional. No immediate changes planned since trade-offs are reasonable.
+thinking
+**Planning run ID uniqueness improvement**
+
+Identified potential runID collision risk when creating run directories, as existing logic may overwrite old data. Planning to add a new function that tries multiple times to create a unique run directory with os.Mkdir, retrying on collisions for improved reliability. This will touch handler and storage code and may include tests.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "ensureRunDir" -n' in /Users/yani/Noema/backend succeeded in 51ms:
+internal/evaluate/storage.go:28:func ensureRunDir(path string) error {
+internal/evaluate/handler.go:82:		if err := ensureRunDir(runPath); err != nil {
+
+thinking
+**Verifying server startup directory creation**
+
+I'll check the main server startup code and configuration to confirm if runsDir is created there, guiding how to handle its initialization or dependencies.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "runs" -n cmd internal/web internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
+cmd/server/main.go:53:			c.JSON(500, gin.H{"status": "error", "error": "runs dir not writable"})
+internal/evaluate/cache.go:39:func cachePath(runsDir, key string) string {
+internal/evaluate/cache.go:40:	return filepath.Join(runsDir, "cache", key, "gemini_output.json")
+internal/evaluate/cache.go:43:func loadCache(runsDir, key string) (*CachedGeminiOutput, error) {
+internal/evaluate/cache.go:44:	path := cachePath(runsDir, key)
+internal/evaluate/cache.go:56:func saveCache(runsDir, key string, out CachedGeminiOutput) error {
+internal/evaluate/cache.go:57:	path := cachePath(runsDir, key)
+internal/evaluate/gemini_eval.go:16:func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
+internal/evaluate/gemini_eval.go:22:	return evalWithGemini(ctx, enabled, runsDir, spec, datasetFile, imageFiles), nil
+internal/evaluate/gemini_eval.go:25:func evalWithGemini(ctx context.Context, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) EvalOutput {
+internal/evaluate/gemini_eval.go:44:	if cached, err := loadCache(runsDir, key); err == nil {
+internal/evaluate/gemini_eval.go:48:		_ = os.Remove(cachePath(runsDir, key))
+internal/evaluate/gemini_eval.go:50:		_ = os.Remove(cachePath(runsDir, key))
+internal/evaluate/gemini_eval.go:101:	if err := saveCache(runsDir, key, cacheOut); err != nil {
+internal/evaluate/storage.go:133:func updateRunsIndex(runsDir string, limit int, entry RunIndexEntry) error {
+internal/evaluate/storage.go:137:	indexPath := filepath.Join(runsDir, "index.json")
+internal/evaluate/storage.go:144:				corruptedErr = fmt.Errorf("runs index corrupted; failed to archive: %w", renameErr)
+internal/evaluate/storage.go:146:				corruptedErr = fmt.Errorf("runs index corrupted; archived as %s", backup)
+internal/evaluate/handler.go:46:func Handler(runsDir string, maxRuns int) gin.HandlerFunc {
+internal/evaluate/handler.go:81:		runPath := filepath.Join(runsDir, runID)
+
+thinking
+**Checking server code for directory validation**
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,120p' cmd/server/main.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package main
+
+import (
+	"context"
+	"log"
+	"os"
+	"strings"
+
+	"noema/internal/auth"
+	"noema/internal/config"
+	"noema/internal/evaluate"
+	"noema/internal/gemini"
+	"noema/internal/verify"
+	"noema/internal/web"
+
+	"github.com/gin-gonic/gin"
+)
+
+func main() {
+	if err := config.Load(); err != nil {
+
+
+thinking
+**Designing unique run directory creation**
+
+Planning a createRunDir function that attempts to make a uniquely named run directory up to three times using os.Mkdir with os.IsExist checks, ensuring collisions are handled gracefully and improving reliability.
+thinking
+**Refactoring handler to use createRunDir**
+
+Planning to replace genRunID and ensureRunDir calls in the handler with createRunDir, removing ensureRunDir if unused, and adding a deterministic test verifying createRunDir creates a run directory with the expected name pattern.
+file update
+M /Users/yani/Noema/backend/internal/evaluate/storage.go
+@@ -27,4 +27,16 @@
+ 
+-func ensureRunDir(path string) error {
+-	return os.MkdirAll(path, 0755)
++func createRunDir(runsDir string) (string, string, error) {
++	const maxAttempts = 5
++	for i := 0; i < maxAttempts; i++ {
++		runID := genRunID()
++		path := filepath.Join(runsDir, runID)
++		if err := os.Mkdir(path, 0755); err == nil {
++			return runID, path, nil
++		} else if os.IsExist(err) {
++			continue
++		} else {
++			return "", "", err
++		}
++	}
++	return "", "", fmt.Errorf("failed to create unique run directory after %d attempts", maxAttempts)
+ }
+apply_patch(auto_approved=true) exited 0 in 30ms:
+Success. Updated the following files:
+M internal/evaluate/storage.go
+file update:
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 886de4b4bb5677d3ee150f88269ec719f9050c70..1a1309f14971ac765573b84271aac76ec595020f
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -25,8 +25,20 @@
+ 	return fmt.Sprintf("run_%d_%d_%d", time.Now().UnixMilli(), os.Getpid(), counter)
+ }
+ 
+-func ensureRunDir(path string) error {
+-	return os.MkdirAll(path, 0755)
++func createRunDir(runsDir string) (string, string, error) {
++	const maxAttempts = 5
++	for i := 0; i < maxAttempts; i++ {
++		runID := genRunID()
++		path := filepath.Join(runsDir, runID)
++		if err := os.Mkdir(path, 0755); err == nil {
++			return runID, path, nil
++		} else if os.IsExist(err) {
++			continue
++		} else {
++			return "", "", err
++		}
++	}
++	return "", "", fmt.Errorf("failed to create unique run directory after %d attempts", maxAttempts)
+ }
+ 
+ func saveRunFiles(runPath string, dataset *multipart.FileHeader, images []*multipart.FileHeader) error {
+
+file update:
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 886de4b4bb5677d3ee150f88269ec719f9050c70..1a1309f14971ac765573b84271aac76ec595020f
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -25,8 +25,20 @@
+ 	return fmt.Sprintf("run_%d_%d_%d", time.Now().UnixMilli(), os.Getpid(), counter)
+ }
+ 
+-func ensureRunDir(path string) error {
+-	return os.MkdirAll(path, 0755)
++func createRunDir(runsDir string) (string, string, error) {
++	const maxAttempts = 5
++	for i := 0; i < maxAttempts; i++ {
++		runID := genRunID()
++		path := filepath.Join(runsDir, runID)
++		if err := os.Mkdir(path, 0755); err == nil {
++			return runID, path, nil
++		} else if os.IsExist(err) {
++			continue
++		} else {
++			return "", "", err
++		}
++	}
++	return "", "", fmt.Errorf("failed to create unique run directory after %d attempts", maxAttempts)
+ }
+ 
+ func saveRunFiles(runPath string, dataset *multipart.FileHeader, images []*multipart.FileHeader) error {
+
+
+thinking
+**Planning handler adjustment**
+file update
+M /Users/yani/Noema/backend/internal/evaluate/handler.go
+@@ -79,5 +79,4 @@
+ 
+-		runID := genRunID()
+-		runPath := filepath.Join(runsDir, runID)
+-		if err := ensureRunDir(runPath); err != nil {
++		runID, runPath, err := createRunDir(runsDir)
++		if err != nil {
+ 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create run directory"})
+apply_patch(auto_approved=true) exited 0 in 37ms:
+Success. Updated the following files:
+M internal/evaluate/handler.go
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index fe139ebe2fc3dfb37e6d2fb5740712203b397866..71a2a51143091eb6a1687c52a84fe43706ac480b
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -77,9 +77,8 @@
+ 			return
+ 		}
+ 
+-		runID := genRunID()
+-		runPath := filepath.Join(runsDir, runID)
+-		if err := ensureRunDir(runPath); err != nil {
++		runID, runPath, err := createRunDir(runsDir)
++		if err != nil {
+ 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create run directory"})
+ 			return
+ 		}
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 886de4b4bb5677d3ee150f88269ec719f9050c70..1a1309f14971ac765573b84271aac76ec595020f
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -25,8 +25,20 @@
+ 	return fmt.Sprintf("run_%d_%d_%d", time.Now().UnixMilli(), os.Getpid(), counter)
+ }
+ 
+-func ensureRunDir(path string) error {
+-	return os.MkdirAll(path, 0755)
++func createRunDir(runsDir string) (string, string, error) {
++	const maxAttempts = 5
++	for i := 0; i < maxAttempts; i++ {
++		runID := genRunID()
++		path := filepath.Join(runsDir, runID)
++		if err := os.Mkdir(path, 0755); err == nil {
++			return runID, path, nil
++		} else if os.IsExist(err) {
++			continue
++		} else {
++			return "", "", err
++		}
++	}
++	return "", "", fmt.Errorf("failed to create unique run directory after %d attempts", maxAttempts)
+ }
+ 
+ func saveRunFiles(runPath string, dataset *multipart.FileHeader, images []*multipart.FileHeader) error {
+
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index fe139ebe2fc3dfb37e6d2fb5740712203b397866..71a2a51143091eb6a1687c52a84fe43706ac480b
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -77,9 +77,8 @@
+ 			return
+ 		}
+ 
+-		runID := genRunID()
+-		runPath := filepath.Join(runsDir, runID)
+-		if err := ensureRunDir(runPath); err != nil {
++		runID, runPath, err := createRunDir(runsDir)
++		if err != nil {
+ 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create run directory"})
+ 			return
+ 		}
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 886de4b4bb5677d3ee150f88269ec719f9050c70..1a1309f14971ac765573b84271aac76ec595020f
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -25,8 +25,20 @@
+ 	return fmt.Sprintf("run_%d_%d_%d", time.Now().UnixMilli(), os.Getpid(), counter)
+ }
+ 
+-func ensureRunDir(path string) error {
+-	return os.MkdirAll(path, 0755)
++func createRunDir(runsDir string) (string, string, error) {
++	const maxAttempts = 5
++	for i := 0; i < maxAttempts; i++ {
++		runID := genRunID()
++		path := filepath.Join(runsDir, runID)
++		if err := os.Mkdir(path, 0755); err == nil {
++			return runID, path, nil
++		} else if os.IsExist(err) {
++			continue
++		} else {
++			return "", "", err
++		}
++	}
++	return "", "", fmt.Errorf("failed to create unique run directory after %d attempts", maxAttempts)
+ }
+ 
+ func saveRunFiles(runPath string, dataset *multipart.FileHeader, images []*multipart.FileHeader) error {
+
+
+thinking
+**Checking filepath import usage**
+
+I'm verifying if the filepath import in handler.go is still necessary since runPath no longer requires it; next, I'll remove filepath if it's unused.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg "filepath" -n internal/evaluate/handler.go' in /Users/yani/Noema/backend succeeded in 52ms:
+10:	"path/filepath"
+219:			path:    filepath.Join(runsDir, entry.Name()),
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index fe139ebe2fc3dfb37e6d2fb5740712203b397866..71a2a51143091eb6a1687c52a84fe43706ac480b
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -77,9 +77,8 @@
+ 			return
+ 		}
+ 
+-		runID := genRunID()
+-		runPath := filepath.Join(runsDir, runID)
+-		if err := ensureRunDir(runPath); err != nil {
++		runID, runPath, err := createRunDir(runsDir)
++		if err != nil {
+ 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create run directory"})
+ 			return
+ 		}
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 886de4b4bb5677d3ee150f88269ec719f9050c70..1a1309f14971ac765573b84271aac76ec595020f
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -25,8 +25,20 @@
+ 	return fmt.Sprintf("run_%d_%d_%d", time.Now().UnixMilli(), os.Getpid(), counter)
+ }
+ 
+-func ensureRunDir(path string) error {
+-	return os.MkdirAll(path, 0755)
++func createRunDir(runsDir string) (string, string, error) {
++	const maxAttempts = 5
++	for i := 0; i < maxAttempts; i++ {
++		runID := genRunID()
++		path := filepath.Join(runsDir, runID)
++		if err := os.Mkdir(path, 0755); err == nil {
++			return runID, path, nil
++		} else if os.IsExist(err) {
++			continue
++		} else {
++			return "", "", err
++		}
++	}
++	return "", "", fmt.Errorf("failed to create unique run directory after %d attempts", maxAttempts)
+ }
+ 
+ func saveRunFiles(runPath string, dataset *multipart.FileHeader, images []*multipart.FileHeader) error {
+
+
+thinking
+**Deciding on test file addition**
+
+Planning to add a test for creating run directories in a new test file within internal/evaluate, verifying if such a test file already exists before adding it.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/evaluate | grep _test.go' in /Users/yani/Noema/backend succeeded in 52ms:
+handler_integration_test.go
+handler_test.go
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index fe139ebe2fc3dfb37e6d2fb5740712203b397866..71a2a51143091eb6a1687c52a84fe43706ac480b
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -77,9 +77,8 @@
+ 			return
+ 		}
+ 
+-		runID := genRunID()
+-		runPath := filepath.Join(runsDir, runID)
+-		if err := ensureRunDir(runPath); err != nil {
++		runID, runPath, err := createRunDir(runsDir)
++		if err != nil {
+ 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create run directory"})
+ 			return
+ 		}
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 886de4b4bb5677d3ee150f88269ec719f9050c70..1a1309f14971ac765573b84271aac76ec595020f
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -25,8 +25,20 @@
+ 	return fmt.Sprintf("run_%d_%d_%d", time.Now().UnixMilli(), os.Getpid(), counter)
+ }
+ 
+-func ensureRunDir(path string) error {
+-	return os.MkdirAll(path, 0755)
++func createRunDir(runsDir string) (string, string, error) {
++	const maxAttempts = 5
++	for i := 0; i < maxAttempts; i++ {
++		runID := genRunID()
++		path := filepath.Join(runsDir, runID)
++		if err := os.Mkdir(path, 0755); err == nil {
++			return runID, path, nil
++		} else if os.IsExist(err) {
++			continue
++		} else {
++			return "", "", err
++		}
++	}
++	return "", "", fmt.Errorf("failed to create unique run directory after %d attempts", maxAttempts)
+ }
+ 
+ func saveRunFiles(runPath string, dataset *multipart.FileHeader, images []*multipart.FileHeader) error {
+
+
+thinking
+**Adding basic createRunDir test**
+
+Planning a simple test using a temporary directory to verify createRunDir creates a directory with the expected "run_" prefix and that the path exists as a directory; skipping collision simulation due to complexity.
+file update
+A /Users/yani/Noema/backend/internal/evaluate/storage_test.go
+package evaluate
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestCreateRunDir(t *testing.T) {
+	runsDir := t.TempDir()
+	runID, runPath, err := createRunDir(runsDir)
+	if err != nil {
+		t.Fatalf("createRunDir error: %v", err)
+	}
+	if !strings.HasPrefix(runID, "run_") {
+		t.Fatalf("expected runID to start with run_, got %q", runID)
+	}
+	if runPath != filepath.Join(runsDir, runID) {
+		t.Fatalf("unexpected runPath: %q", runPath)
+	}
+	info, err := os.Stat(runPath)
+	if err != nil {
+		t.Fatalf("stat runPath error: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected runPath to be a directory")
+	}
+}
+apply_patch(auto_approved=true) exited 0 in 48ms:
+Success. Updated the following files:
+A internal/evaluate/storage_test.go
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index fe139ebe2fc3dfb37e6d2fb5740712203b397866..71a2a51143091eb6a1687c52a84fe43706ac480b
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -77,9 +77,8 @@
+ 			return
+ 		}
+ 
+-		runID := genRunID()
+-		runPath := filepath.Join(runsDir, runID)
+-		if err := ensureRunDir(runPath); err != nil {
++		runID, runPath, err := createRunDir(runsDir)
++		if err != nil {
+ 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create run directory"})
+ 			return
+ 		}
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 886de4b4bb5677d3ee150f88269ec719f9050c70..1a1309f14971ac765573b84271aac76ec595020f
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -25,8 +25,20 @@
+ 	return fmt.Sprintf("run_%d_%d_%d", time.Now().UnixMilli(), os.Getpid(), counter)
+ }
+ 
+-func ensureRunDir(path string) error {
+-	return os.MkdirAll(path, 0755)
++func createRunDir(runsDir string) (string, string, error) {
++	const maxAttempts = 5
++	for i := 0; i < maxAttempts; i++ {
++		runID := genRunID()
++		path := filepath.Join(runsDir, runID)
++		if err := os.Mkdir(path, 0755); err == nil {
++			return runID, path, nil
++		} else if os.IsExist(err) {
++			continue
++		} else {
++			return "", "", err
++		}
++	}
++	return "", "", fmt.Errorf("failed to create unique run directory after %d attempts", maxAttempts)
+ }
+ 
+ func saveRunFiles(runPath string, dataset *multipart.FileHeader, images []*multipart.FileHeader) error {
+diff --git a/backend/internal/evaluate/storage_test.go b/backend/internal/evaluate/storage_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..65dbc8aef8258cf8a3369cf03d7f064c8837f00e
+--- /dev/null
++++ b/backend/internal/evaluate/storage_test.go
+@@ -0,0 +1,29 @@
++package evaluate
++
++import (
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++)
++
++func TestCreateRunDir(t *testing.T) {
++	runsDir := t.TempDir()
++	runID, runPath, err := createRunDir(runsDir)
++	if err != nil {
++		t.Fatalf("createRunDir error: %v", err)
++	}
++	if !strings.HasPrefix(runID, "run_") {
++		t.Fatalf("expected runID to start with run_, got %q", runID)
++	}
++	if runPath != filepath.Join(runsDir, runID) {
++		t.Fatalf("unexpected runPath: %q", runPath)
++	}
++	info, err := os.Stat(runPath)
++	if err != nil {
++		t.Fatalf("stat runPath error: %v", err)
++	}
++	if !info.IsDir() {
++		t.Fatalf("expected runPath to be a directory")
++	}
++}
+
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index fe139ebe2fc3dfb37e6d2fb5740712203b397866..71a2a51143091eb6a1687c52a84fe43706ac480b
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -77,9 +77,8 @@
+ 			return
+ 		}
+ 
+-		runID := genRunID()
+-		runPath := filepath.Join(runsDir, runID)
+-		if err := ensureRunDir(runPath); err != nil {
++		runID, runPath, err := createRunDir(runsDir)
++		if err != nil {
+ 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create run directory"})
+ 			return
+ 		}
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 886de4b4bb5677d3ee150f88269ec719f9050c70..1a1309f14971ac765573b84271aac76ec595020f
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -25,8 +25,20 @@
+ 	return fmt.Sprintf("run_%d_%d_%d", time.Now().UnixMilli(), os.Getpid(), counter)
+ }
+ 
+-func ensureRunDir(path string) error {
+-	return os.MkdirAll(path, 0755)
++func createRunDir(runsDir string) (string, string, error) {
++	const maxAttempts = 5
++	for i := 0; i < maxAttempts; i++ {
++		runID := genRunID()
++		path := filepath.Join(runsDir, runID)
++		if err := os.Mkdir(path, 0755); err == nil {
++			return runID, path, nil
++		} else if os.IsExist(err) {
++			continue
++		} else {
++			return "", "", err
++		}
++	}
++	return "", "", fmt.Errorf("failed to create unique run directory after %d attempts", maxAttempts)
+ }
+ 
+ func saveRunFiles(runPath string, dataset *multipart.FileHeader, images []*multipart.FileHeader) error {
+diff --git a/backend/internal/evaluate/storage_test.go b/backend/internal/evaluate/storage_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..65dbc8aef8258cf8a3369cf03d7f064c8837f00e
+--- /dev/null
++++ b/backend/internal/evaluate/storage_test.go
+@@ -0,0 +1,29 @@
++package evaluate
++
++import (
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++)
++
++func TestCreateRunDir(t *testing.T) {
++	runsDir := t.TempDir()
++	runID, runPath, err := createRunDir(runsDir)
++	if err != nil {
++		t.Fatalf("createRunDir error: %v", err)
++	}
++	if !strings.HasPrefix(runID, "run_") {
++		t.Fatalf("expected runID to start with run_, got %q", runID)
++	}
++	if runPath != filepath.Join(runsDir, runID) {
++		t.Fatalf("unexpected runPath: %q", runPath)
++	}
++	info, err := os.Stat(runPath)
++	if err != nil {
++		t.Fatalf("stat runPath error: %v", err)
++	}
++	if !info.IsDir() {
++		t.Fatalf("expected runPath to be a directory")
++	}
++}
+
+
+thinking
+**Running all Go tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 672ms:
+?   	noema/cmd/server	[no test files]
+?   	noema/internal/auth	[no test files]
+ok  	noema/internal/config	(cached)
+?   	noema/internal/crypto	[no test files]
+ok  	noema/internal/evaluate	0.146s
+?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
+ok  	noema/internal/session	(cached)
+ok  	noema/internal/verify	(cached)
+?   	noema/internal/web	[no test files]
+ok  	noema/internal/zk	(cached)
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index fe139ebe2fc3dfb37e6d2fb5740712203b397866..71a2a51143091eb6a1687c52a84fe43706ac480b
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -77,9 +77,8 @@
+ 			return
+ 		}
+ 
+-		runID := genRunID()
+-		runPath := filepath.Join(runsDir, runID)
+-		if err := ensureRunDir(runPath); err != nil {
++		runID, runPath, err := createRunDir(runsDir)
++		if err != nil {
+ 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create run directory"})
+ 			return
+ 		}
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 886de4b4bb5677d3ee150f88269ec719f9050c70..1a1309f14971ac765573b84271aac76ec595020f
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -25,8 +25,20 @@
+ 	return fmt.Sprintf("run_%d_%d_%d", time.Now().UnixMilli(), os.Getpid(), counter)
+ }
+ 
+-func ensureRunDir(path string) error {
+-	return os.MkdirAll(path, 0755)
++func createRunDir(runsDir string) (string, string, error) {
++	const maxAttempts = 5
++	for i := 0; i < maxAttempts; i++ {
++		runID := genRunID()
++		path := filepath.Join(runsDir, runID)
++		if err := os.Mkdir(path, 0755); err == nil {
++			return runID, path, nil
++		} else if os.IsExist(err) {
++			continue
++		} else {
++			return "", "", err
++		}
++	}
++	return "", "", fmt.Errorf("failed to create unique run directory after %d attempts", maxAttempts)
+ }
+ 
+ func saveRunFiles(runPath string, dataset *multipart.FileHeader, images []*multipart.FileHeader) error {
+diff --git a/backend/internal/evaluate/storage_test.go b/backend/internal/evaluate/storage_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..65dbc8aef8258cf8a3369cf03d7f064c8837f00e
+--- /dev/null
++++ b/backend/internal/evaluate/storage_test.go
+@@ -0,0 +1,29 @@
++package evaluate
++
++import (
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++)
++
++func TestCreateRunDir(t *testing.T) {
++	runsDir := t.TempDir()
++	runID, runPath, err := createRunDir(runsDir)
++	if err != nil {
++		t.Fatalf("createRunDir error: %v", err)
++	}
++	if !strings.HasPrefix(runID, "run_") {
++		t.Fatalf("expected runID to start with run_, got %q", runID)
++	}
++	if runPath != filepath.Join(runsDir, runID) {
++		t.Fatalf("unexpected runPath: %q", runPath)
++	}
++	info, err := os.Stat(runPath)
++	if err != nil {
++		t.Fatalf("stat runPath error: %v", err)
++	}
++	if !info.IsDir() {
++		t.Fatalf("expected runPath to be a directory")
++	}
++}
+
+codex
+What I changed (short)
+- Added `createRunDir` to avoid rare run ID collisions and updated evaluate handler to use it.
+- Added a unit test to ensure run directories are created as expected.
+
+Tests run
+- `go test ./...`
+file update:
+diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
+index fe139ebe2fc3dfb37e6d2fb5740712203b397866..71a2a51143091eb6a1687c52a84fe43706ac480b
+--- a/backend/internal/evaluate/handler.go
++++ b/backend/internal/evaluate/handler.go
+@@ -77,9 +77,8 @@
+ 			return
+ 		}
+ 
+-		runID := genRunID()
+-		runPath := filepath.Join(runsDir, runID)
+-		if err := ensureRunDir(runPath); err != nil {
++		runID, runPath, err := createRunDir(runsDir)
++		if err != nil {
+ 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create run directory"})
+ 			return
+ 		}
+diff --git a/backend/internal/evaluate/storage.go b/backend/internal/evaluate/storage.go
+index 886de4b4bb5677d3ee150f88269ec719f9050c70..1a1309f14971ac765573b84271aac76ec595020f
+--- a/backend/internal/evaluate/storage.go
++++ b/backend/internal/evaluate/storage.go
+@@ -25,8 +25,20 @@
+ 	return fmt.Sprintf("run_%d_%d_%d", time.Now().UnixMilli(), os.Getpid(), counter)
+ }
+ 
+-func ensureRunDir(path string) error {
+-	return os.MkdirAll(path, 0755)
++func createRunDir(runsDir string) (string, string, error) {
++	const maxAttempts = 5
++	for i := 0; i < maxAttempts; i++ {
++		runID := genRunID()
++		path := filepath.Join(runsDir, runID)
++		if err := os.Mkdir(path, 0755); err == nil {
++			return runID, path, nil
++		} else if os.IsExist(err) {
++			continue
++		} else {
++			return "", "", err
++		}
++	}
++	return "", "", fmt.Errorf("failed to create unique run directory after %d attempts", maxAttempts)
+ }
+ 
+ func saveRunFiles(runPath string, dataset *multipart.FileHeader, images []*multipart.FileHeader) error {
+diff --git a/backend/internal/evaluate/storage_test.go b/backend/internal/evaluate/storage_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..65dbc8aef8258cf8a3369cf03d7f064c8837f00e
+--- /dev/null
++++ b/backend/internal/evaluate/storage_test.go
+@@ -0,0 +1,29 @@
++package evaluate
++
++import (
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++)
++
++func TestCreateRunDir(t *testing.T) {
++	runsDir := t.TempDir()
++	runID, runPath, err := createRunDir(runsDir)
++	if err != nil {
++		t.Fatalf("createRunDir error: %v", err)
++	}
++	if !strings.HasPrefix(runID, "run_") {
++		t.Fatalf("expected runID to start with run_, got %q", runID)
++	}
++	if runPath != filepath.Join(runsDir, runID) {
++		t.Fatalf("unexpected runPath: %q", runPath)
++	}
++	info, err := os.Stat(runPath)
++	if err != nil {
++		t.Fatalf("stat runPath error: %v", err)
++	}
++	if !info.IsDir() {
++		t.Fatalf("expected runPath to be a directory")
++	}
++}
+
+tokens used
+48,176
+What I changed (short)
+- Added `createRunDir` to avoid rare run ID collisions and updated evaluate handler to use it.
+- Added a unit test to ensure run directories are created as expected.
+
+Tests run
+- `go test ./...`

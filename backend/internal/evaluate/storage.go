@@ -25,8 +25,20 @@ func genRunID() string {
 	return fmt.Sprintf("run_%d_%d_%d", time.Now().UnixMilli(), os.Getpid(), counter)
 }
 
-func ensureRunDir(path string) error {
-	return os.MkdirAll(path, 0755)
+func createRunDir(runsDir string) (string, string, error) {
+	const maxAttempts = 5
+	for i := 0; i < maxAttempts; i++ {
+		runID := genRunID()
+		path := filepath.Join(runsDir, runID)
+		if err := os.Mkdir(path, 0755); err == nil {
+			return runID, path, nil
+		} else if os.IsExist(err) {
+			continue
+		} else {
+			return "", "", err
+		}
+	}
+	return "", "", fmt.Errorf("failed to create unique run directory after %d attempts", maxAttempts)
 }
 
 func saveRunFiles(runPath string, dataset *multipart.FileHeader, images []*multipart.FileHeader) error {
