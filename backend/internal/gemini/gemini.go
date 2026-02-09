@@ -10,7 +10,7 @@ import (
 	"google.golang.org/genai"
 )
 
-const defaultModel = "gemini-3-pro"
+const defaultModel = "gemini-3-flash-preview"
 
 type ImageInput struct {
 	MIMEType string

@@ -13,29 +13,26 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func TestEvaluateHandler_WithEvalOutput(t *testing.T) {
+func TestEvaluateHandler_WithEvaluationResult(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	runsDir := t.TempDir()
 	router.POST("/api/evaluate", Handler(runsDir, 0))
 
-	spec := Spec{
-		SchemaVersion:  1,
-		EvaluationName: "test",
-		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
-		Constraints: []Constraint{
-			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+	cfg := PolicyConfig{
+		PolicyVersion: "noema_policy_v1",
+		Constraints: []PolicyConstraint{
+			{ID: "pii_exposure_risk", Enabled: true, MaxAllowed: 1},
 		},
 	}
-	evalOut := EvalOutput{
-		SchemaVersion: 1,
-		Constraints: []EvalConstraintResult{
+	evalOut := EvaluationResult{
+		EvalVersion: "noema_eval_v1",
+		Results: []EvalResultItem{
 			{ID: "pii_exposure_risk", Severity: 2, Rationale: "clear identifiers"},
 		},
-		MaxSeverity: 2,
 	}
 
-	body, contentType := buildMultipartEvalRequest(t, spec, evalOut, true)
+	body, contentType := buildMultipartEvalRequest(t, cfg, evalOut, true)
 	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", body)
 	req.Header.Set("Content-Type", contentType)
 	rec := httptest.NewRecorder()
@@ -55,31 +52,26 @@ func TestEvaluateHandler_WithEvalOutput(t *testing.T) {
 	if resp.PublicOutput.MaxSeverity != 2 {
 		t.Fatalf("expected max severity 2, got %d", resp.PublicOutput.MaxSeverity)
 	}
-	if resp.PublicOutput.PolicyThreshold != 1 {
-		t.Fatalf("expected policy threshold 1, got %d", resp.PublicOutput.PolicyThreshold)
-	}
 	if resp.Proof.ProofB64 == "" || resp.Proof.PublicInputsB64 == "" {
 		t.Fatalf("expected proof fields to be populated")
 	}
 }
 
-func TestEvaluateHandler_StubEvalOutput(t *testing.T) {
+func TestEvaluateHandler_StubEvaluationResult(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	runsDir := t.TempDir()
 	router.POST("/api/evaluate", Handler(runsDir, 0))
 
-	spec := Spec{
-		SchemaVersion:  1,
-		EvaluationName: "test",
-		Policy:         Policy{Reveal: RevealPolicy{MaxSeverity: true, Commitment: true}},
-		Constraints: []Constraint{
-			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
-			{ID: "harm_enabling_content_risk", Enabled: true, AllowedMaxSeverity: 2},
+	cfg := PolicyConfig{
+		PolicyVersion: "noema_policy_v1",
+		Constraints: []PolicyConstraint{
+			{ID: "pii_exposure_risk", Enabled: true, MaxAllowed: 1},
+			{ID: "harm_enabling_content_risk", Enabled: true, MaxAllowed: 2},
 		},
 	}
 
-	body, contentType := buildMultipartEvalRequest(t, spec, EvalOutput{}, false)
+	body, contentType := buildMultipartEvalRequest(t, cfg, EvaluationResult{}, false)
 	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", body)
 	req.Header.Set("Content-Type", contentType)
 	rec := httptest.NewRecorder()
@@ -104,53 +96,50 @@ func TestEvaluateHandler_StubEvalOutput(t *testing.T) {
 	}
 }
 
-func TestEvaluateHandler_InvalidDataset(t *testing.T) {
+func TestEvaluateHandler_AllowsAnyJSONDataset(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	runsDir := t.TempDir()
 	router.POST("/api/evaluate", Handler(runsDir, 0))
 
-	spec := Spec{
-		SchemaVersion:  1,
-		EvaluationName: "test",
-		Constraints: []Constraint{
-			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+	cfg := PolicyConfig{
+		PolicyVersion: "noema_policy_v1",
+		Constraints: []PolicyConstraint{
+			{ID: "pii_exposure_risk", Enabled: true, MaxAllowed: 1},
 		},
 	}
 
-	body, contentType := buildMultipartEvalRequestWithDataset(t, spec, `{"items":[]}`)
+	body, contentType := buildMultipartEvalRequestWithDataset(t, cfg, `{"any":"json","array":[1,2,3]}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", body)
 	req.Header.Set("Content-Type", contentType)
 	rec := httptest.NewRecorder()
 
 	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
-func TestEvaluateHandler_InvalidEvalOutput(t *testing.T) {
+func TestEvaluateHandler_InvalidEvaluationResult(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	runsDir := t.TempDir()
 	router.POST("/api/evaluate", Handler(runsDir, 0))
 
-	spec := Spec{
-		SchemaVersion:  1,
-		EvaluationName: "test",
-		Constraints: []Constraint{
-			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+	cfg := PolicyConfig{
+		PolicyVersion: "noema_policy_v1",
+		Constraints: []PolicyConstraint{
+			{ID: "pii_exposure_risk", Enabled: true, MaxAllowed: 1},
 		},
 	}
-	evalOut := EvalOutput{
-		SchemaVersion: 1,
-		Constraints: []EvalConstraintResult{
+	evalOut := EvaluationResult{
+		EvalVersion: "noema_eval_v1",
+		Results: []EvalResultItem{
 			{ID: "unknown", Severity: 2, Rationale: "bad"},
 		},
-		MaxSeverity: 2,
 	}
 
-	body, contentType := buildMultipartEvalRequest(t, spec, evalOut, true)
+	body, contentType := buildMultipartEvalRequest(t, cfg, evalOut, true)
 	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", body)
 	req.Header.Set("Content-Type", contentType)
 	rec := httptest.NewRecorder()
@@ -167,22 +156,20 @@ func TestEvaluateHandler_CleansUpFailedRun(t *testing.T) {
 	runsDir := t.TempDir()
 	router.POST("/api/evaluate", Handler(runsDir, 0))
 
-	spec := Spec{
-		SchemaVersion:  1,
-		EvaluationName: "test",
-		Constraints: []Constraint{
-			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+	cfg := PolicyConfig{
+		PolicyVersion: "noema_policy_v1",
+		Constraints: []PolicyConstraint{
+			{ID: "pii_exposure_risk", Enabled: true, MaxAllowed: 1},
 		},
 	}
-	evalOut := EvalOutput{
-		SchemaVersion: 1,
-		Constraints: []EvalConstraintResult{
+	evalOut := EvaluationResult{
+		EvalVersion: "noema_eval_v1",
+		Results: []EvalResultItem{
 			{ID: "unknown", Severity: 2, Rationale: "bad"},
 		},
-		MaxSeverity: 2,
 	}
 
-	body, contentType := buildMultipartEvalRequest(t, spec, evalOut, true)
+	body, contentType := buildMultipartEvalRequest(t, cfg, evalOut, true)
 	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", body)
 	req.Header.Set("Content-Type", contentType)
 	rec := httptest.NewRecorder()
@@ -209,15 +196,14 @@ func TestEvaluateHandler_WithImages(t *testing.T) {
 	runsDir := t.TempDir()
 	router.POST("/api/evaluate", Handler(runsDir, 0))
 
-	spec := Spec{
-		SchemaVersion:  1,
-		EvaluationName: "test",
-		Constraints: []Constraint{
-			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+	cfg := PolicyConfig{
+		PolicyVersion: "noema_policy_v1",
+		Constraints: []PolicyConstraint{
+			{ID: "pii_exposure_risk", Enabled: true, MaxAllowed: 1},
 		},
 	}
 
-	body, contentType := buildMultipartEvalRequestWithImages(t, spec)
+	body, contentType := buildMultipartEvalRequestWithImages(t, cfg)
 	req := httptest.NewRequest(http.MethodPost, "/api/evaluate", body)
 	req.Header.Set("Content-Type", contentType)
 	rec := httptest.NewRecorder()
@@ -228,27 +214,27 @@ func TestEvaluateHandler_WithImages(t *testing.T) {
 	}
 }
 
-func buildMultipartEvalRequest(t *testing.T, spec Spec, evalOut EvalOutput, includeEvalOutput bool) (*bytes.Buffer, string) {
+func buildMultipartEvalRequest(t *testing.T, cfg PolicyConfig, evalOut EvaluationResult, includeEvalOutput bool) (*bytes.Buffer, string) {
 	t.Helper()
 
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 
-	specRaw, err := json.Marshal(spec)
+	policyRaw, err := json.Marshal(cfg)
 	if err != nil {
-		t.Fatalf("marshal spec: %v", err)
+		t.Fatalf("marshal policy_config: %v", err)
 	}
-	if err := writer.WriteField("spec", string(specRaw)); err != nil {
-		t.Fatalf("write spec field: %v", err)
+	if err := writer.WriteField("policy_config", string(policyRaw)); err != nil {
+		t.Fatalf("write policy_config field: %v", err)
 	}
 
 	if includeEvalOutput {
 		evalRaw, err := json.Marshal(evalOut)
 		if err != nil {
-			t.Fatalf("marshal eval_output: %v", err)
+			t.Fatalf("marshal evaluation_result: %v", err)
 		}
-		if err := writer.WriteField("eval_output", string(evalRaw)); err != nil {
-			t.Fatalf("write eval_output field: %v", err)
+		if err := writer.WriteField("evaluation_result", string(evalRaw)); err != nil {
+			t.Fatalf("write evaluation_result field: %v", err)
 		}
 	}
 
@@ -267,18 +253,18 @@ func buildMultipartEvalRequest(t *testing.T, spec Spec, evalOut EvalOutput, incl
 	return &buf, writer.FormDataContentType()
 }
 
-func buildMultipartEvalRequestWithDataset(t *testing.T, spec Spec, datasetJSON string) (*bytes.Buffer, string) {
+func buildMultipartEvalRequestWithDataset(t *testing.T, cfg PolicyConfig, datasetJSON string) (*bytes.Buffer, string) {
 	t.Helper()
 
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 
-	specRaw, err := json.Marshal(spec)
+	policyRaw, err := json.Marshal(cfg)
 	if err != nil {
-		t.Fatalf("marshal spec: %v", err)
+		t.Fatalf("marshal policy_config: %v", err)
 	}
-	if err := writer.WriteField("spec", string(specRaw)); err != nil {
-		t.Fatalf("write spec field: %v", err)
+	if err := writer.WriteField("policy_config", string(policyRaw)); err != nil {
+		t.Fatalf("write policy_config field: %v", err)
 	}
 
 	part, err := writer.CreateFormFile("dataset", "dataset.json")
@@ -296,18 +282,18 @@ func buildMultipartEvalRequestWithDataset(t *testing.T, spec Spec, datasetJSON s
 	return &buf, writer.FormDataContentType()
 }
 
-func buildMultipartEvalRequestWithImages(t *testing.T, spec Spec) (*bytes.Buffer, string) {
+func buildMultipartEvalRequestWithImages(t *testing.T, cfg PolicyConfig) (*bytes.Buffer, string) {
 	t.Helper()
 
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 
-	specRaw, err := json.Marshal(spec)
+	policyRaw, err := json.Marshal(cfg)
 	if err != nil {
-		t.Fatalf("marshal spec: %v", err)
+		t.Fatalf("marshal policy_config: %v", err)
 	}
-	if err := writer.WriteField("spec", string(specRaw)); err != nil {
-		t.Fatalf("write spec field: %v", err)
+	if err := writer.WriteField("policy_config", string(policyRaw)); err != nil {
+		t.Fatalf("write policy_config field: %v", err)
 	}
 
 	part, err := writer.CreateFormFile("dataset", "dataset.json")

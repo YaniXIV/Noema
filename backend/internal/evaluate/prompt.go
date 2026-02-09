@@ -8,13 +8,14 @@ import (
 	"strings"
 )
 
-const promptVersion = "noema-eval-v1"
+const promptVersion = "noema-eval-v2"
 
 type PromptConstraint struct {
 	ID                 string
 	Description        string
 	SeverityLevels     map[string]string
 	AllowedMaxSeverity int
+	Enabled            bool
 }
 
 var presetConstraints = map[string]PromptConstraint{
@@ -80,16 +81,21 @@ You are a strict dataset policy evaluator for Noema.
 Return ONLY valid JSON that conforms to the provided schema.
 Be concise: each rationale should be a short phrase or sentence (<= 25 words).
 Do not include any extra keys, markdown, or explanations outside JSON.
+You must reason about the dataset content when assigning severities.
 	`)
 }
 
-func buildUserPrompt(spec Spec, datasetJSON []byte, images []ImageInfo) string {
-	constraints := resolvePromptConstraints(spec)
+func buildUserPrompt(cfg PolicyConfig, datasetJSON []byte, images []ImageInfo) string {
+	constraints := resolvePromptConstraints(cfg)
 	var buf bytes.Buffer
 	buf.WriteString("Evaluate the dataset against the following constraints.\n")
+	buf.WriteString("Return ONLY valid JSON. No prose. Must match:\n")
+	buf.WriteString("{\"eval_version\":\"noema_eval_v1\",\"results\":[{\"id\":\"...\",\"severity\":0|1|2,\"confidence\":0..1,\"rationale\":\"...\"}]}\n")
+	buf.WriteString("Include one result per constraint id provided. severity must be integer 0,1,2.\n")
 	buf.WriteString("Constraints:\n")
 	for _, c := range constraints {
 		buf.WriteString(fmt.Sprintf("- id: %s\n", c.ID))
+		buf.WriteString(fmt.Sprintf("  enabled: %t\n", c.Enabled))
 		buf.WriteString(fmt.Sprintf("  description: %s\n", c.Description))
 		if len(c.SeverityLevels) > 0 {
 			buf.WriteString("  severity_levels:\n")
@@ -110,38 +116,20 @@ func buildUserPrompt(spec Spec, datasetJSON []byte, images []ImageInfo) string {
 	return buf.String()
 }
 
-func resolvePromptConstraints(spec Spec) []PromptConstraint {
+func resolvePromptConstraints(cfg PolicyConfig) []PromptConstraint {
 	var out []PromptConstraint
-	for _, c := range spec.Constraints {
-		if !c.Enabled {
-			continue
-		}
+	for _, c := range cfg.Constraints {
 		if preset, ok := presetConstraints[c.ID]; ok {
-			preset.AllowedMaxSeverity = c.AllowedMaxSeverity
+			preset.AllowedMaxSeverity = c.MaxAllowed
+			preset.Enabled = c.Enabled
 			out = append(out, preset)
 			continue
 		}
 		out = append(out, PromptConstraint{
 			ID:                 c.ID,
 			Description:        "No description provided for this constraint.",
-			AllowedMaxSeverity: c.AllowedMaxSeverity,
-		})
-	}
-	for _, c := range spec.CustomConstraints {
-		if !c.Enabled {
-			continue
-		}
-		desc := strings.TrimSpace(c.Description)
-		if desc == "" {
-			desc = strings.TrimSpace(c.Title)
-		}
-		if desc == "" {
-			desc = "Custom constraint."
-		}
-		out = append(out, PromptConstraint{
-			ID:                 c.ID,
-			Description:        desc,
-			AllowedMaxSeverity: c.AllowedMaxSeverity,
+			AllowedMaxSeverity: c.MaxAllowed,
+			Enabled:            c.Enabled,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })

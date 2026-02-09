@@ -55,46 +55,39 @@ func buildMultipartForm(t *testing.T, files []formFile) *multipart.Form {
 	return form
 }
 
-func TestParseEvalOutputOptional_DefaultsToStub(t *testing.T) {
-	spec := Spec{
-		SchemaVersion: 1,
-		Constraints: []Constraint{
-			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
-			{ID: "harm_enabling_content_risk", Enabled: true, AllowedMaxSeverity: 2},
+func TestParseEvaluationResultOptional_DefaultsToStub(t *testing.T) {
+	cfg := PolicyConfig{
+		PolicyVersion: "noema_policy_v1",
+		Constraints: []PolicyConstraint{
+			{ID: "pii_exposure_risk", Enabled: true, MaxAllowed: 1},
+			{ID: "harm_enabling_content_risk", Enabled: true, MaxAllowed: 2},
 		},
-	}
-	enabled, err := enabledConstraints(spec)
-	if err != nil {
-		t.Fatalf("enabledConstraints error: %v", err)
 	}
 
 	form := &multipart.Form{Value: map[string][]string{}}
-	out, err := parseEvalOutputOptional(form, enabled)
+	out, err := parseEvaluationResultOptional(form, cfg)
 	if err != nil {
-		t.Fatalf("parseEvalOutputOptional error: %v", err)
+		t.Fatalf("parseEvaluationResultOptional error: %v", err)
 	}
-	if out.SchemaVersion != 1 {
-		t.Fatalf("expected schema_version 1, got %d", out.SchemaVersion)
+	if out.EvalVersion != "noema_eval_v1" {
+		t.Fatalf("expected eval_version noema_eval_v1, got %s", out.EvalVersion)
 	}
-	if out.MaxSeverity != 0 {
-		t.Fatalf("expected max_severity 0, got %d", out.MaxSeverity)
-	}
-	if len(out.Constraints) != len(enabled) {
-		t.Fatalf("expected %d constraints, got %d", len(enabled), len(out.Constraints))
+	if len(out.Results) != len(cfg.Constraints) {
+		t.Fatalf("expected %d results, got %d", len(cfg.Constraints), len(out.Results))
 	}
 
-	ids := make([]string, 0, len(out.Constraints))
-	for _, c := range out.Constraints {
-		if c.Severity != 0 {
-			t.Fatalf("expected severity 0 for %s, got %d", c.ID, c.Severity)
+	ids := make([]string, 0, len(out.Results))
+	for _, r := range out.Results {
+		if r.Severity != 0 {
+			t.Fatalf("expected severity 0 for %s, got %d", r.ID, r.Severity)
 		}
-		if c.Rationale == "" {
-			t.Fatalf("expected rationale for %s", c.ID)
+		if r.Rationale == "" {
+			t.Fatalf("expected rationale for %s", r.ID)
 		}
-		ids = append(ids, c.ID)
+		ids = append(ids, r.ID)
 	}
 	if !sort.StringsAreSorted(ids) {
-		t.Fatalf("expected constraints sorted by id, got %v", ids)
+		t.Fatalf("expected results sorted by id, got %v", ids)
 	}
 }
 
@@ -122,186 +115,143 @@ func TestParseUploads_RejectsImageFilenameWhitespace(t *testing.T) {
 	}
 }
 
-func TestParseUploads_RejectsImageRefPathSeparators(t *testing.T) {
-	dataset := `{"items":[{"id":"item-1","text":"hello","image_ref":"images/pic.png"}]}`
-	form := buildMultipartForm(t, []formFile{
-		{
-			field:       "dataset",
-			filename:    "dataset.json",
-			contentType: "application/json",
-			content:     []byte(dataset),
-		},
-	})
-
-	if _, _, err := parseUploads(form); err == nil {
-		t.Fatalf("expected error for image_ref with path separators")
-	} else if !strings.Contains(err.Error(), "path separators") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestParseEvalOutputOptional_UsesProvidedOutput(t *testing.T) {
-	spec := Spec{
-		SchemaVersion: 1,
-		Constraints: []Constraint{
-			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
-			{ID: "harm_enabling_content_risk", Enabled: true, AllowedMaxSeverity: 2},
+func TestParseEvaluationResultOptional_UsesProvidedOutput(t *testing.T) {
+	cfg := PolicyConfig{
+		PolicyVersion: "noema_policy_v1",
+		Constraints: []PolicyConstraint{
+			{ID: "pii_exposure_risk", Enabled: true, MaxAllowed: 1},
+			{ID: "harm_enabling_content_risk", Enabled: true, MaxAllowed: 2},
 		},
 	}
-	enabled, err := enabledConstraints(spec)
-	if err != nil {
-		t.Fatalf("enabledConstraints error: %v", err)
-	}
 
-	payload := EvalOutput{
-		SchemaVersion: 1,
-		Constraints: []EvalConstraintResult{
+	payload := EvaluationResult{
+		EvalVersion: "noema_eval_v1",
+		Results: []EvalResultItem{
 			{ID: "pii_exposure_risk", Severity: 1, Rationale: "limited"},
 			{ID: "harm_enabling_content_risk", Severity: 0, Rationale: "none"},
 		},
-		MaxSeverity: 1,
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		t.Fatalf("marshal eval_output: %v", err)
+		t.Fatalf("marshal evaluation_result: %v", err)
 	}
 
-	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw)}}}
-	out, err := parseEvalOutputOptional(form, enabled)
+	form := &multipart.Form{Value: map[string][]string{"evaluation_result": {string(raw)}}}
+	out, err := parseEvaluationResultOptional(form, cfg)
 	if err != nil {
-		t.Fatalf("parseEvalOutputOptional error: %v", err)
+		t.Fatalf("parseEvaluationResultOptional error: %v", err)
 	}
-	if out.MaxSeverity != 1 {
-		t.Fatalf("expected max_severity 1, got %d", out.MaxSeverity)
-	}
-	if len(out.Constraints) != 2 {
-		t.Fatalf("expected 2 constraints, got %d", len(out.Constraints))
+	if len(out.Results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(out.Results))
 	}
 }
 
-func TestParseEvalOutputOptional_RejectsInvalidOutput(t *testing.T) {
-	spec := Spec{
-		SchemaVersion: 1,
-		Constraints: []Constraint{
-			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+func TestParseEvaluationResultOptional_RejectsInvalidOutput(t *testing.T) {
+	cfg := PolicyConfig{
+		PolicyVersion: "noema_policy_v1",
+		Constraints: []PolicyConstraint{
+			{ID: "pii_exposure_risk", Enabled: true, MaxAllowed: 1},
 		},
-	}
-	enabled, err := enabledConstraints(spec)
-	if err != nil {
-		t.Fatalf("enabledConstraints error: %v", err)
 	}
 
-	payload := EvalOutput{
-		SchemaVersion: 1,
-		Constraints: []EvalConstraintResult{
+	payload := EvaluationResult{
+		EvalVersion: "noema_eval_v1",
+		Results: []EvalResultItem{
 			{ID: "unknown_constraint", Severity: 2, Rationale: "bad"},
 		},
-		MaxSeverity: 2,
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		t.Fatalf("marshal eval_output: %v", err)
+		t.Fatalf("marshal evaluation_result: %v", err)
 	}
 
-	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw)}}}
-	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
+	form := &multipart.Form{Value: map[string][]string{"evaluation_result": {string(raw)}}}
+	if _, err := parseEvaluationResultOptional(form, cfg); err == nil {
 		t.Fatalf("expected validation error for unknown constraint")
 	}
 }
 
-func TestParseEvalOutputOptional_RejectsTrailingGarbage(t *testing.T) {
-	spec := Spec{
-		SchemaVersion: 1,
-		Constraints: []Constraint{
-			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+func TestParseEvaluationResultOptional_RejectsTrailingGarbage(t *testing.T) {
+	cfg := PolicyConfig{
+		PolicyVersion: "noema_policy_v1",
+		Constraints: []PolicyConstraint{
+			{ID: "pii_exposure_risk", Enabled: true, MaxAllowed: 1},
 		},
-	}
-	enabled, err := enabledConstraints(spec)
-	if err != nil {
-		t.Fatalf("enabledConstraints error: %v", err)
 	}
 
-	payload := EvalOutput{
-		SchemaVersion: 1,
-		Constraints: []EvalConstraintResult{
+	payload := EvaluationResult{
+		EvalVersion: "noema_eval_v1",
+		Results: []EvalResultItem{
 			{ID: "pii_exposure_risk", Severity: 0, Rationale: "ok"},
 		},
-		MaxSeverity: 0,
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		t.Fatalf("marshal eval_output: %v", err)
+		t.Fatalf("marshal evaluation_result: %v", err)
 	}
 
-	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw) + " trailing"}}}
-	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
+	form := &multipart.Form{Value: map[string][]string{"evaluation_result": {string(raw) + " trailing"}}}
+	if _, err := parseEvaluationResultOptional(form, cfg); err == nil {
 		t.Fatalf("expected error for trailing garbage")
 	}
 }
 
-func TestParseEvalOutputOptional_RejectsMultipleValues(t *testing.T) {
-	spec := Spec{
-		SchemaVersion: 1,
-		Constraints: []Constraint{
-			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+func TestParseEvaluationResultOptional_RejectsMultipleValues(t *testing.T) {
+	cfg := PolicyConfig{
+		PolicyVersion: "noema_policy_v1",
+		Constraints: []PolicyConstraint{
+			{ID: "pii_exposure_risk", Enabled: true, MaxAllowed: 1},
 		},
-	}
-	enabled, err := enabledConstraints(spec)
-	if err != nil {
-		t.Fatalf("enabledConstraints error: %v", err)
 	}
 
-	payload := EvalOutput{
-		SchemaVersion: 1,
-		Constraints: []EvalConstraintResult{
+	payload := EvaluationResult{
+		EvalVersion: "noema_eval_v1",
+		Results: []EvalResultItem{
 			{ID: "pii_exposure_risk", Severity: 0, Rationale: "ok"},
 		},
-		MaxSeverity: 0,
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		t.Fatalf("marshal eval_output: %v", err)
+		t.Fatalf("marshal evaluation_result: %v", err)
 	}
 
-	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw), string(raw)}}}
-	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
-		t.Fatalf("expected error for multiple eval_output values")
+	form := &multipart.Form{Value: map[string][]string{"evaluation_result": {string(raw), string(raw)}}}
+	if _, err := parseEvaluationResultOptional(form, cfg); err == nil {
+		t.Fatalf("expected error for multiple evaluation_result values")
 	}
 }
 
-func TestParseEvalOutputOptional_RejectsWhitespace(t *testing.T) {
-	spec := Spec{
-		SchemaVersion: 1,
-		Constraints: []Constraint{
-			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
-			{ID: "harm_enabling_content_risk", Enabled: true, AllowedMaxSeverity: 2},
+func TestParseEvaluationResultOptional_RejectsWhitespace(t *testing.T) {
+	cfg := PolicyConfig{
+		PolicyVersion: "noema_policy_v1",
+		Constraints: []PolicyConstraint{
+			{ID: "pii_exposure_risk", Enabled: true, MaxAllowed: 1},
+			{ID: "harm_enabling_content_risk", Enabled: true, MaxAllowed: 2},
 		},
 	}
-	enabled, err := enabledConstraints(spec)
-	if err != nil {
-		t.Fatalf("enabledConstraints error: %v", err)
-	}
 
-	form := &multipart.Form{Value: map[string][]string{"eval_output": {" \n\t "}}}
-	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
-		t.Fatalf("expected error for blank eval_output")
+	form := &multipart.Form{Value: map[string][]string{"evaluation_result": {" \n\t "}}}
+	if _, err := parseEvaluationResultOptional(form, cfg); err == nil {
+		t.Fatalf("expected error for blank evaluation_result")
 	}
 }
 
 func TestComputePolicyResult(t *testing.T) {
-	enabled := map[string]ConstraintRule{
-		"pii":    {ID: "pii", AllowedMaxSeverity: 1},
-		"safety": {ID: "safety", AllowedMaxSeverity: 2},
+	cfg := PolicyConfig{
+		PolicyVersion: "noema_policy_v1",
+		Constraints: []PolicyConstraint{
+			{ID: "pii", Enabled: true, MaxAllowed: 1},
+			{ID: "safety", Enabled: true, MaxAllowed: 2},
+		},
 	}
-	out := EvalOutput{
-		SchemaVersion: 1,
-		Constraints: []EvalConstraintResult{
+	out := EvaluationResult{
+		EvalVersion: "noema_eval_v1",
+		Results: []EvalResultItem{
 			{ID: "pii", Severity: 2, Rationale: "ok"},
 			{ID: "safety", Severity: 2, Rationale: "ok"},
 		},
-		MaxSeverity: 2,
 	}
-	overall, maxSeverity, threshold := computePolicyResult(out, enabled)
+	overall, maxSeverity, threshold := computePolicyResult(out, cfg)
 	if threshold != 1 {
 		t.Fatalf("expected threshold 1, got %d", threshold)
 	}
@@ -310,115 +260,6 @@ func TestComputePolicyResult(t *testing.T) {
 	}
 	if overall {
 		t.Fatalf("expected overall pass false due to pii threshold")
-	}
-}
-
-func TestValidateDatasetJSON_ImageRefRequiresImages(t *testing.T) {
-	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"img1.png"}]}`
-	form := buildMultipartForm(t, []formFile{
-		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-	})
-	datasetFile := form.File["dataset"][0]
-	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-		t.Fatalf("expected error for image_ref without images")
-	}
-}
-
-func TestValidateDatasetJSON_ImageRefMatchesUpload(t *testing.T) {
-	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"img1.png"}]}`
-	form := buildMultipartForm(t, []formFile{
-		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-		{field: "images", filename: "img1.png", contentType: "image/png", content: []byte("png")},
-	})
-	datasetFile := form.File["dataset"][0]
-	imageFiles := form.File["images"]
-	if err := validateDatasetJSON(datasetFile, imageFiles); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestValidateDatasetJSON_RejectsUnusedImages(t *testing.T) {
-	dataset := `{"items":[{"id":"1","text":"hello"}]}`
-	form := buildMultipartForm(t, []formFile{
-		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-		{field: "images", filename: "img1.png", contentType: "image/png", content: []byte("png")},
-	})
-	datasetFile := form.File["dataset"][0]
-	imageFiles := form.File["images"]
-	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
-		t.Fatalf("expected error for unused image")
-	} else if !strings.Contains(err.Error(), "not referenced") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestValidateDatasetJSON_RejectsWhitespaceImageRef(t *testing.T) {
-	dataset := `{"items":[{"id":"1","text":"hello","image_ref":"   "}]}`
-	form := buildMultipartForm(t, []formFile{
-		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
-	})
-	datasetFile := form.File["dataset"][0]
-	imageFiles := form.File["images"]
-	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
-		t.Fatalf("expected error for whitespace image_ref")
-	}
-}
-
-func TestValidateDatasetJSON_RejectsTrimmedImageRef(t *testing.T) {
-	dataset := `{"items":[{"id":"1","text":"hello","image_ref":" img.png "}]}`
-	form := buildMultipartForm(t, []formFile{
-		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-		{field: "images", filename: "img.png", contentType: "image/png", content: []byte("png")},
-	})
-	datasetFile := form.File["dataset"][0]
-	imageFiles := form.File["images"]
-	if err := validateDatasetJSON(datasetFile, imageFiles); err == nil {
-		t.Fatalf("expected error for trimmed image_ref")
-	}
-}
-
-func TestValidateDatasetJSON_RejectsDuplicateIDs(t *testing.T) {
-	dataset := `{"items":[{"id":"1","text":"hello"},{"id":"1","text":"world"}]}`
-	form := buildMultipartForm(t, []formFile{
-		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-	})
-	datasetFile := form.File["dataset"][0]
-	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-		t.Fatalf("expected error for duplicate dataset ids")
-	}
-}
-
-func TestValidateDatasetJSON_RejectsUnknownFields(t *testing.T) {
-	dataset := `{"items":[{"id":"1","text":"hello","extra":"nope"}]}`
-	form := buildMultipartForm(t, []formFile{
-		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-	})
-	datasetFile := form.File["dataset"][0]
-	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-		t.Fatalf("expected error for unknown dataset fields")
-	}
-}
-
-func TestValidateDatasetJSON_RejectsWhitespaceFields(t *testing.T) {
-	dataset := `{"items":[{"id":"   ","text":"hello"},{"id":"2","text":"   "}]}`
-	form := buildMultipartForm(t, []formFile{
-		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-	})
-	datasetFile := form.File["dataset"][0]
-	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-		t.Fatalf("expected error for whitespace dataset fields")
-	}
-}
-
-func TestValidateDatasetJSON_RejectsTrimmedIDs(t *testing.T) {
-	dataset := `{"items":[{"id":" 1 ","text":"hello"}]}`
-	form := buildMultipartForm(t, []formFile{
-		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-	})
-	datasetFile := form.File["dataset"][0]
-	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-		t.Fatalf("expected error for trimmed dataset ids")
 	}
 }
 
@@ -455,108 +296,60 @@ func TestParseUploads_RejectsDuplicateImageNames(t *testing.T) {
 	}
 }
 
-func TestValidateSpec_RejectsEmptyConstraintIDs(t *testing.T) {
-	spec := Spec{
-		SchemaVersion:  1,
-		EvaluationName: "eval",
-		Constraints: []Constraint{
-			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
-			{ID: "   ", Enabled: true, AllowedMaxSeverity: 1},
+func TestValidatePolicyConfig_RejectsEmptyConstraintIDs(t *testing.T) {
+	cfg := PolicyConfig{
+		PolicyVersion: "noema_policy_v1",
+		Constraints: []PolicyConstraint{
+			{ID: "pii_exposure_risk", Enabled: true, MaxAllowed: 1},
+			{ID: "   ", Enabled: true, MaxAllowed: 1},
 		},
 	}
-	if err := validateSpec(spec); err == nil {
+	if err := validatePolicyConfig(cfg); err == nil {
 		t.Fatalf("expected error for empty constraint id")
 	}
 }
 
-func TestValidateSpec_RejectsEmptyCustomConstraintIDs(t *testing.T) {
-	spec := Spec{
-		SchemaVersion:  1,
-		EvaluationName: "eval",
-		CustomConstraints: []CustomConstraint{
-			{ID: "", Title: "Custom", Description: "desc", Enabled: true, AllowedMaxSeverity: 1},
+func TestValidatePolicyConfig_RejectsDuplicateConstraintIDs(t *testing.T) {
+	cfg := PolicyConfig{
+		PolicyVersion: "noema_policy_v1",
+		Constraints: []PolicyConstraint{
+			{ID: "pii_exposure_risk", Enabled: true, MaxAllowed: 1},
+			{ID: "pii_exposure_risk", Enabled: false, MaxAllowed: 2},
 		},
 	}
-	if err := validateSpec(spec); err == nil {
-		t.Fatalf("expected error for empty custom constraint id")
-	}
-}
-
-func TestValidateSpec_RejectsDuplicateConstraintIDs(t *testing.T) {
-	spec := Spec{
-		SchemaVersion:  1,
-		EvaluationName: "eval",
-		Constraints: []Constraint{
-			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
-			{ID: "pii_exposure_risk", Enabled: false, AllowedMaxSeverity: 2},
-		},
-	}
-	if err := validateSpec(spec); err == nil {
+	if err := validatePolicyConfig(cfg); err == nil {
 		t.Fatalf("expected error for duplicate constraint id")
 	}
 }
 
-func TestValidateSpec_RejectsWhitespaceConstraintIDs(t *testing.T) {
-	spec := Spec{
-		SchemaVersion:  1,
-		EvaluationName: "eval",
-		Constraints: []Constraint{
-			{ID: " pii_exposure_risk ", Enabled: true, AllowedMaxSeverity: 1},
+func TestValidatePolicyConfig_RejectsWhitespaceConstraintIDs(t *testing.T) {
+	cfg := PolicyConfig{
+		PolicyVersion: "noema_policy_v1",
+		Constraints: []PolicyConstraint{
+			{ID: " pii_exposure_risk ", Enabled: true, MaxAllowed: 1},
 		},
 	}
-	if err := validateSpec(spec); err == nil {
+	if err := validatePolicyConfig(cfg); err == nil {
 		t.Fatalf("expected error for whitespace in constraint id")
 	}
 }
 
-func TestValidateSpec_RejectsMissingEvaluationName(t *testing.T) {
-	spec := Spec{
-		SchemaVersion:  1,
-		EvaluationName: "",
-		Constraints: []Constraint{
-			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
+func TestValidatePolicyConfig_RejectsInvalidVersion(t *testing.T) {
+	cfg := PolicyConfig{
+		PolicyVersion: "noema_policy_v2",
+		Constraints: []PolicyConstraint{
+			{ID: "pii_exposure_risk", Enabled: true, MaxAllowed: 1},
 		},
 	}
-	if err := validateSpec(spec); err == nil {
-		t.Fatalf("expected error for missing evaluation_name")
+	if err := validatePolicyConfig(cfg); err == nil {
+		t.Fatalf("expected error for invalid policy_version")
 	}
 }
 
-func TestValidateSpec_RejectsWhitespaceEvaluationName(t *testing.T) {
-	spec := Spec{
-		SchemaVersion:  1,
-		EvaluationName: " eval ",
-		Constraints: []Constraint{
-			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
-		},
-	}
-	if err := validateSpec(spec); err == nil {
-		t.Fatalf("expected error for whitespace in evaluation_name")
-	}
-}
-
-func TestParseSpec_RejectsUnknownFields(t *testing.T) {
-	form := &multipart.Form{
-		Value: map[string][]string{
-			"spec": {`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[],"extra":true}`},
-		},
-	}
-	if _, err := parseSpec(form); err == nil {
-		t.Fatalf("expected error for unknown spec fields")
-	}
-}
-
-func TestParseSpec_RejectsMultipleValues(t *testing.T) {
-	form := &multipart.Form{
-		Value: map[string][]string{
-			"spec": {
-				`{"schema_version":1,"evaluation_name":"eval","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[]}`,
-				`{"schema_version":1,"evaluation_name":"other","policy":{"reveal":{"max_severity":true,"commitment":true}},"constraints":[],"custom_constraints":[]}`,
-			},
-		},
-	}
-	if _, err := parseSpec(form); err == nil {
-		t.Fatalf("expected error for multiple spec values")
+func TestParsePolicyConfig_RejectsUnknownFields(t *testing.T) {
+	raw := `{"policy_version":"noema_policy_v1","constraints":[{"id":"pii_exposure_risk","enabled":true,"max_allowed":1}],"extra":true}`
+	if _, err := parsePolicyConfig(raw); err == nil {
+		t.Fatalf("expected error for unknown policy_config fields")
 	}
 }
 

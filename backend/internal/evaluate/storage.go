@@ -61,12 +61,12 @@ func saveRunFiles(runPath string, dataset *multipart.FileHeader, images []*multi
 	return nil
 }
 
-func saveRunMetadata(runPath string, spec Spec, evalOut EvalOutput) error {
-	if err := saveJSON(filepath.Join(runPath, "spec.json"), spec); err != nil {
-		return fmt.Errorf("failed to save spec: %w", err)
+func saveRunMetadata(runPath string, policyConfig PolicyConfig, evalOut EvaluationResult) error {
+	if err := saveJSON(filepath.Join(runPath, "policy_config.json"), policyConfig); err != nil {
+		return fmt.Errorf("failed to save policy_config: %w", err)
 	}
-	if err := saveJSON(filepath.Join(runPath, "eval_output.json"), evalOut); err != nil {
-		return fmt.Errorf("failed to save evaluation output: %w", err)
+	if err := saveJSON(filepath.Join(runPath, "evaluation_result.json"), evalOut); err != nil {
+		return fmt.Errorf("failed to save evaluation result: %w", err)
 	}
 	return nil
 }

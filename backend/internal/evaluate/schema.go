@@ -4,16 +4,15 @@ func evalResponseSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"required": []any{
-			"schema_version",
-			"constraints",
-			"max_severity",
+			"eval_version",
+			"results",
 		},
 		"properties": map[string]any{
-			"schema_version": map[string]any{
-				"type": "integer",
-				"enum": []any{1},
+			"eval_version": map[string]any{
+				"type": "string",
+				"enum": []any{"noema_eval_v1"},
 			},
-			"constraints": map[string]any{
+			"results": map[string]any{
 				"type":     "array",
 				"minItems": 1,
 				"items": map[string]any{
@@ -21,7 +20,6 @@ func evalResponseSchema() map[string]any {
 					"required": []any{
 						"id",
 						"severity",
-						"rationale",
 					},
 					"properties": map[string]any{
 						"id": map[string]any{
@@ -35,19 +33,14 @@ func evalResponseSchema() map[string]any {
 						"rationale": map[string]any{
 							"type": "string",
 						},
+						"confidence": map[string]any{
+							"type":    "number",
+							"minimum": 0,
+							"maximum": 1,
+						},
 					},
 					"additionalProperties": false,
 				},
-			},
-			"max_severity": map[string]any{
-				"type":    "integer",
-				"minimum": 0,
-				"maximum": 2,
-			},
-			"confidence": map[string]any{
-				"type":    "number",
-				"minimum": 0,
-				"maximum": 1,
 			},
 		},
 		"additionalProperties": false,

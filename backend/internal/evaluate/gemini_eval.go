@@ -13,36 +13,39 @@ import (
 
 const geminiEvalTimeout = 45 * time.Second
 
-func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
-	if out, provided, err := parseEvalOutputProvided(form, enabled); err != nil {
-		return EvalOutput{}, err
+func resolveEvaluationResult(ctx context.Context, form *multipart.Form, cfg PolicyConfig, runsDir string, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvaluationResult, error) {
+	if out, provided, err := parseEvaluationResultProvided(form, cfg); err != nil {
+		return EvaluationResult{}, err
 	} else if provided {
 		return out, nil
 	}
-	return evalWithGemini(ctx, enabled, runsDir, spec, datasetFile, imageFiles), nil
+	return evalWithGemini(ctx, cfg, runsDir, datasetFile, imageFiles), nil
 }
 
-func evalWithGemini(ctx context.Context, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) EvalOutput {
+func evalWithGemini(ctx context.Context, cfg PolicyConfig, runsDir string, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) EvaluationResult {
 	if config.GeminiAPIKey() == "" {
-		return stubEvalOutput(enabled)
+		log.Printf("gemini disabled: missing GEMINI_API_KEY")
+		return stubEvaluationResult(cfg)
 	}
 
-	rawDataset, ds, err := readDatasetFile(datasetFile)
+	rawDataset, err := readDatasetBytes(datasetFile)
 	if err != nil {
-		log.Printf("gemini read dataset: %v", err)
-		return stubEvalOutput(enabled)
+		log.Printf("gemini fallback: read dataset failed: %v", err)
+		return stubEvaluationResult(cfg)
 	}
 
 	sampleLimit := config.SampleItemsLimit()
 	model := gemini.ModelName()
-	specJSON, err := jsonBytes(spec)
+	policyJSON, err := jsonBytes(cfg)
 	if err != nil {
-		log.Printf("gemini marshal spec: %v", err)
-		return stubEvalOutput(enabled)
+		log.Printf("gemini fallback: marshal policy_config failed: %v", err)
+		return stubEvaluationResult(cfg)
 	}
-	key := cacheKey(rawDataset, specJSON, model, sampleLimit)
+	log.Printf("gemini request: model=%s sample_limit=%d", model, sampleLimit)
+	key := cacheKey(rawDataset, policyJSON, model, sampleLimit)
 	if cached, err := loadCache(runsDir, key); err == nil {
-		if err := validateEvalOutput(cached.Output, enabled); err == nil {
+		if err := validateEvaluationResult(cached.Output, cfg); err == nil {
+			log.Printf("gemini cache hit: %s", key)
 			return cached.Output
 		}
 		_ = os.Remove(cachePath(runsDir, key))
@@ -50,20 +53,25 @@ func evalWithGemini(ctx context.Context, enabled map[string]ConstraintRule, runs
 		_ = os.Remove(cachePath(runsDir, key))
 	}
 
-	sampled := sampleDataset(ds, sampleLimit)
-	sampledJSON, err := marshalSampledDataset(sampled)
-	if err != nil {
-		log.Printf("gemini marshal dataset: %v", err)
-		return stubEvalOutput(enabled)
+	var sampledJSON []byte
+	if ds, err := parseDatasetSchema(rawDataset); err == nil {
+		sampled := sampleDataset(ds, sampleLimit)
+		sampledJSON, err = marshalSampledDataset(sampled)
+		if err != nil {
+			log.Printf("gemini marshal dataset: %v", err)
+			return stubEvaluationResult(cfg)
+		}
+	} else {
+		sampledJSON = rawDataset
 	}
 
 	images, err := readImages(imageFiles)
 	if err != nil {
-		log.Printf("gemini read images: %v", err)
-		return stubEvalOutput(enabled)
+		log.Printf("gemini fallback: read images failed: %v", err)
+		return stubEvaluationResult(cfg)
 	}
 
-	prompt := buildUserPrompt(spec, sampledJSON, images)
+	prompt := buildUserPrompt(cfg, sampledJSON, images)
 	req := gemini.EvalRequest{
 		SystemPrompt:    buildSystemPrompt(),
 		UserPrompt:      prompt,
@@ -72,23 +80,27 @@ func evalWithGemini(ctx context.Context, enabled map[string]ConstraintRule, runs
 		MaxOutputTokens: 2048,
 		Images:          toGeminiImages(images),
 	}
+	log.Printf("gemini system prompt: %s", req.SystemPrompt)
+	log.Printf("gemini user prompt: %s", req.UserPrompt)
 
 	ctx, cancel := withGeminiTimeout(ctx)
 	defer cancel()
+	log.Printf("gemini call: sending request")
 	resp, err := gemini.Evaluate(ctx, req)
 	if err != nil {
-		log.Printf("gemini evaluate: %v", err)
-		return stubEvalOutput(enabled)
+		log.Printf("gemini fallback: evaluate failed: %v", err)
+		return stubEvaluationResult(cfg)
 	}
+	log.Printf("gemini output: %s", resp.Text)
 
-	out, err := parseEvalOutput(resp.Text)
+	out, err := parseEvaluationResult(resp.Text)
 	if err != nil {
-		log.Printf("gemini parse output: %v", err)
-		return stubEvalOutput(enabled)
+		log.Printf("gemini fallback: parse output failed: %v", err)
+		return stubEvaluationResult(cfg)
 	}
-	if err := validateEvalOutput(out, enabled); err != nil {
-		log.Printf("gemini validate output: %v", err)
-		return stubEvalOutput(enabled)
+	if err := validateEvaluationResult(out, cfg); err != nil {
+		log.Printf("gemini fallback: validate output failed: %v", err)
+		return stubEvaluationResult(cfg)
 	}
 
 	cacheOut := CachedGeminiOutput{

@@ -11,12 +11,12 @@ import (
 )
 
 type CachedGeminiOutput struct {
-	Model         string       `json:"model"`
-	PromptVersion string       `json:"prompt_version"`
-	Output        EvalOutput   `json:"output"`
-	RawText       string       `json:"raw_text"`
-	Usage         *GeminiUsage `json:"usage,omitempty"`
-	CachedAt      string       `json:"cached_at"`
+	Model         string           `json:"model"`
+	PromptVersion string           `json:"prompt_version"`
+	Output        EvaluationResult `json:"output"`
+	RawText       string           `json:"raw_text"`
+	Usage         *GeminiUsage     `json:"usage,omitempty"`
+	CachedAt      string           `json:"cached_at"`
 }
 
 type GeminiUsage struct {
@@ -26,10 +26,10 @@ type GeminiUsage struct {
 	CachedTokenCount int32 `json:"cached_token_count"`
 }
 
-func cacheKey(dataset []byte, spec []byte, model string, sampleLimit int) string {
+func cacheKey(dataset []byte, policyConfig []byte, model string, sampleLimit int) string {
 	h := sha256.New()
 	h.Write(dataset)
-	h.Write(spec)
+	h.Write(policyConfig)
 	h.Write([]byte(model))
 	h.Write([]byte(promptVersion))
 	h.Write([]byte(fmt.Sprintf("sample:%d", sampleLimit)))

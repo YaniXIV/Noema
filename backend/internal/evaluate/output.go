@@ -7,71 +7,64 @@ import (
 	"io"
 )
 
-type EvalConstraintResult struct {
-	ID        string `json:"id"`
-	Severity  int    `json:"severity"`
-	Rationale string `json:"rationale"`
+type EvalResultItem struct {
+	ID         string   `json:"id"`
+	Severity   int      `json:"severity"`
+	Confidence *float64 `json:"confidence,omitempty"`
+	Rationale  string   `json:"rationale,omitempty"`
 }
 
-type EvalOutput struct {
-	SchemaVersion int                    `json:"schema_version"`
-	Constraints   []EvalConstraintResult `json:"constraints"`
-	MaxSeverity   int                    `json:"max_severity"`
-	Confidence    *float64               `json:"confidence,omitempty"`
+type EvaluationResult struct {
+	EvalVersion string           `json:"eval_version"`
+	Results     []EvalResultItem `json:"results"`
 }
 
-func parseEvalOutput(raw string) (EvalOutput, error) {
+func parseEvaluationResult(raw string) (EvaluationResult, error) {
 	dec := json.NewDecoder(bytes.NewBufferString(raw))
 	dec.DisallowUnknownFields()
-	var out EvalOutput
+	var out EvaluationResult
 	if err := dec.Decode(&out); err != nil {
-		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
+		return EvaluationResult{}, fmt.Errorf("invalid gemini JSON output")
 	}
 	if err := dec.Decode(&struct{}{}); err != io.EOF {
-		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
+		return EvaluationResult{}, fmt.Errorf("invalid gemini JSON output")
 	}
-	if out.SchemaVersion != 1 {
-		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
+	if out.EvalVersion != "noema_eval_v1" {
+		return EvaluationResult{}, fmt.Errorf("invalid gemini JSON output")
 	}
-	if len(out.Constraints) == 0 {
-		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
-	}
-	if out.MaxSeverity < 0 || out.MaxSeverity > 2 {
-		return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
-	}
-	if out.Confidence != nil {
-		if *out.Confidence < 0 || *out.Confidence > 1 {
-			return EvalOutput{}, fmt.Errorf("invalid gemini JSON output")
-		}
+	if len(out.Results) == 0 {
+		return EvaluationResult{}, fmt.Errorf("invalid gemini JSON output")
 	}
 	return out, nil
 }
 
-func validateEvalOutput(out EvalOutput, enabled map[string]ConstraintRule) error {
+func validateEvaluationResult(out EvaluationResult, cfg PolicyConfig) error {
+	byID := make(map[string]PolicyConstraint, len(cfg.Constraints))
+	for _, c := range cfg.Constraints {
+		byID[c.ID] = c
+	}
 	seen := map[string]bool{}
-	max := 0
-	for _, c := range out.Constraints {
-		if c.ID == "" || c.Rationale == "" {
+	for _, r := range out.Results {
+		if r.ID == "" {
 			return fmt.Errorf("invalid gemini JSON output")
 		}
-		if c.Severity < 0 || c.Severity > 2 {
+		if r.Severity < 0 || r.Severity > 2 {
 			return fmt.Errorf("invalid gemini JSON output")
 		}
-		if _, ok := enabled[c.ID]; !ok {
+		if r.Confidence != nil {
+			if *r.Confidence < 0 || *r.Confidence > 1 {
+				return fmt.Errorf("invalid gemini JSON output")
+			}
+		}
+		if _, ok := byID[r.ID]; !ok {
 			return fmt.Errorf("invalid gemini JSON output")
 		}
-		if seen[c.ID] {
+		if seen[r.ID] {
 			return fmt.Errorf("invalid gemini JSON output")
 		}
-		seen[c.ID] = true
-		if c.Severity > max {
-			max = c.Severity
-		}
+		seen[r.ID] = true
 	}
-	if max != out.MaxSeverity {
-		return fmt.Errorf("invalid gemini JSON output")
-	}
-	if len(seen) != len(enabled) {
+	if len(seen) != len(cfg.Constraints) {
 		return fmt.Errorf("invalid gemini JSON output")
 	}
 	return nil

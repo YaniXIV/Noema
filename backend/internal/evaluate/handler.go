@@ -21,11 +21,16 @@ import (
 
 // EvaluateResponse is the JSON response for POST /api/evaluate.
 type EvaluateResponse struct {
-	RunID        string       `json:"run_id"`
-	Status       string       `json:"status"` // PASS or FAIL
-	PublicOutput PublicOutput `json:"public_output"`
-	Proof        Proof        `json:"proof"`
-	Verified     bool         `json:"verified"`
+	RunID           string       `json:"run_id"`
+	Status          string       `json:"status"` // PASS or FAIL
+	OverallPass     bool         `json:"overall_pass"`
+	MaxSeverity     int          `json:"max_severity"`
+	Commitment      string       `json:"commitment"`
+	ProofB64        string       `json:"proof_b64"`
+	PublicInputsB64 string       `json:"public_inputs_b64"`
+	PublicOutput    PublicOutput `json:"public_output"`
+	Proof           Proof        `json:"proof"`
+	Verified        bool         `json:"verified"`
 }
 
 type PublicOutput struct {
@@ -49,7 +54,7 @@ func Handler(runsDir string, maxRuns int) gin.HandlerFunc {
 		maxBody := int64(config.MaxDatasetBytes) + int64(config.MaxImages*config.MaxImageBytes) + multipartOverhead
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBody)
 
-		// Parse multipart: spec (string), dataset (file, required), images (files, optional)
+		// Parse multipart: policy_config (string), dataset (file, required), images (files, optional)
 		form, err := c.MultipartForm()
 		if err != nil {
 			if httputil.IsBodyTooLarge(err) {
@@ -61,13 +66,35 @@ func Handler(runsDir string, maxRuns int) gin.HandlerFunc {
 		}
 		defer form.RemoveAll()
 
-		spec, err := parseSpec(form)
+		policyRaw, policyProvided, err := optionalFormValue(form, "policy_config")
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if err := validateSpec(spec); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		var policyConfig PolicyConfig
+		if policyProvided {
+			policyConfig, err = parsePolicyConfig(policyRaw)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			if err := validatePolicyConfig(policyConfig); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+		} else if len(form.Value["spec"]) > 0 {
+			spec, err := parseSpec(form)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			if err := validateSpec(spec); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			policyConfig = policyConfigFromSpec(spec)
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "missing field: policy_config"})
 			return
 		}
 
@@ -95,35 +122,40 @@ func Handler(runsDir string, maxRuns int) gin.HandlerFunc {
 			return
 		}
 
-		enabled, err := enabledConstraints(spec)
+		evalOut, err := resolveEvaluationResult(c.Request.Context(), form, policyConfig, runsDir, datasetFile, imageFiles)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
-		evalOut, err := resolveEvalOutput(c.Request.Context(), form, enabled, runsDir, spec, datasetFile, imageFiles)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		overallPass, maxSeverity, policyThreshold := computePolicyResult(evalOut, enabled)
+		overallPass, maxSeverity, policyThreshold := computePolicyResult(evalOut, policyConfig)
 		status := "FAIL"
 		if overallPass {
 			status = "PASS"
 		}
 
-		specJSON, err := jsonBytes(spec)
+		policyJSON, err := jsonBytes(policyConfig)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode spec"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode policy_config"})
 			return
 		}
 		evalJSON, err := jsonBytes(evalOut)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode evaluation output"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode evaluation result"})
 			return
 		}
-		commitment := zk.CommitmentSHA256([]byte("spec"), specJSON, []byte("eval"), evalJSON)
+		datasetID := strings.TrimSpace(formValue(form, "dataset_id"))
+		if datasetID == "" {
+			if digest, err := datasetDigestHex(datasetFile); err == nil && digest != "" {
+				datasetID = "digest:" + digest
+			} else {
+				datasetID = "unknown"
+			}
+		}
+		commitment := zk.CommitmentSHA256(policyJSON, evalJSON, []byte(datasetID))
+
+		log.Printf("policy_config=%s", string(policyJSON))
+		log.Printf("evaluation_result=%s", string(evalJSON))
 		proof, err := zk.GenerateProof(zk.PublicInputs{
 			PolicyThreshold: policyThreshold,
 			MaxSeverity:     maxSeverity,
@@ -146,7 +178,7 @@ func Handler(runsDir string, maxRuns int) gin.HandlerFunc {
 			return
 		}
 
-		if err := saveRunMetadata(runPath, spec, evalOut); err != nil {
+		if err := saveRunMetadata(runPath, policyConfig, evalOut); err != nil {
 			log.Printf("save run metadata: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist run metadata"})
 			return
@@ -157,7 +189,7 @@ func Handler(runsDir string, maxRuns int) gin.HandlerFunc {
 			RunID:          runID,
 			Status:         status,
 			Timestamp:      time.Now().Unix(),
-			EvaluationName: spec.EvaluationName,
+			EvaluationName: "",
 		}); err != nil {
 			log.Printf("runs index update: %v", err)
 		}
@@ -167,8 +199,13 @@ func Handler(runsDir string, maxRuns int) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, EvaluateResponse{
-			RunID:  runID,
-			Status: status,
+			RunID:           runID,
+			Status:          status,
+			OverallPass:     overallPass,
+			MaxSeverity:     maxSeverity,
+			Commitment:      commitment,
+			ProofB64:        proof.ProofB64,
+			PublicInputsB64: proof.PublicInputsB64,
 			PublicOutput: PublicOutput{
 				OverallPass:     overallPass,
 				MaxSeverity:     maxSeverity,
@@ -237,32 +274,31 @@ func pruneRuns(runsDir string, maxRuns int) error {
 	return nil
 }
 
-func parseEvalOutputOptional(form *multipart.Form, enabled map[string]ConstraintRule) (EvalOutput, error) {
-	out, provided, err := parseEvalOutputProvided(form, enabled)
+func parseEvaluationResultOptional(form *multipart.Form, cfg PolicyConfig) (EvaluationResult, error) {
+	out, provided, err := parseEvaluationResultProvided(form, cfg)
 	if err != nil {
-		return EvalOutput{}, err
+		return EvaluationResult{}, err
 	}
 	if !provided {
-		return stubEvalOutput(enabled), nil
+		return stubEvaluationResult(cfg), nil
 	}
 	return out, nil
 }
 
-func stubEvalOutput(enabled map[string]ConstraintRule) EvalOutput {
-	out := EvalOutput{
-		SchemaVersion: 1,
-		Constraints:   make([]EvalConstraintResult, 0, len(enabled)),
-		MaxSeverity:   0,
+func stubEvaluationResult(cfg PolicyConfig) EvaluationResult {
+	out := EvaluationResult{
+		EvalVersion: "noema_eval_v1",
+		Results:     make([]EvalResultItem, 0, len(cfg.Constraints)),
 	}
-	for id := range enabled {
-		out.Constraints = append(out.Constraints, EvalConstraintResult{
-			ID:        id,
+	for _, c := range cfg.Constraints {
+		out.Results = append(out.Results, EvalResultItem{
+			ID:        c.ID,
 			Severity:  0,
 			Rationale: "stub",
 		})
 	}
-	sort.Slice(out.Constraints, func(i, j int) bool {
-		return out.Constraints[i].ID < out.Constraints[j].ID
+	sort.Slice(out.Results, func(i, j int) bool {
+		return out.Results[i].ID < out.Results[j].ID
 	})
 	return out
 }
@@ -271,23 +307,69 @@ func jsonBytes(v any) ([]byte, error) {
 	return json.Marshal(v)
 }
 
-func parseEvalOutputProvided(form *multipart.Form, enabled map[string]ConstraintRule) (EvalOutput, bool, error) {
-	if form == nil || len(form.Value["eval_output"]) == 0 {
-		return EvalOutput{}, false, nil
+func parseEvaluationResultProvided(form *multipart.Form, cfg PolicyConfig) (EvaluationResult, bool, error) {
+	if form == nil {
+		return EvaluationResult{}, false, nil
 	}
-	if len(form.Value["eval_output"]) > 1 {
-		return EvalOutput{}, true, fmt.Errorf("only one eval_output value allowed")
+	if len(form.Value["evaluation_result"]) > 1 || len(form.Value["eval_output"]) > 1 {
+		return EvaluationResult{}, true, fmt.Errorf("only one evaluation_result value allowed")
 	}
-	raw := strings.TrimSpace(form.Value["eval_output"][0])
+	hasEval := len(form.Value["evaluation_result"]) > 0
+	hasLegacy := len(form.Value["eval_output"]) > 0
+	raw := strings.TrimSpace(formValue(form, "evaluation_result"))
+	if raw == "" && hasEval {
+		return EvaluationResult{}, true, fmt.Errorf("evaluation_result must be non-empty")
+	}
 	if raw == "" {
-		return EvalOutput{}, true, fmt.Errorf("eval_output must be non-empty")
+		raw = strings.TrimSpace(formValue(form, "eval_output"))
+		if raw == "" && hasLegacy {
+			return EvaluationResult{}, true, fmt.Errorf("evaluation_result must be non-empty")
+		}
 	}
-	out, err := parseEvalOutput(raw)
+	if raw == "" {
+		return EvaluationResult{}, false, nil
+	}
+	out, err := parseEvaluationResult(raw)
 	if err != nil {
-		return EvalOutput{}, true, err
+		return EvaluationResult{}, true, err
 	}
-	if err := validateEvalOutput(out, enabled); err != nil {
-		return EvalOutput{}, true, err
+	if err := validateEvaluationResult(out, cfg); err != nil {
+		return EvaluationResult{}, true, err
 	}
 	return out, true, nil
+}
+
+func singleFormValue(form *multipart.Form, key string) (string, error) {
+	if form == nil || len(form.Value[key]) == 0 {
+		return "", fmt.Errorf("missing field: %s", key)
+	}
+	if len(form.Value[key]) > 1 {
+		return "", fmt.Errorf("only one %s value allowed", key)
+	}
+	raw := strings.TrimSpace(form.Value[key][0])
+	if raw == "" {
+		return "", fmt.Errorf("%s must be non-empty", key)
+	}
+	return raw, nil
+}
+
+func optionalFormValue(form *multipart.Form, key string) (string, bool, error) {
+	if form == nil || len(form.Value[key]) == 0 {
+		return "", false, nil
+	}
+	if len(form.Value[key]) > 1 {
+		return "", true, fmt.Errorf("only one %s value allowed", key)
+	}
+	raw := strings.TrimSpace(form.Value[key][0])
+	if raw == "" {
+		return "", true, fmt.Errorf("%s must be non-empty", key)
+	}
+	return raw, true, nil
+}
+
+func formValue(form *multipart.Form, key string) string {
+	if form == nil || len(form.Value[key]) == 0 {
+		return ""
+	}
+	return form.Value[key][0]
 }

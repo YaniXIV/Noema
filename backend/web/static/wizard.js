@@ -4,7 +4,6 @@
   var maxStep = 3;
   var customConstraintCount = 0;
   var maxCustomConstraints = 5;
-  var datasetSource = 'file';
   var MAX_DATASET_BYTES = 50 * 1024 * 1024;
   var MAX_IMAGE_BYTES = 5 * 1024 * 1024;
   var MAX_IMAGE_COUNT = 10;
@@ -86,82 +85,50 @@
     updateWizardNavState();
   }
 
-  function setDatasetSource(source) {
-    datasetSource = source;
-    document.querySelectorAll('.segmented-btn').forEach(function(btn) {
-      var active = btn.getAttribute('data-source') === source;
-      btn.classList.toggle('active', active);
-      btn.setAttribute('aria-selected', active);
-    });
-    document.querySelectorAll('.dataset-source-pane').forEach(function(pane) {
-      var active = pane.getAttribute('data-source') === source;
-      pane.classList.toggle('active', active);
-      pane.hidden = !active;
-    });
-    updateDatasetStatus();
-  }
-
   function updateDatasetStatus() {
     var statusEl = document.getElementById('dataset-status');
-    var previewEl = document.getElementById('dataset-preview');
     statusEl.classList.remove('is-valid', 'is-invalid');
     var fileInput = document.getElementById('dataset-file');
-    var pasteInput = document.getElementById('dataset-paste');
+    var zoneText = document.getElementById('dataset-zone-text');
+    var details = document.getElementById('dataset-details');
+    var fileName = document.getElementById('dataset-file-name');
+    var fileSize = document.getElementById('dataset-file-size');
+    var clientError = document.getElementById('dataset-client-error');
+    var maxBytes = parseInt(fileInput.dataset.maxBytes || '', 10);
+    var maxBytesLabel = fileInput.dataset.maxBytesLabel || '';
     if (fileInput) fileInput.classList.remove('is-invalid');
-    if (pasteInput) pasteInput.classList.remove('is-invalid');
 
-    if (datasetSource === 'file') {
-      if (fileInput.files && fileInput.files.length > 0) {
-        var file = fileInput.files[0];
-        if (file.size > MAX_DATASET_BYTES) {
-          statusEl.textContent = 'File too large. Max size is 50MB.';
-          statusEl.classList.add('is-invalid');
-          fileInput.classList.add('is-invalid');
-        } else {
-          statusEl.textContent = 'Selected file: ' + file.name + ' (' + formatBytes(file.size) + ')';
-          statusEl.classList.add('is-valid');
+    if (fileInput.files && fileInput.files.length > 0) {
+      var file = fileInput.files[0];
+      zoneText.textContent = 'Drop another file to replace';
+      if (fileName) fileName.textContent = file.name;
+      if (fileSize) fileSize.textContent = formatBytes(file.size);
+      if (details) details.style.display = 'flex';
+      if (Number.isFinite(maxBytes) && maxBytes > 0 && file.size > maxBytes) {
+        statusEl.textContent = 'File too large. Max size is ' + maxBytesLabel + '.';
+        statusEl.classList.add('is-invalid');
+        fileInput.classList.add('is-invalid');
+        if (clientError) {
+          clientError.textContent = 'File exceeds ' + maxBytesLabel + ' limit.';
+          clientError.style.display = 'block';
         }
       } else {
-        statusEl.textContent = 'Select a JSON file to continue.';
+        statusEl.textContent = 'Selected file: ' + file.name + ' (' + formatBytes(file.size) + ')';
+        statusEl.classList.add('is-valid');
+        if (clientError) {
+          clientError.textContent = '';
+          clientError.style.display = 'none';
+        }
       }
-      previewEl.hidden = true;
-      updateWizardNavState();
-      return;
+    } else {
+      statusEl.textContent = 'Select a JSON file to continue.';
+      if (zoneText) zoneText.textContent = 'Drag and drop a JSON file here, or click to choose';
+      if (details) details.style.display = 'none';
+      if (clientError) {
+        clientError.textContent = '';
+        clientError.style.display = 'none';
+      }
     }
-
-    var paste = document.getElementById('dataset-paste').value.trim();
-    if (!paste) {
-      statusEl.textContent = 'Paste JSON to continue.';
-      previewEl.hidden = true;
-      updateWizardNavState();
-      return;
-    }
-
-    if (new Blob([paste]).size > MAX_DATASET_BYTES) {
-      statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
-      statusEl.classList.add('is-invalid');
-      pasteInput.classList.add('is-invalid');
-      previewEl.hidden = true;
-      updateWizardNavState();
-      return;
-    }
-
-    var parsed = parseJsonSafe(paste);
-    if (!parsed.valid) {
-      statusEl.textContent = 'Invalid JSON: ' + parsed.error;
-      statusEl.classList.add('is-invalid');
-      pasteInput.classList.add('is-invalid');
-      previewEl.hidden = true;
-      updateWizardNavState();
-      return;
-    }
-
-    statusEl.textContent = 'JSON looks valid.';
-    statusEl.classList.add('is-valid');
-    var preview = JSON.stringify(parsed.data, null, 2);
-    if (preview.length > 700) preview = preview.slice(0, 700) + '\n…';
-    previewEl.textContent = preview;
-    previewEl.hidden = false;
     updateWizardNavState();
   }
 
@@ -201,15 +168,6 @@
     statusEl.classList.add('is-valid');
     updateWizardNavState();
     return true;
-  }
-
-  function parseJsonSafe(text) {
-    try {
-      var data = JSON.parse(text);
-      return { valid: true, data: data, error: null };
-    } catch (err) {
-      return { valid: false, data: null, error: err.message || 'Parse error' };
-    }
   }
 
   function buildConstraintsList() {
@@ -371,63 +329,38 @@
     return valid;
   }
 
-  function buildSpec() {
-    var spec = {
-      schema_version: 1,
-      evaluation_name: document.getElementById('evaluation-name').value.trim() || '',
-      policy: {
-        reveal: {
-          max_severity: document.getElementById('reveal-max-severity').checked,
-          commitment: document.getElementById('reveal-commitment').checked
-        }
-      },
-      constraints: [],
-      custom_constraints: []
+  function buildPolicyConfig() {
+    var config = {
+      policy_version: 'noema_policy_v1',
+      constraints: []
     };
 
     document.querySelectorAll('.constraint-item').forEach(function(item) {
       var id = item.querySelector('.constraint-enabled').getAttribute('data-id');
       var enabled = item.querySelector('.constraint-enabled').checked;
       var severity = parseInt(item.querySelector('.constraint-severity').value, 10);
-      spec.constraints.push({ id: id, enabled: enabled, allowed_max_severity: severity });
+      config.constraints.push({ id: id, enabled: enabled, max_allowed: severity });
     });
 
     document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
-      var title = (item.querySelector('.custom-title') && item.querySelector('.custom-title').value) || '';
-      var desc = (item.querySelector('.custom-desc') && item.querySelector('.custom-desc').value) || '';
       var severity = parseInt(item.querySelector('.custom-severity').value, 10);
       var enabled = item.querySelector('.custom-enabled').checked;
-      spec.custom_constraints.push({
+      config.constraints.push({
         id: 'custom_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
-        title: title.trim(),
-        description: desc.trim(),
         enabled: enabled,
-        allowed_max_severity: severity
+        max_allowed: severity
       });
     });
 
-    return spec;
+    return config;
   }
 
   function getDatasetFile() {
-    if (datasetSource === 'file') {
-      var fileInput = document.getElementById('dataset-file');
-      if (fileInput.files && fileInput.files.length > 0) {
-        var file = fileInput.files[0];
-        if (file.size > MAX_DATASET_BYTES) return null;
-        return file;
-      }
-      return null;
-    }
-
-    var paste = document.getElementById('dataset-paste').value.trim();
-    if (paste) {
-      if (new Blob([paste]).size > MAX_DATASET_BYTES) return null;
-      var parsed = parseJsonSafe(paste);
-      if (parsed.valid) {
-        return new File([paste], 'dataset.json', { type: 'application/json' });
-      }
-      return null;
+    var fileInput = document.getElementById('dataset-file');
+    if (fileInput.files && fileInput.files.length > 0) {
+      var file = fileInput.files[0];
+      if (file.size > MAX_DATASET_BYTES) return null;
+      return file;
     }
     return null;
   }
@@ -435,13 +368,11 @@
   function updateReviewSummary() {
     var name = document.getElementById('evaluation-name').value.trim() || '(unnamed)';
     var datasetFile = getDatasetFile();
-    var datasetSourceLabel = datasetSource === 'file' ? 'Uploaded file' : 'Pasted JSON';
-    var datasetSource = datasetFile ? (datasetFile.name || datasetSourceLabel) : '—';
+    var datasetLabel = datasetFile ? (datasetFile.name || 'Uploaded file') : '—';
     var datasetSize = datasetFile && datasetFile.size ? formatBytes(datasetFile.size) : '';
-    var datasetLine = datasetSource + (datasetSize ? (' · ' + datasetSize) : '');
-    var spec = buildSpec();
-    var enabledCount = spec.constraints.filter(function(c) { return c.enabled; }).length +
-      spec.custom_constraints.filter(function(c) { return c.enabled; }).length;
+    var datasetLine = datasetLabel + (datasetSize ? (' · ' + datasetSize) : '');
+    var policyConfig = buildPolicyConfig();
+    var enabledCount = policyConfig.constraints.filter(function(c) { return c.enabled; }).length;
     var imagesInput = document.getElementById('images-file');
     var images = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
     var imageTotal = images.reduce(function(sum, file) { return sum + file.size; }, 0);
@@ -451,20 +382,40 @@
       '<div class="review-item"><span class="review-label">Evaluation</span><span class="review-value">' + escapeHtml(name) + '</span></div>' +
       '<div class="review-item"><span class="review-label">Dataset</span><span class="review-value">' + escapeHtml(datasetLine) + '</span></div>' +
       '<div class="review-item"><span class="review-label">Images</span><span class="review-value">' + escapeHtml(imagesLine) + '</span></div>' +
-      '<div class="review-item"><span class="review-label">Reveal</span><span class="review-value">Max severity: ' + (spec.policy.reveal.max_severity ? 'Yes' : 'No') + ' · Commitment: ' + (spec.policy.reveal.commitment ? 'Yes' : 'No') + '</span></div>' +
       '<div class="review-item"><span class="review-label">Constraints</span><span class="review-value">' + enabledCount + ' enabled</span></div>';
   }
 
-  document.querySelectorAll('.segmented-btn').forEach(function(btn) {
-    btn.addEventListener('click', function() {
-      setDatasetSource(this.getAttribute('data-source'));
-    });
-  });
-
   document.getElementById('dataset-file').addEventListener('change', updateDatasetStatus);
-  document.getElementById('dataset-paste').addEventListener('input', updateDatasetStatus);
   var imagesInputEl = document.getElementById('images-file');
   if (imagesInputEl) imagesInputEl.addEventListener('change', updateImagesStatus);
+  var datasetZone = document.getElementById('dataset-drop-zone');
+  var datasetClear = document.getElementById('dataset-clear');
+  if (datasetClear) {
+    datasetClear.addEventListener('click', function() {
+      var input = document.getElementById('dataset-file');
+      input.value = '';
+      if (datasetZone) datasetZone.classList.remove('dragover');
+      updateDatasetStatus();
+    });
+  }
+  if (datasetZone) {
+    datasetZone.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      datasetZone.classList.add('dragover');
+    });
+    datasetZone.addEventListener('dragleave', function() {
+      datasetZone.classList.remove('dragover');
+    });
+    datasetZone.addEventListener('drop', function(e) {
+      e.preventDefault();
+      datasetZone.classList.remove('dragover');
+      var input = document.getElementById('dataset-file');
+      if (e.dataTransfer.files.length) {
+        input.files = e.dataTransfer.files;
+        updateDatasetStatus();
+      }
+    });
+  }
 
   document.getElementById('wizard-next').addEventListener('click', function() {
     if (currentStep < maxStep) {
@@ -516,7 +467,7 @@
     e.preventDefault();
     var datasetFile = getDatasetFile();
     if (!datasetFile) {
-      document.getElementById('submit-error').textContent = 'Please provide a dataset (file or pasted JSON).';
+      document.getElementById('submit-error').textContent = 'Please provide a dataset file.';
       document.getElementById('submit-error').style.display = 'block';
       return;
     }
@@ -543,9 +494,10 @@
     if (runBtn) runBtn.disabled = true;
     document.getElementById('wizard-next').disabled = true;
 
-    var spec = buildSpec();
+    var policyConfig = buildPolicyConfig();
     var formData = new FormData();
-    formData.append('spec', JSON.stringify(spec));
+    formData.append('policy_config', JSON.stringify(policyConfig));
+    formData.append('dataset_id', datasetFile && datasetFile.name ? datasetFile.name : '');
     formData.append('dataset', datasetFile);
 
     var imagesInput = document.getElementById('images-file');
@@ -569,7 +521,7 @@
         var storageKey = 'noema_run_' + runId;
         try {
           data.client = {
-            dataset_source: datasetSource,
+            dataset_source: 'file',
             dataset_name: datasetFile && datasetFile.name ? datasetFile.name : '',
             dataset_size: datasetFile && datasetFile.size ? datasetFile.size : 0
           };
@@ -577,9 +529,9 @@
           var recent = JSON.parse(localStorage.getItem('noema_recent_runs') || '[]');
           recent.unshift({
             run_id: runId,
-            status: data.status,
+            status: data.status || (data.overall_pass ? 'PASS' : 'FAIL'),
             ts: Date.now(),
-            name: spec.evaluation_name || runId
+            name: (document.getElementById('evaluation-name').value.trim() || runId)
           });
           localStorage.setItem('noema_recent_runs', JSON.stringify(recent.slice(0, 50)));
         } catch (err) {}
@@ -595,7 +547,7 @@
   });
 
   buildConstraintsList();
-  setDatasetSource('file');
+  updateDatasetStatus();
   updateCustomLimitHint();
   updateImagesStatus();
 })();

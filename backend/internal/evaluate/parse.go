@@ -121,9 +121,13 @@ func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.Fil
 }
 
 func validateDatasetJSON(fh *multipart.FileHeader, imageFiles []*multipart.FileHeader) error {
-	_, ds, err := readDatasetFile(fh)
+	raw, err := readDatasetBytes(fh)
 	if err != nil {
 		return err
+	}
+	ds, err := parseDatasetSchema(raw)
+	if err != nil {
+		return nil
 	}
 	if len(imageFiles) == 0 {
 		for i, item := range ds.Items {

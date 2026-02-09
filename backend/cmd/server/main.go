@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"log"
 	"os"
 	"strings"
@@ -10,11 +11,28 @@ import (
 	"noema/internal/config"
 	"noema/internal/evaluate"
 	"noema/internal/gemini"
+	"noema/internal/session"
 	"noema/internal/verify"
 	"noema/internal/web"
 
 	"github.com/gin-gonic/gin"
 )
+
+func isAuthed(c *gin.Context) bool {
+	expect := config.JudgeKey()
+	if expect == "" {
+		return false
+	}
+	cookie, err := c.Cookie(session.CookieName)
+	if err != nil || cookie == "" {
+		return false
+	}
+	payload, ok := session.Verify(config.CookieSecret(), cookie)
+	if !ok {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(payload), []byte(expect)) == 1
+}
 
 func main() {
 	if err := config.Load(); err != nil {
@@ -62,10 +80,13 @@ func main() {
 		web.Index(c, "index", web.IndexData{Error: errMsg})
 	})
 	r.GET("/verify", func(c *gin.Context) {
-		c.HTML(200, "verify", nil)
+		c.HTML(200, "verify", gin.H{"IsAuthed": isAuthed(c)})
 	})
 	r.GET("/verify/:id", func(c *gin.Context) {
-		web.ResultsPage(c, "verify_results", c.Param("id"))
+		c.HTML(200, "verify_results", gin.H{
+			"RunID":    c.Param("id"),
+			"IsAuthed": isAuthed(c),
+		})
 	})
 	r.POST("/auth", func(c *gin.Context) {
 		web.AuthPost(c, "index")
@@ -84,12 +105,6 @@ func main() {
 		})
 		htmlGated.GET("/app/results/:id", func(c *gin.Context) {
 			web.ResultsPage(c, "app_results", c.Param("id"))
-		})
-		htmlGated.GET("/upload", func(c *gin.Context) {
-			web.UploadGet(c, "upload", web.UploadData{})
-		})
-		htmlGated.POST("/upload", func(c *gin.Context) {
-			web.UploadPost(c, "upload", config.UploadsDir())
 		})
 	}
 

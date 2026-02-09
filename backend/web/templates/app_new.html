@@ -26,24 +26,22 @@
         <!-- Step 1: Dataset -->
         <div class="wizard-pane active" id="pane-1" role="tabpanel">
           <h2 class="pane-title">Dataset</h2>
-          <p class="text-muted">Choose a JSON file or paste JSON directly (max 50MB).</p>
-          <div class="dataset-source-toggle" role="tablist" aria-label="Dataset source">
-            <button type="button" class="segmented-btn active" data-source="file" aria-selected="true">Upload file</button>
-            <button type="button" class="segmented-btn" data-source="paste" aria-selected="false">Paste JSON</button>
-          </div>
-          <div class="dataset-source-pane active" data-source="file">
-            <div class="form-group">
-              <label class="label">Dataset file</label>
-              <input type="file" id="dataset-file" name="dataset_file" accept=".json,application/json" class="input">
-              <p class="form-hint">Use a file when you want to keep datasets in versioned artifacts.</p>
+          <p class="text-muted">Drop a JSON dataset (max 50MB).</p>
+          <div class="form-group">
+            <label class="label">Dataset file</label>
+            <label class="upload-zone" for="dataset-file" id="dataset-drop-zone">
+              <input type="file" id="dataset-file" name="dataset_file" accept=".json,application/json" data-max-bytes="52428800" data-max-bytes-label="50MB" aria-describedby="dataset-hint dataset-client-error">
+              <span id="dataset-zone-text">Drag and drop a JSON file here, or click to choose</span>
+            </label>
+            <div class="upload-details" id="dataset-details" aria-live="polite" style="display:none;">
+              <div class="upload-file">
+                <span class="upload-file-name" id="dataset-file-name"></span>
+                <span class="upload-file-size" id="dataset-file-size"></span>
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm" id="dataset-clear">Clear</button>
             </div>
-          </div>
-          <div class="dataset-source-pane" data-source="paste" hidden>
-            <div class="form-group">
-              <label class="label">Paste JSON</label>
-              <textarea id="dataset-paste" class="input textarea" rows="8" placeholder='{"items": [...]}'></textarea>
-              <p class="form-hint">We validate the JSON before you continue.</p>
-            </div>
+            <p class="form-hint upload-hint" id="dataset-hint">JSON files recommended. Max 50MB.</p>
+            <div class="upload-result error" id="dataset-client-error" aria-live="polite" style="display:none;"></div>
           </div>
           <div class="form-group">
             <label class="label">Images (optional, max 10, 5MB each)</label>
@@ -51,7 +49,6 @@
           </div>
           <div class="dataset-status" id="images-status">No images selected.</div>
           <div class="dataset-status" id="dataset-status">No dataset selected.</div>
-          <pre class="dataset-preview" id="dataset-preview" hidden></pre>
         </div>
 
         <!-- Step 2: Policy -->
