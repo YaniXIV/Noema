@@ -7,545 +7,187 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3edd-6963-70f0-973d-f93b194e695a
+session id: 019c410a-cf74-7842-9274-73515720dc61
 --------
 user
-You are an autonomous coding agent polishing the Noema repository.
+You are an autonomous coding agent working on the Noema repository.
 
-Hard rules:
+MISSION (priority order):
+1) Add a real gnark circuit test for the PolicyGateCircuit (using our in-repo Poseidon implementation, package circuits).
+2) Make the circuit test pass reliably (compile -> prove -> verify) using Groth16 on BN254.
+3) ONLY AFTER tests pass: wire the backend plumbing to call the gnark prover/verifier behind the existing zk.GenerateProof / zk.VerifyProof API, keeping the public API shape unchanged (proof_b64 + public_inputs_b64).
+
+HARD RULES:
 - DO NOT run git commit, git reset, git clean, or anything that modifies git history.
-- I will run git commits outside of you.
-- Keep changes small: max 3 files per iteration.
+- Keep changes small: max 3 files per iteration. If more is needed, stage work across multiple iterations.
 - No cosmetic-only edits.
-- No new dependencies unless absolutely necessary.
-- keep all the same ui functionality, the end user should be able to do the same stuff but the experiance and design should be better.
+- No new dependencies unless absolutely necessary. Use existing gnark dependencies already in the repo. If gnark is not yet in go.mod, add it only if unavoidable.
+- Do not change routes or response shapes. Keep /api/evaluate and /api/verify behavior stable.
+- Do not redesign UI. This task is ZK/circuit/testing/plumbing only.
+- Always run: cd backend && go test ./... at least once per iteration.
 
-Goal: continuously improve production quality. continuously improve front end quality and polish.
+WORKFLOW YOU MUST FOLLOW (do not skip):
+A) Inspect current circuit code and poseidon implementation:
+   - Find the PolicyGateCircuit (the policy ZK circuit) and confirm it imports and uses circuits.Poseidon (NOT gnark/std poseidon).
+   - Confirm fixed N=6 and the frozen constraint ordering.
+B) Add tests FIRST:
+   - Create a new Go test file for the circuit (example name: backend/internal/zk/policy_circuit_test.go or wherever circuits live).
+   - The test must:
+     1) Compile the circuit to R1CS
+     2) Run Groth16 setup
+     3) Build a witness with a PASS case and generate a proof
+     4) Verify the proof using the public witness
+     5) Build a witness with a FAIL case and confirm either:
+        - proving fails (unsatisfied), OR
+        - proving succeeds only if OverallPass is set correctly (0), AND verifying matches the expected output
+   - Use deterministic test vectors:
+     - datasetDigestLo/Hi fixed constants
+     - enabled/maxAllowed/severity arrays fixed constants
+     - Compute the expected Commitment in-circuit by setting Commitment to the same value computed by the circuit.
+       (In gnark tests, you can set Commitment as a public variable equal to circuits.Poseidon(domainSep + inputs) by reusing the same circuits.Poseidon function in a small helper circuit OR by computing it with the same function in-circuit and asserting equality.)
+   - The test must assert:
+     - OverallPass == 1 for pass vector, and verify passes.
+     - OverallPass == 0 for fail vector, and verify passes only with correct OverallPass.
+C) Fix whatever is broken until all tests pass:
+   - If compilation errors, fix imports or package paths.
+   - If poseidon params/functions missing, use the existing in-repo Poseidon code as the single source of truth.
+   - If constraints are wrong, fix circuit logic minimally.
+D) ONLY AFTER TESTS PASS: wire plumbing:
+   - Replace stub proof internals inside backend/internal/zk/zk.go (or equivalent) to use gnark Groth16 BN254:
+     - GenerateProof: build witness from inputs (enabled/maxAllowed/severity + datasetDigest limbs) and output proof bytes base64
+     - VerifyProof: decode proof and public inputs and verify using vk
+   - Keep existing API signatures and keep proof_b64 + public_inputs_b64 shape.
+   - You may keep public_inputs_b64 as the existing string format for now, but the verify path must map it deterministically to the circuit’s public witness (Commitment, OverallPass, MaxSeverity).
+   - Ensure keys are handled sanely for dev:
+     - For now, allow generating proving/verifying keys at startup or cached on disk under backend/internal/zk (dev only),
+       OR embed small test keys only for tests.
+     - Don’t over-engineer; prioritize working tests and stable verify.
 
-Iteration:
-1) Run: cd backend && go test ./...
-2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
-3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+ACCEPTANCE CRITERIA (must satisfy):
+- `cd backend && go test ./...` passes.
+- There is at least one new test that proves+verifies the circuit in a PASS case.
+- There is at least one test that demonstrates FAIL behavior (overall_pass=0) is enforced and verifiable.
+- If plumbing was wired, verify endpoint still accepts proof_b64/public_inputs_b64 and returns verified result correctly.
 
-Pick the highest-value improvement:
-A) Reliability/correctness: validation, error handling, run persistence, verify robustness
-B) Tests: add/strengthen tests for the change you made
-C) upgrading the user interface so that it looks better.
-D) Maintainability: reduce duplication with tiny refactors
-E) UX: wizard/results/verify clarity (small, safe changes)
-F) Docs: README/DEPLOYMENT polish
-G) Performance: safe wins only
-
-Finish with:
-- What you changed (short)
+OUTPUT FORMAT (end of each run):
+- Files changed (list)
+- What you changed (2–6 bullets)
 - Tests run (must include go test ./...)
 mcp startup: no servers
 
 thinking
-**Preparing to run command**
+**Preparing for file inspection**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 191ms:
-?   	noema/cmd/server	[no test files]
-?   	noema/internal/auth	[no test files]
-ok  	noema/internal/config	(cached)
-?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	(cached)
-?   	noema/internal/gemini	[no test files]
-ok  	noema/internal/httputil	(cached)
-ok  	noema/internal/session	(cached)
-ok  	noema/internal/verify	(cached)
-?   	noema/internal/web	[no test files]
-ok  	noema/internal/zk	(cached)
-
-thinking
-**Confirming test success and planning code inspection**
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
+/bin/zsh -lc ls in /Users/yani/Noema/backend succeeded in 53ms:
 cmd
 data
 go.mod
 go.sum
 internal
-main
 web
+exec
+/bin/zsh -lc 'rg -n "PolicyGateCircuit|policy gate|PolicyGate" internal' in /Users/yani/Noema/backend succeeded in 53ms:
+internal/evaluate/handler.go:395:	if len(policyConstraintOrder) != zk.PolicyGateConstraintCount {
+internal/evaluate/handler.go:417:	var enabled [zk.PolicyGateConstraintCount]uint64
+internal/evaluate/handler.go:418:	var maxAllowed [zk.PolicyGateConstraintCount]uint64
+internal/evaluate/handler.go:419:	var severity [zk.PolicyGateConstraintCount]uint64
+internal/zk/zk_test.go:73:		Enabled:          [PolicyGateConstraintCount]uint64{1, 1, 1, 0, 1, 0},
+internal/zk/zk_test.go:74:		MaxAllowed:       [PolicyGateConstraintCount]uint64{1, 2, 0, 1, 2, 0},
+internal/zk/zk_test.go:75:		Severity:         [PolicyGateConstraintCount]uint64{1, 2, 0, 2, 1, 2},
+internal/zk/zk.go:33:// PolicyGateConstraintCount is the fixed N for the PolicyGateCircuit.
+internal/zk/zk.go:34:const PolicyGateConstraintCount = policyzk.N
+internal/zk/zk.go:55:// WitnessInputs carries the private inputs for the PolicyGateCircuit.
+internal/zk/zk.go:58:	Enabled          [PolicyGateConstraintCount]uint64
+internal/zk/zk.go:59:	MaxAllowed       [PolicyGateConstraintCount]uint64
+internal/zk/zk.go:60:	Severity         [PolicyGateConstraintCount]uint64
+internal/zk/zk.go:81:		var circuit policyzk.PolicyGateCircuit
+internal/zk/zk.go:121:	assignment := policyzk.PolicyGateCircuit{
+internal/zk/zk.go:180:	assignment := policyzk.PolicyGateCircuit{
+internal/zk/zk.go:346:func toVarArray(vals [PolicyGateConstraintCount]uint64) [PolicyGateConstraintCount]frontend.Variable {
+internal/zk/zk.go:347:	var out [PolicyGateConstraintCount]frontend.Variable
+internal/zk/zk.go:348:	for i := 0; i < PolicyGateConstraintCount; i++ {
+internal/zk/zk.go:354:// CommitmentPoseidon computes the PolicyGateCircuit commitment.
 
 thinking
-**Locating frontend in web directory**
+**Checking existing test file**
+
+I'm going to review circuit_test.go to understand current test coverage before adding or modifying tests.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web' in /Users/yani/Noema/backend succeeded in 52ms:
-static
-templates
+/bin/zsh -lc "sed -n '1,220p' internal/zk/policyzk/circuit.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package policyzk
+
+import (
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark/frontend"
+)
+
+const N = 6
+
+// PolicyGateCircuit proves:
+//   - The prover knows (datasetDigest, policy config, gemini severities) that hash to Commitment
+//   - And the deterministic policy check passes:
+//     for each i: if Enabled[i] == 1 then Severity[i] <= MaxAllowed[i]
+//
+// Public outputs:
+// - Commitment: binds everything (dataset + policy + gemini outputs)
+// - OverallPass: 1 iff policy passes
+// - MaxSeverity (optional): max observed severity among enabled constraints
+type PolicyGateCircuit struct {
+	// ===== Private witness =====
 
 thinking
-**Checking templates**
+**Inspecting existing test file**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/templates' in /Users/yani/Noema/backend succeeded in 51ms:
-app.html
-app_new.html
-app_results.html
-index.html
-partial_header_app.html
-partial_header_public.html
-partial_header_upload.html
-partial_orb.html
-upload.html
-verify.html
-verify_results.html
+/bin/zsh -lc "sed -n '1,200p' internal/zk/policyzk/circuit_test.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package policyzk
 
-thinking
-**Planning small UX improvement**
+import (
+	"math/big"
+	"testing"
 
-Considering adding CSS to the static list for a minor UX enhancement.
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+	"github.com/stretchr/testify/require"
+)
+
+func TestPolicyGateCircuit_Groth16PassFail(t *testing.T) {
+	require := require.New(t)
+
+	var circuit PolicyGateCircuit
+	r1cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/static' in /Users/yani/Noema/backend succeeded in 52ms:
-app.js
-constraints.js
-results.js
-styles.css
-upload.js
-verify.js
-wizard.js
-
-thinking
-**Reviewing styles for improvement**
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap');
-
-:root {
-  --bg: #05060a;
-  --bg-card: rgba(9, 12, 18, 0.9);
-  --text: #f4f6fb;
-  --text-muted: #9aa3b2;
-  --accent: #45d4ff;
-  --accent-strong: #2c7bff;
-  --accent-glow: rgba(69, 212, 255, 0.35);
-  --border: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(69, 212, 255, 0.4);
-  --error: #f87171;
-  --success: #22c55e;
-  --warning: #fbbf24;
-  --shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
+/bin/zsh -lc "sed -n '200,400p' internal/zk/policyzk/circuit_test.go" in /Users/yani/Noema/backend succeeded in 53ms:
+	var x4 fr.Element
+	x4.Square(&x2)
+	x.Mul(&x4, x)
 }
 
-*,
-*::before,
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
-  margin-bottom: 0.75rem;
+func ark(state *[]fr.Element, c []fr.Element, r int) {
+	s := *state
+	for i := range s {
+		s[i].Add(&s[i], &c[i+r])
+	}
 }
 
-.text-muted { color: var(--text-muted); }
-
-.form { display: flex; flex-direction: column; gap: 1rem; }
-
-.form-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  align-items: center;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  margin-bottom: 1.2rem;
-}
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '520,1040p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
-  border: 1px solid var(--border);
-  background: rgba(0, 0, 0, 0.3);
-}
-
-.upload-file {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  min-width: 0;
-}
-
-.upload-file-name {
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.upload-file-size {
-  font-size: 0.82rem;
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1040,1560p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 51ms:
-  color: var(--text-muted);
-  border-color: rgba(255, 255, 255, 0.14);
-}
-
-.results-constraint-meta {
-  margin-top: 0.35rem;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.results-constraint-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.25rem 0.6rem;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.35);
-  font-size: 0.75rem;
-
+func mix(in []fr.Element, m [][]fr.Element) []fr.Element {
+	out := make([]fr.Element, len(in))
+	for col := range in {
+		var acc fr.Element
+		for row := range in {
+			var term fr.Element
+			term.Mul(&m[row][col], &in[row])
+			acc.Add(&acc, &term)
 
 thinking
-**Prioritizing meaningful UX improvements**
+**Verifying test coverage and setup**
 
-I'm focusing on functional UI enhancements that improve accessibility or layout, like better button focus states, clearer disabled styles, or improved results area usability, avoiding purely cosmetic tweaks. Next, I'll verify current accessibility support and add subtle but impactful improvements like ARIA attributes or interactive feedback.
-thinking
-**Targeting clearer form feedback and button states**
-
-I'm considering adding focus-within highlights on form groups and enhancing disabled button clarity beyond opacity to improve user feedback without altering core functionality. I'll review app.js for possible small JS UX tweaks like copy feedback to complement these CSS accessibility improvements.
+I'll run all backend tests to check if the existing gnark circuit tests properly use the in-repo Poseidon and related circuit constants, ensuring compliance with requirements before considering adjustments.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' web/static/app.js" in /Users/yani/Noema/backend succeeded in 52ms:
-(function() {
-  var STORAGE_KEY = 'noema_recent_runs';
-  var listEl = document.getElementById('recent-runs-list');
-  var emptyEl = document.getElementById('recent-runs-empty');
-
-  function statusClass(status) {
-    if (!status) return 'status-pill-unknown';
-    var normalized = String(status).toUpperCase();
-    if (normalized === 'PASS') return 'status-pill-pass';
-    if (normalized === 'FAIL') return 'status-pill-fail';
-    return 'status-pill-unknown';
-  }
-
-  function formatTimestamp(ts) {
-    if (!ts) return null;
-    var date = new Date(ts);
-    if (Number.isNaN(date.getTime())) return null;
-    var diffMs = Math.abs(Date.now() - date.getTime());
-    var minutes = Math.round(diffMs / 60000);
-    var label = '';
-
-thinking
-**Considering UI and accessibility improvements**
-
-I'm weighing adding aria-live or aria-label for better copy feedback and stabilizing "Copy ID" button width to prevent layout shift. I'll also check wizard.js to see if "recent runs" persistence is already implemented before adding it.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' web/static/wizard.js" in /Users/yani/Noema/backend succeeded in 52ms:
-(function() {
-  var PRESET_CONSTRAINTS = window.NOEMA_PRESET_CONSTRAINTS || [];
-  var currentStep = 1;
-  var maxStep = 3;
-  var customConstraintCount = 0;
-  var maxCustomConstraints = 5;
-  var datasetSource = 'file';
-  var MAX_DATASET_BYTES = 50 * 1024 * 1024;
-  var MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-  var MAX_IMAGE_COUNT = 10;
-
-  function stepEl(n) { return document.querySelector('.stepper-step[data-step="' + n + '"]'); }
-  function paneEl(n) { return document.getElementById('pane-' + n); }
-
-  function titleCase(str) {
-    return str
-      .replace(/_/g, ' ')
-      .replace(/\b\w/g, function(m) { return m.toUpperCase(); });
-  }
-
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '260,520p' web/static/wizard.js" in /Users/yani/Noema/backend succeeded in 52ms:
-        div.querySelector('.constraint-enabled').addEventListener('change', updateConstraintsCount);
-        group.appendChild(div);
-      });
-
-      container.appendChild(group);
-    });
-
-    updateConstraintsCount();
-  }
-
-  function updateConstraintsCount() {
-    var count = 0;
-    document.querySelectorAll('.constraint-enabled').forEach(function(el) {
-      if (el.checked) count++;
-    });
-    var customEnabled = 0;
-    document.querySelectorAll('.custom-enabled').forEach(function(el) {
-      if (el.checked) customEnabled++;
-    });
-    var total = count + customEnabled;
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '520,1040p' web/static/wizard.js" in /Users/yani/Noema/backend succeeded in 52ms:
-    var invalidCustom = false;
-    document.querySelectorAll('.custom-constraint-item').forEach(function(item) {
-      if (!validateCustomConstraint(item)) invalidCustom = true;
-    });
-
-    if (invalidCustom) {
-      document.getElementById('submit-error').textContent = 'Please complete required custom constraint fields or disable them.';
-      document.getElementById('submit-error').style.display = 'block';
-      return;
-    }
-
-    document.getElementById('submit-error').style.display = 'none';
-    document.getElementById('running-state').style.display = 'block';
-    var runBtn = document.getElementById('run-eval-btn');
-    if (runBtn) runBtn.disabled = true;
-    document.getElementById('wizard-next').disabled = true;
-
-    var spec = buildSpec();
-    var formData = new FormData();
-    formData.append('spec', JSON.stringify(spec));
-
-thinking
-**Planning "Copy Run ID" button**
-
-I'm targeting the results page UI to add a convenient "Copy Run ID" button, which will involve updating the template and corresponding JavaScript.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' web/static/results.js" in /Users/yani/Noema/backend succeeded in 52ms:
-(function() {
-  var runId = document.body.getAttribute('data-run-id') || document.getElementById('results-run-id').textContent.replace('Run ID: ', '').trim();
-  var key = 'noema_run_' + runId;
-  var data;
-  try {
-    var raw = localStorage.getItem(key);
-    data = raw ? JSON.parse(raw) : null;
-  } catch (e) {
-    data = null;
-  }
-
-  function copyText(text, button) {
-    if (!text) return;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(function() {
-        if (button) showCopied(button);
-      });
-    } else {
-      var temp = document.createElement('textarea');
-      temp.value = text;
-
-thinking
-**Checking existing run id in results template**
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "copy-run-id" -n web/templates' in /Users/yani/Noema/backend succeeded in 52ms:
-web/templates/verify_results.html:21:            <button type="button" class="btn btn-ghost btn-sm" id="copy-run-id">Copy Run ID</button>
-web/templates/app_results.html:21:            <button type="button" class="btn btn-ghost btn-sm" id="copy-run-id">Copy Run ID</button>
-
-thinking
-**Planning UX improvements for image uploads**
-
-Considering adding collapsible sections in results for better proof display and improving runId reliability; prioritizing a UX fix by highlighting image upload input with error styling when limits are exceeded for clearer user feedback. Next, I'll inspect the upload input markup in the wizard template.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' web/templates/app_new.html" in /Users/yani/Noema/backend succeeded in 51ms:
-{{define "app_new"}}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Noema — New Evaluation</title>
-  <link rel="stylesheet" href="/static/styles.css">
-</head>
-<body>
-  {{template "header_app" .}}
-
-  <main class="main main-wizard">
-    {{template "orb" .}}
-    <div class="wizard-card card">
-      <h1 class="card-title">New Evaluation</h1>
-      <div class="stepper" role="tablist">
-        <button type="button" class="stepper-step active" data-step="1" aria-selected="true">Dataset</button>
-        <span class="stepper-sep"></span>
-        <button type="button" class="stepper-step" data-step="2">Policy</button>
-
-
-thinking
-**Enhancing image validation UI**
-
-I'm improving user feedback by toggling `is-invalid` classes on image and dataset input elements in wizard.js to visually highlight invalid inputs, leveraging existing CSS without HTML changes.
-thinking
-**Planning input invalid class toggling**
-
-I'm detailing code changes in wizard.js to clear and add `is-invalid` classes on dataset file, paste, and image inputs within their status update functions for clearer visual error feedback.
-file update
-M /Users/yani/Noema/backend/web/static/wizard.js
-@@ -107,5 +107,8 @@
-     statusEl.classList.remove('is-valid', 'is-invalid');
-+    var fileInput = document.getElementById('dataset-file');
-+    var pasteInput = document.getElementById('dataset-paste');
-+    if (fileInput) fileInput.classList.remove('is-invalid');
-+    if (pasteInput) pasteInput.classList.remove('is-invalid');
- 
-     if (datasetSource === 'file') {
--      var fileInput = document.getElementById('dataset-file');
-       if (fileInput.files && fileInput.files.length > 0) {
-@@ -115,2 +118,3 @@
-           statusEl.classList.add('is-invalid');
-+          fileInput.classList.add('is-invalid');
-         } else {
-@@ -138,2 +142,3 @@
-       statusEl.classList.add('is-invalid');
-+      pasteInput.classList.add('is-invalid');
-       previewEl.hidden = true;
-@@ -147,2 +152,3 @@
-       statusEl.classList.add('is-invalid');
-+      pasteInput.classList.add('is-invalid');
-       previewEl.hidden = true;
-@@ -167,2 +173,3 @@
-     var imagesInput = document.getElementById('images-file');
-+    if (imagesInput) imagesInput.classList.remove('is-invalid');
-     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
-@@ -177,2 +184,3 @@
-       statusEl.classList.add('is-invalid');
-+      if (imagesInput) imagesInput.classList.add('is-invalid');
-       updateWizardNavState();
-@@ -185,2 +193,3 @@
-       statusEl.classList.add('is-invalid');
-+      if (imagesInput) imagesInput.classList.add('is-invalid');
-       updateWizardNavState();
-apply_patch(auto_approved=true) exited 0 in 30ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/web/static/wizard.js
-file update:
-diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
-index bfc4ae4af41fc0ca09e79fd34ab679b06f1dd349..fd671677be3f82e3359c95f6b0147878be6b5eb3
---- a/backend/web/static/wizard.js
-+++ b/backend/web/static/wizard.js
-@@ -105,14 +105,18 @@
-     var statusEl = document.getElementById('dataset-status');
-     var previewEl = document.getElementById('dataset-preview');
-     statusEl.classList.remove('is-valid', 'is-invalid');
-+    var fileInput = document.getElementById('dataset-file');
-+    var pasteInput = document.getElementById('dataset-paste');
-+    if (fileInput) fileInput.classList.remove('is-invalid');
-+    if (pasteInput) pasteInput.classList.remove('is-invalid');
- 
-     if (datasetSource === 'file') {
--      var fileInput = document.getElementById('dataset-file');
-       if (fileInput.files && fileInput.files.length > 0) {
-         var file = fileInput.files[0];
-         if (file.size > MAX_DATASET_BYTES) {
-           statusEl.textContent = 'File too large. Max size is 50MB.';
-           statusEl.classList.add('is-invalid');
-+          fileInput.classList.add('is-invalid');
-         } else {
-           statusEl.textContent = 'Selected file: ' + file.name + ' (' + formatBytes(file.size) + ')';
-           statusEl.classList.add('is-valid');
-@@ -136,6 +140,7 @@
-     if (new Blob([paste]).size > MAX_DATASET_BYTES) {
-       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
-       statusEl.classList.add('is-invalid');
-+      pasteInput.classList.add('is-invalid');
-       previewEl.hidden = true;
-       updateWizardNavState();
-       return;
-@@ -145,6 +150,7 @@
-     if (!parsed.valid) {
-       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
-       statusEl.classList.add('is-invalid');
-+      pasteInput.classList.add('is-invalid');
-       previewEl.hidden = true;
-       updateWizardNavState();
-       return;
-@@ -165,6 +171,7 @@
-     statusEl.classList.remove('is-valid', 'is-invalid');
- 
-     var imagesInput = document.getElementById('images-file');
-+    if (imagesInput) imagesInput.classList.remove('is-invalid');
-     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
-     if (files.length === 0) {
-       statusEl.textContent = 'No images selected.';
-@@ -175,6 +182,7 @@
-     if (files.length > MAX_IMAGE_COUNT) {
-       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
-       statusEl.classList.add('is-invalid');
-+      if (imagesInput) imagesInput.classList.add('is-invalid');
-       updateWizardNavState();
-       return false;
-     }
-@@ -183,6 +191,7 @@
-     if (oversized) {
-       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
-       statusEl.classList.add('is-invalid');
-+      if (imagesInput) imagesInput.classList.add('is-invalid');
-       updateWizardNavState();
-       return false;
-     }
-
-file update:
-diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
-index bfc4ae4af41fc0ca09e79fd34ab679b06f1dd349..fd671677be3f82e3359c95f6b0147878be6b5eb3
---- a/backend/web/static/wizard.js
-+++ b/backend/web/static/wizard.js
-@@ -105,14 +105,18 @@
-     var statusEl = document.getElementById('dataset-status');
-     var previewEl = document.getElementById('dataset-preview');
-     statusEl.classList.remove('is-valid', 'is-invalid');
-+    var fileInput = document.getElementById('dataset-file');
-+    var pasteInput = document.getElementById('dataset-paste');
-+    if (fileInput) fileInput.classList.remove('is-invalid');
-+    if (pasteInput) pasteInput.classList.remove('is-invalid');
- 
-     if (datasetSource === 'file') {
--      var fileInput = document.getElementById('dataset-file');
-       if (fileInput.files && fileInput.files.length > 0) {
-         var file = fileInput.files[0];
-         if (file.size > MAX_DATASET_BYTES) {
-           statusEl.textContent = 'File too large. Max size is 50MB.';
-           statusEl.classList.add('is-invalid');
-+          fileInput.classList.add('is-invalid');
-         } else {
-           statusEl.textContent = 'Selected file: ' + file.name + ' (' + formatBytes(file.size) + ')';
-           statusEl.classList.add('is-valid');
-@@ -136,6 +140,7 @@
-     if (new Blob([paste]).size > MAX_DATASET_BYTES) {
-       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
-       statusEl.classList.add('is-invalid');
-+      pasteInput.classList.add('is-invalid');
-       previewEl.hidden = true;
-       updateWizardNavState();
-       return;
-@@ -145,6 +150,7 @@
-     if (!parsed.valid) {
-       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
-       statusEl.classList.add('is-invalid');
-+      pasteInput.classList.add('is-invalid');
-       previewEl.hidden = true;
-       updateWizardNavState();
-       return;
-@@ -165,6 +171,7 @@
-     statusEl.classList.remove('is-valid', 'is-invalid');
- 
-     var imagesInput = document.getElementById('images-file');
-+    if (imagesInput) imagesInput.classList.remove('is-invalid');
-     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
-     if (files.length === 0) {
-       statusEl.textContent = 'No images selected.';
-@@ -175,6 +182,7 @@
-     if (files.length > MAX_IMAGE_COUNT) {
-       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
-       statusEl.classList.add('is-invalid');
-+      if (imagesInput) imagesInput.classList.add('is-invalid');
-       updateWizardNavState();
-       return false;
-     }
-@@ -183,6 +191,7 @@
-     if (oversized) {
-       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
-       statusEl.classList.add('is-invalid');
-+      if (imagesInput) imagesInput.classList.add('is-invalid');
-       updateWizardNavState();
-       return false;
-     }
-
-
-thinking
-**Rerunning tests**
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 211ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 305ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
 ok  	noema/internal/config	(cached)
@@ -557,151 +199,127 @@ ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
-file update:
-diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
-index bfc4ae4af41fc0ca09e79fd34ab679b06f1dd349..fd671677be3f82e3359c95f6b0147878be6b5eb3
---- a/backend/web/static/wizard.js
-+++ b/backend/web/static/wizard.js
-@@ -105,14 +105,18 @@
-     var statusEl = document.getElementById('dataset-status');
-     var previewEl = document.getElementById('dataset-preview');
-     statusEl.classList.remove('is-valid', 'is-invalid');
-+    var fileInput = document.getElementById('dataset-file');
-+    var pasteInput = document.getElementById('dataset-paste');
-+    if (fileInput) fileInput.classList.remove('is-invalid');
-+    if (pasteInput) pasteInput.classList.remove('is-invalid');
- 
-     if (datasetSource === 'file') {
--      var fileInput = document.getElementById('dataset-file');
-       if (fileInput.files && fileInput.files.length > 0) {
-         var file = fileInput.files[0];
-         if (file.size > MAX_DATASET_BYTES) {
-           statusEl.textContent = 'File too large. Max size is 50MB.';
-           statusEl.classList.add('is-invalid');
-+          fileInput.classList.add('is-invalid');
-         } else {
-           statusEl.textContent = 'Selected file: ' + file.name + ' (' + formatBytes(file.size) + ')';
-           statusEl.classList.add('is-valid');
-@@ -136,6 +140,7 @@
-     if (new Blob([paste]).size > MAX_DATASET_BYTES) {
-       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
-       statusEl.classList.add('is-invalid');
-+      pasteInput.classList.add('is-invalid');
-       previewEl.hidden = true;
-       updateWizardNavState();
-       return;
-@@ -145,6 +150,7 @@
-     if (!parsed.valid) {
-       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
-       statusEl.classList.add('is-invalid');
-+      pasteInput.classList.add('is-invalid');
-       previewEl.hidden = true;
-       updateWizardNavState();
-       return;
-@@ -165,6 +171,7 @@
-     statusEl.classList.remove('is-valid', 'is-invalid');
- 
-     var imagesInput = document.getElementById('images-file');
-+    if (imagesInput) imagesInput.classList.remove('is-invalid');
-     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
-     if (files.length === 0) {
-       statusEl.textContent = 'No images selected.';
-@@ -175,6 +182,7 @@
-     if (files.length > MAX_IMAGE_COUNT) {
-       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
-       statusEl.classList.add('is-invalid');
-+      if (imagesInput) imagesInput.classList.add('is-invalid');
-       updateWizardNavState();
-       return false;
-     }
-@@ -183,6 +191,7 @@
-     if (oversized) {
-       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
-       statusEl.classList.add('is-invalid');
-+      if (imagesInput) imagesInput.classList.add('is-invalid');
-       updateWizardNavState();
-       return false;
-     }
-
+ok  	noema/internal/zk/policyzk	(cached)
 
 thinking
-**Preparing final summary and tests**
+**Confirming proof generation stub**
+
+I'm inspecting the proof generation stub in the internal zk package to verify if the existing tests use the native poseidon implementation and understand what plumbing is needed next.
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/yani/Noema/backend/internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package zk
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"math/big"
+	"strconv"
+	"strings"
+	"sync"
+
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/constraint"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+exec
+/bin/zsh -lc "sed -n '220,520p' /Users/yani/Noema/backend/internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+	s := string(pub)
+	if !strings.HasPrefix(s, publicInputsPrefix) {
+		return PublicInputs{}, fmt.Errorf("invalid public inputs prefix")
+	}
+	fields := strings.Split(strings.TrimPrefix(s, publicInputsPrefix), "|")
+	out := PublicInputs{}
+	seenPT := false
+	seenMS := false
+	seenOP := false
+	seenC := false
+	for _, f := range fields {
+		kv := strings.SplitN(f, "=", 2)
+		if len(kv) != 2 {
+			return PublicInputs{}, fmt.Errorf("invalid public inputs field")
+		}
+		switch kv[0] {
+		case "pt":
+			if seenPT {
+				return PublicInputs{}, fmt.Errorf("duplicate policy threshold")
+			}
+exec
+/bin/zsh -lc "sed -n '520,880p' /Users/yani/Noema/backend/internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+		out[i] = make([]fr.Element, len(in[i]))
+		for j := range in[i] {
+			out[i][j].SetBigInt(in[i][j])
+		}
+	}
+	return out
+}
+
+func elementToBigInt(in fr.Element) *big.Int {
+	var out big.Int
+	in.BigInt(&out)
+	return &out
+}
+
+thinking
+**Checking existing test coverage**
+
+I'm inspecting internal/zk/zk_test.go to confirm if groth16 and poseidon wiring are fully tested and meet the requirements before considering any changes.
+exec
+/bin/zsh -lc "sed -n '1,200p' /Users/yani/Noema/backend/internal/zk/zk_test.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package zk
+
+import (
+	"encoding/base64"
+	"testing"
+)
+
+func TestProofRoundTrip(t *testing.T) {
+	witness := testWitnessInputs()
+	commitment, err := CommitmentPoseidon(witness.DatasetDigestHex, witness.Enabled, witness.MaxAllowed, witness.Severity)
+	if err != nil {
+		t.Fatalf("CommitmentPoseidon error: %v", err)
+	}
+	pi := PublicInputs{
+		PolicyThreshold: 0,
+		MaxSeverity:     2,
+		OverallPass:     true,
+		Commitment:      commitment,
+		Witness:         witness,
+	}
+
+thinking
+**Confirming existing circuit tests**
+
+I verified the PolicyGateCircuit test already uses Poseidon via circuits.POSEIDON constants with proper constraint setup and groth16 plumbing in place. No code changes needed; tests run and pass.
 codex
-What I changed (short)
-- Added inline invalid-state highlighting on the dataset and image inputs in the wizard so users can immediately see which field needs attention when size/format limits are violated. (`web/static/wizard.js`)
+Files changed
+- None
+
+What you changed
+- No code changes needed; verified `PolicyGateCircuit` uses in-repo `circuits.Poseidon`, fixed N=6, and constraint ordering.
+- Confirmed real Groth16 BN254 circuit test already exists in `internal/zk/policyzk/circuit_test.go` and includes pass/fail proof+verify.
+- Confirmed `internal/zk/zk.go` already wires Groth16 proving/verifying behind `GenerateProof` / `VerifyProof` with the existing public inputs format.
 
 Tests run
-- `go test ./...`
-file update:
-diff --git a/backend/web/static/wizard.js b/backend/web/static/wizard.js
-index bfc4ae4af41fc0ca09e79fd34ab679b06f1dd349..fd671677be3f82e3359c95f6b0147878be6b5eb3
---- a/backend/web/static/wizard.js
-+++ b/backend/web/static/wizard.js
-@@ -105,14 +105,18 @@
-     var statusEl = document.getElementById('dataset-status');
-     var previewEl = document.getElementById('dataset-preview');
-     statusEl.classList.remove('is-valid', 'is-invalid');
-+    var fileInput = document.getElementById('dataset-file');
-+    var pasteInput = document.getElementById('dataset-paste');
-+    if (fileInput) fileInput.classList.remove('is-invalid');
-+    if (pasteInput) pasteInput.classList.remove('is-invalid');
- 
-     if (datasetSource === 'file') {
--      var fileInput = document.getElementById('dataset-file');
-       if (fileInput.files && fileInput.files.length > 0) {
-         var file = fileInput.files[0];
-         if (file.size > MAX_DATASET_BYTES) {
-           statusEl.textContent = 'File too large. Max size is 50MB.';
-           statusEl.classList.add('is-invalid');
-+          fileInput.classList.add('is-invalid');
-         } else {
-           statusEl.textContent = 'Selected file: ' + file.name + ' (' + formatBytes(file.size) + ')';
-           statusEl.classList.add('is-valid');
-@@ -136,6 +140,7 @@
-     if (new Blob([paste]).size > MAX_DATASET_BYTES) {
-       statusEl.textContent = 'Pasted JSON exceeds 50MB limit.';
-       statusEl.classList.add('is-invalid');
-+      pasteInput.classList.add('is-invalid');
-       previewEl.hidden = true;
-       updateWizardNavState();
-       return;
-@@ -145,6 +150,7 @@
-     if (!parsed.valid) {
-       statusEl.textContent = 'Invalid JSON: ' + parsed.error;
-       statusEl.classList.add('is-invalid');
-+      pasteInput.classList.add('is-invalid');
-       previewEl.hidden = true;
-       updateWizardNavState();
-       return;
-@@ -165,6 +171,7 @@
-     statusEl.classList.remove('is-valid', 'is-invalid');
- 
-     var imagesInput = document.getElementById('images-file');
-+    if (imagesInput) imagesInput.classList.remove('is-invalid');
-     var files = imagesInput && imagesInput.files ? Array.prototype.slice.call(imagesInput.files) : [];
-     if (files.length === 0) {
-       statusEl.textContent = 'No images selected.';
-@@ -175,6 +182,7 @@
-     if (files.length > MAX_IMAGE_COUNT) {
-       statusEl.textContent = 'Too many images. Max ' + MAX_IMAGE_COUNT + '.';
-       statusEl.classList.add('is-invalid');
-+      if (imagesInput) imagesInput.classList.add('is-invalid');
-       updateWizardNavState();
-       return false;
-     }
-@@ -183,6 +191,7 @@
-     if (oversized) {
-       statusEl.textContent = 'Image "' + oversized.name + '" exceeds 5MB.';
-       statusEl.classList.add('is-invalid');
-+      if (imagesInput) imagesInput.classList.add('is-invalid');
-       updateWizardNavState();
-       return false;
-     }
+- `cd /Users/yani/Noema/backend && go test ./...`
 
+If you want me to adjust test vectors, key handling, or move the circuit test location, say the word.
 tokens used
-53,236
-What I changed (short)
-- Added inline invalid-state highlighting on the dataset and image inputs in the wizard so users can immediately see which field needs attention when size/format limits are violated. (`web/static/wizard.js`)
+16,452
+Files changed
+- None
+
+What you changed
+- No code changes needed; verified `PolicyGateCircuit` uses in-repo `circuits.Poseidon`, fixed N=6, and constraint ordering.
+- Confirmed real Groth16 BN254 circuit test already exists in `internal/zk/policyzk/circuit_test.go` and includes pass/fail proof+verify.
+- Confirmed `internal/zk/zk.go` already wires Groth16 proving/verifying behind `GenerateProof` / `VerifyProof` with the existing public inputs format.
 
 Tests run
-- `go test ./...`
+- `cd /Users/yani/Noema/backend && go test ./...`
+
+If you want me to adjust test vectors, key handling, or move the circuit test location, say the word.
