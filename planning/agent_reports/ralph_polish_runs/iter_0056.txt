@@ -7,40 +7,244 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3cbd-a096-77f1-a43c-5719450b8225
+session id: 019c4124-736a-7160-a701-b1ab2a101fbd
 --------
 user
-You are an autonomous coding agent polishing the Noema repository.
+You are an autonomous coding agent working on the Noema repository.
 
-Hard rules:
+MISSION (priority order):
+1) Add a real gnark circuit test for the PolicyGateCircuit (using our in-repo Poseidon implementation, package circuits).
+2) Make the circuit test pass reliably (compile -> prove -> verify) using Groth16 on BN254.
+3) ONLY AFTER tests pass: wire the backend plumbing to call the gnark prover/verifier behind the existing zk.GenerateProof / zk.VerifyProof API, keeping the public API shape unchanged (proof_b64 + public_inputs_b64).
+
+HARD RULES:
 - DO NOT run git commit, git reset, git clean, or anything that modifies git history.
-- I will run git commits outside of you.
-- Keep changes small: max 3 files per iteration.
+- Keep changes small: max 3 files per iteration. If more is needed, stage work across multiple iterations.
 - No cosmetic-only edits.
-- No new dependencies unless absolutely necessary.
+- No new dependencies unless absolutely necessary. Use existing gnark dependencies already in the repo. If gnark is not yet in go.mod, add it only if unavoidable.
+- Do not change routes or response shapes. Keep /api/evaluate and /api/verify behavior stable.
+- Do not redesign UI. This task is ZK/circuit/testing/plumbing only.
+- Always run: cd backend && go test ./... at least once per iteration.
 
-Goal: continuously improve production quality.
+WORKFLOW YOU MUST FOLLOW (do not skip):
+A) Inspect current circuit code and poseidon implementation:
+   - Find the PolicyGateCircuit (the policy ZK circuit) and confirm it imports and uses circuits.Poseidon (NOT gnark/std poseidon).
+   - Confirm fixed N=6 and the frozen constraint ordering.
+B) Add tests FIRST:
+   - Create a new Go test file for the circuit (example name: backend/internal/zk/policy_circuit_test.go or wherever circuits live).
+   - The test must:
+     1) Compile the circuit to R1CS
+     2) Run Groth16 setup
+     3) Build a witness with a PASS case and generate a proof
+     4) Verify the proof using the public witness
+     5) Build a witness with a FAIL case and confirm either:
+        - proving fails (unsatisfied), OR
+        - proving succeeds only if OverallPass is set correctly (0), AND verifying matches the expected output
+   - Use deterministic test vectors:
+     - datasetDigestLo/Hi fixed constants
+     - enabled/maxAllowed/severity arrays fixed constants
+     - Compute the expected Commitment in-circuit by setting Commitment to the same value computed by the circuit.
+       (In gnark tests, you can set Commitment as a public variable equal to circuits.Poseidon(domainSep + inputs) by reusing the same circuits.Poseidon function in a small helper circuit OR by computing it with the same function in-circuit and asserting equality.)
+   - The test must assert:
+     - OverallPass == 1 for pass vector, and verify passes.
+     - OverallPass == 0 for fail vector, and verify passes only with correct OverallPass.
+C) Fix whatever is broken until all tests pass:
+   - If compilation errors, fix imports or package paths.
+   - If poseidon params/functions missing, use the existing in-repo Poseidon code as the single source of truth.
+   - If constraints are wrong, fix circuit logic minimally.
+D) ONLY AFTER TESTS PASS: wire plumbing:
+   - Replace stub proof internals inside backend/internal/zk/zk.go (or equivalent) to use gnark Groth16 BN254:
+     - GenerateProof: build witness from inputs (enabled/maxAllowed/severity + datasetDigest limbs) and output proof bytes base64
+     - VerifyProof: decode proof and public inputs and verify using vk
+   - Keep existing API signatures and keep proof_b64 + public_inputs_b64 shape.
+   - You may keep public_inputs_b64 as the existing string format for now, but the verify path must map it deterministically to the circuit’s public witness (Commitment, OverallPass, MaxSeverity).
+   - Ensure keys are handled sanely for dev:
+     - For now, allow generating proving/verifying keys at startup or cached on disk under backend/internal/zk (dev only),
+       OR embed small test keys only for tests.
+     - Don’t over-engineer; prioritize working tests and stable verify.
 
-Iteration:
-1) Run: cd backend && go test ./...
-2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
-3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+ACCEPTANCE CRITERIA (must satisfy):
+- `cd backend && go test ./...` passes.
+- There is at least one new test that proves+verifies the circuit in a PASS case.
+- There is at least one test that demonstrates FAIL behavior (overall_pass=0) is enforced and verifiable.
+- If plumbing was wired, verify endpoint still accepts proof_b64/public_inputs_b64 and returns verified result correctly.
 
-Pick the highest-value improvement:
-A) Reliability/correctness: validation, error handling, run persistence, verify robustness
-B) Tests: add/strengthen tests for the change you made
-C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
-D) Maintainability: reduce duplication with tiny refactors
-E) UX: wizard/results/verify clarity (small, safe changes)
-F) Docs: README/DEPLOYMENT polish
-G) Performance: safe wins only
-
-Finish with:
-- What you changed (short)
+OUTPUT FORMAT (end of each run):
+- Files changed (list)
+- What you changed (2–6 bullets)
 - Tests run (must include go test ./...)
 mcp startup: no servers
+
+thinking
+**Preparing to inspect files**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 104ms:
+/bin/zsh -lc ls in /Users/yani/Noema/backend succeeded in 53ms:
+cmd
+data
+go.mod
+go.sum
+internal
+web
+
+thinking
+**Searching for circuit usage**
+exec
+/bin/zsh -lc 'rg -n "PolicyGateCircuit|policy gate|PolicyGate" internal' in /Users/yani/Noema/backend succeeded in 53ms:
+internal/evaluate/handler.go:395:	if len(policyConstraintOrder) != zk.PolicyGateConstraintCount {
+internal/evaluate/handler.go:417:	var enabled [zk.PolicyGateConstraintCount]uint64
+internal/evaluate/handler.go:418:	var maxAllowed [zk.PolicyGateConstraintCount]uint64
+internal/evaluate/handler.go:419:	var severity [zk.PolicyGateConstraintCount]uint64
+internal/zk/policy_circuit_groth16_test.go:14:func TestPolicyGateCircuit_Groth16PassFail(t *testing.T) {
+internal/zk/policy_circuit_groth16_test.go:15:	var circuit policyzk.PolicyGateCircuit
+internal/zk/policy_circuit_groth16_test.go:27:	enabled := [PolicyGateConstraintCount]uint64{1, 1, 1, 0, 1, 0}
+internal/zk/policy_circuit_groth16_test.go:28:	maxAllowed := [PolicyGateConstraintCount]uint64{1, 2, 0, 1, 2, 0}
+internal/zk/policy_circuit_groth16_test.go:30:	passSeverity := [PolicyGateConstraintCount]uint64{1, 2, 0, 2, 1, 2}
+internal/zk/policy_circuit_groth16_test.go:47:	passAssignment := policyzk.PolicyGateCircuit{
+internal/zk/policy_circuit_groth16_test.go:74:	failSeverity := [PolicyGateConstraintCount]uint64{1, 2, 1, 2, 1, 2}
+internal/zk/policy_circuit_groth16_test.go:86:	failAssignment := policyzk.PolicyGateCircuit{
+internal/zk/policy_circuit_groth16_test.go:124:func maxSeverity(enabled, severity [PolicyGateConstraintCount]uint64) int {
+internal/zk/policy_circuit_groth16_test.go:126:	for i := 0; i < PolicyGateConstraintCount; i++ {
+internal/zk/zk_test.go:73:		Enabled:          [PolicyGateConstraintCount]uint64{1, 1, 1, 0, 1, 0},
+internal/zk/zk_test.go:74:		MaxAllowed:       [PolicyGateConstraintCount]uint64{1, 2, 0, 1, 2, 0},
+internal/zk/zk_test.go:75:		Severity:         [PolicyGateConstraintCount]uint64{1, 2, 0, 2, 1, 2},
+internal/zk/zk.go:33:// PolicyGateConstraintCount is the fixed N for the PolicyGateCircuit.
+internal/zk/zk.go:34:const PolicyGateConstraintCount = policyzk.N
+internal/zk/zk.go:55:// WitnessInputs carries the private inputs for the PolicyGateCircuit.
+
+thinking
+**Inspecting circuit and Poseidon use**
+
+I'm examining the circuit implementation with a focus on how Poseidon hashing is integrated, starting from the open circuit to understand its role and verify correctness.
+exec
+/bin/zsh -lc "sed -n '1,220p' internal/zk/policyzk/circuit.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package policyzk
+
+import (
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark/frontend"
+)
+
+const N = 6
+
+// PolicyGateCircuit proves:
+//   - The prover knows (datasetDigest, policy config, gemini severities) that hash to Commitment
+//   - And the deterministic policy check passes:
+//     for each i: if Enabled[i] == 1 then Severity[i] <= MaxAllowed[i]
+//
+// Public outputs:
+// - Commitment: binds everything (dataset + policy + gemini outputs)
+// - OverallPass: 1 iff policy passes
+// - MaxSeverity (optional): max observed severity among enabled constraints
+type PolicyGateCircuit struct {
+	// ===== Private witness =====
+
+thinking
+**Inspecting existing test coverage**
+
+I'll review the test file for the policy circuit to verify it meets the required specifications before adding or modifying tests.
+exec
+/bin/zsh -lc "sed -n '1,220p' internal/zk/policy_circuit_groth16_test.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package zk
+
+import (
+	"testing"
+
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+
+	"noema/internal/zk/policyzk"
+)
+
+func TestPolicyGateCircuit_Groth16PassFail(t *testing.T) {
+	var circuit policyzk.PolicyGateCircuit
+	r1cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
+	if err != nil {
+		t.Fatalf("compile circuit: %v", err)
+	}
+
+
+thinking
+**Checking existing tests in policyzk**
+exec
+/bin/zsh -lc "sed -n '1,220p' internal/zk/policyzk/circuit_test.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package policyzk
+
+import (
+	"math/big"
+	"testing"
+
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+	"github.com/stretchr/testify/require"
+)
+
+func TestPolicyGateCircuit_Groth16PassFail(t *testing.T) {
+	require := require.New(t)
+
+	var circuit PolicyGateCircuit
+	r1cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
+
+thinking
+**Checking existing test coverage**
+
+There is already a groth16 test in policyzk, but the next step is adding a test for PolicyGateCircuit using the in-repo Poseidon. I need to verify if current zk.go stubs support this and check if existing tests pass.
+exec
+/bin/zsh -lc "sed -n '1,260p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package zk
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"math/big"
+	"strconv"
+	"strings"
+	"sync"
+
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/constraint"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+exec
+/bin/zsh -lc "sed -n '260,620p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+			out.MaxSeverity = v
+			seenMS = true
+		case "op":
+			if seenOP {
+				return PublicInputs{}, fmt.Errorf("duplicate overall pass")
+			}
+			v, err := strconv.Atoi(kv[1])
+			if err != nil {
+				return PublicInputs{}, fmt.Errorf("invalid overall pass")
+			}
+			if v != 0 && v != 1 {
+				return PublicInputs{}, fmt.Errorf("overall pass must be 0 or 1")
+			}
+			out.OverallPass = v == 1
+			seenOP = true
+		case "c":
+			if seenC {
+				return PublicInputs{}, fmt.Errorf("duplicate commitment")
+			}
+			if kv[1] == "" {
+
+thinking
+**Running existing tests**
+
+I'm running all Go tests to check if they pass before adding new tests and wiring.
+exec
+/bin/zsh -lc 'go test ./...' in /Users/yani/Noema/backend succeeded in 306ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
 ok  	noema/internal/config	(cached)
@@ -52,492 +256,63 @@ ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
+ok  	noema/internal/zk/policyzk	(cached)
 
 thinking
-**Planning test improvement**
+**Confirming existing Poseidon circuit test**
 
-Tests are passing but one improvement is needed; next I'll inspect the repo for relevant areas by searching for TODOs or similar markers.
+The code already includes real gnark circuit tests using the in-repo Poseidon implementation in both policyzk and internal/zk, with relevant wiring present and tests passing; no new additions seem necessary based on current inspection.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME|BUG|HACK"' in /Users/yani/Noema/backend exited 1 in 51ms:
-
-
-thinking
-**Planning investigation for reliability issues**
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "panic|must|assume|unsafe|TODO" internal' in /Users/yani/Noema/backend succeeded in 52ms:
-internal/evaluate/parse.go:43:		return fmt.Errorf("evaluation_name must not include leading/trailing whitespace")
-internal/evaluate/parse.go:49:			return fmt.Errorf("constraint id must be non-empty")
-internal/evaluate/parse.go:52:			return fmt.Errorf("constraint id must not include leading/trailing whitespace")
-internal/evaluate/parse.go:59:			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
-internal/evaluate/parse.go:65:			return fmt.Errorf("custom_constraint id must be non-empty")
-internal/evaluate/parse.go:68:			return fmt.Errorf("custom_constraint id must not include leading/trailing whitespace")
-internal/evaluate/parse.go:75:			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
-internal/evaluate/parse.go:101:			return nil, nil, fmt.Errorf("image filename must be non-empty")
-internal/evaluate/parse.go:104:			return nil, nil, fmt.Errorf("image filename must not include leading/trailing whitespace")
-internal/evaluate/parse.go:107:			return nil, nil, fmt.Errorf("image filename must not include path separators")
-internal/evaluate/parse.go:110:			return nil, nil, fmt.Errorf("image filenames must be unique")
-internal/evaluate/parse.go:114:			return nil, nil, fmt.Errorf("each image must be at most %s", formatBytes(int64(config.MaxImageBytes)))
-internal/evaluate/parse.go:146:			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
-internal/evaluate/dataset.go:46:		return nil, Dataset{}, fmt.Errorf("dataset must be valid JSON")
-internal/evaluate/dataset.go:49:		return nil, Dataset{}, fmt.Errorf("dataset must be a single JSON value")
-internal/evaluate/dataset.go:56:		return nil, Dataset{}, fmt.Errorf("dataset must match schema")
-internal/evaluate/dataset.go:59:		return nil, Dataset{}, fmt.Errorf("dataset.items must be a non-empty array")
-internal/evaluate/dataset.go:68:			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must not include leading/trailing whitespace", i)
-internal/evaluate/dataset.go:76:				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must be non-empty", i)
-internal/evaluate/dataset.go:79:				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must not include leading/trailing whitespace", i)
-
-thinking
-**Considering test addition for reliability**
-
-I'm exploring adding a meaningful test, possibly in evaluate/parse.go, to improve reliability. Next, I'll identify where the most impact can be made.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
+/bin/zsh -lc "sed -n '1,220p' internal/zk/zk_test.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package zk
 
 import (
-	"encoding/json"
-	"fmt"
-	"io"
-	"mime/multipart"
-	"path/filepath"
-	"strings"
-
-	"noema/internal/config"
-)
-
-func parseSpec(form *multipart.Form) (Spec, error) {
-	specStrs := form.Value["spec"]
-	if len(specStrs) == 0 || specStrs[0] == "" {
-		return Spec{}, fmt.Errorf("missing field: spec")
-	}
-	if len(specStrs) > 1 {
-		return Spec{}, fmt.Errorf("only one spec value allowed")
-
-thinking
-**Checking dataset JSON handling**
-
-I'll inspect the dataset JSON reading logic to verify its reliability and see if it can provide more detailed error info.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io"
-	"mime/multipart"
-	"strings"
-
-	"noema/internal/config"
-)
-
-type Dataset struct {
-	Items []DatasetItem `json:"items"`
-}
-
-type DatasetItem struct {
-	ID       string         `json:"id"`
-	Text     string         `json:"text"`
-
-
-thinking
-**Considering validation improvements**
-
-I'm weighing adding checks to reject path separators in image references to clarify errors when matching against uploaded filenames, which don't allow separators. Also considering better error details for JSON parsing and reinforcing trimmed uniqueness of dataset item IDs, though current checks seem adequate.
-thinking
-**Planning path separator validation**
-
-I'm planning to add a check in dataset reading to reject image references containing path separators for clearer errors, aligning with existing image filename checks. I'll add filepath usage for this and review evaluate dataset tests to decide on adding new validation tests.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
-cache.go
-commitment.go
-dataset.go
-gemini_eval.go
-handler.go
-handler_integration_test.go
-handler_test.go
-images.go
-output.go
-parse.go
-policy.go
-prompt.go
-schema.go
-spec.go
-storage.go
-storage_test.go
-
-thinking
-**Preparing to add dataset tests**
-
-I’m checking existing tests to determine where to add a unit test for reading dataset files, likely in the handler tests, to ensure meaningful improvement.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"mime/multipart"
-	"net/textproto"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
+	"encoding/base64"
 	"testing"
-	"time"
 )
 
-type formFile struct {
-	field       string
-	filename    string
-	contentType string
-
-
-thinking
-**Planning image_ref path separator validation**
-
-I'm adding a check in dataset reading to error if image_ref contains path separators by comparing with filepath.Base. This validation triggers early, so tests will build datasets with image_ref containing separators and images present to verify the specific error before image matching. I'll add these tests in handler_test to cover parseUploads handling.
-thinking
-**Confirming parseUploads rejects path separators early**
-
-The path separator check in dataset reading triggers before validateDatasetJSON, so parseUploads will error on image_ref with separators even without images uploaded. I'll implement this in dataset.go and add a handler_test to create a dataset with image_ref containing path separators, verifying parseUploads returns the path separator error.
-file update
-M /Users/yani/Noema/backend/internal/evaluate/dataset.go
-@@ -8,2 +8,3 @@
- 	"mime/multipart"
-+	"path/filepath"
- 	"strings"
-@@ -80,2 +81,5 @@
- 			}
-+			if filepath.Base(item.ImageRef) != item.ImageRef {
-+				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must not include path separators", i)
-+			}
- 		}
-apply_patch(auto_approved=true) exited 0 in 29ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/dataset.go
-file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index d2680e9cf89837817c3842782349649f702668c4..f77daadf4a2c6f58f2a92ec142e51714f59d0085
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -6,6 +6,7 @@
- 	"fmt"
- 	"io"
- 	"mime/multipart"
-+	"path/filepath"
- 	"strings"
- 
- 	"noema/internal/config"
-@@ -78,6 +79,9 @@
- 			if trimmedRef != item.ImageRef {
- 				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must not include leading/trailing whitespace", i)
- 			}
-+			if filepath.Base(item.ImageRef) != item.ImageRef {
-+				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must not include path separators", i)
-+			}
- 		}
- 		if _, exists := seenIDs[item.ID]; exists {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
-
-file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index d2680e9cf89837817c3842782349649f702668c4..f77daadf4a2c6f58f2a92ec142e51714f59d0085
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -6,6 +6,7 @@
- 	"fmt"
- 	"io"
- 	"mime/multipart"
-+	"path/filepath"
- 	"strings"
- 
- 	"noema/internal/config"
-@@ -78,6 +79,9 @@
- 			if trimmedRef != item.ImageRef {
- 				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must not include leading/trailing whitespace", i)
- 			}
-+			if filepath.Base(item.ImageRef) != item.ImageRef {
-+				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must not include path separators", i)
-+			}
- 		}
- 		if _, exists := seenIDs[item.ID]; exists {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
-
+func TestProofRoundTrip(t *testing.T) {
+	witness := testWitnessInputs()
+	commitment, err := CommitmentPoseidon(witness.DatasetDigestHex, witness.Enabled, witness.MaxAllowed, witness.Severity)
+	if err != nil {
+		t.Fatalf("CommitmentPoseidon error: %v", err)
+	}
+	pi := PublicInputs{
+		PolicyThreshold: 0,
+		MaxSeverity:     2,
+		OverallPass:     true,
+		Commitment:      commitment,
+		Witness:         witness,
+	}
 
 thinking
-**Adding rejection test for path separators**
+**Reporting no changes with tests passing**
 
-I'm creating a test near the existing parse upload tests that supplies a dataset JSON with an image_ref containing path separators to confirm that validation correctly rejects it.
-file update
-M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
-@@ -124,2 +124,20 @@
- 
-+func TestParseUploads_RejectsImageRefPathSeparators(t *testing.T) {
-+	dataset := `{"items":[{"id":"item-1","text":"hello","image_ref":"images/pic.png"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{
-+			field:       "dataset",
-+			filename:    "dataset.json",
-+			contentType: "application/json",
-+			content:     []byte(dataset),
-+		},
-+	})
-+
-+	if _, _, err := parseUploads(form); err == nil {
-+		t.Fatalf("expected error for image_ref with path separators")
-+	} else if !strings.Contains(err.Error(), "path separators") {
-+		t.Fatalf("unexpected error: %v", err)
-+	}
-+}
-+
- func TestParseEvalOutputOptional_UsesProvidedOutput(t *testing.T) {
-apply_patch(auto_approved=true) exited 0 in 35ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
-file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index d2680e9cf89837817c3842782349649f702668c4..f77daadf4a2c6f58f2a92ec142e51714f59d0085
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -6,6 +6,7 @@
- 	"fmt"
- 	"io"
- 	"mime/multipart"
-+	"path/filepath"
- 	"strings"
- 
- 	"noema/internal/config"
-@@ -78,6 +79,9 @@
- 			if trimmedRef != item.ImageRef {
- 				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must not include leading/trailing whitespace", i)
- 			}
-+			if filepath.Base(item.ImageRef) != item.ImageRef {
-+				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must not include path separators", i)
-+			}
- 		}
- 		if _, exists := seenIDs[item.ID]; exists {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 6ef68ec416df1009d6bb2d08e7b1bc3dbd0083dc..119855505614c5f186d4bd09ca8a6a455b7cb491
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -122,6 +122,24 @@
- 	}
- }
- 
-+func TestParseUploads_RejectsImageRefPathSeparators(t *testing.T) {
-+	dataset := `{"items":[{"id":"item-1","text":"hello","image_ref":"images/pic.png"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{
-+			field:       "dataset",
-+			filename:    "dataset.json",
-+			contentType: "application/json",
-+			content:     []byte(dataset),
-+		},
-+	})
-+
-+	if _, _, err := parseUploads(form); err == nil {
-+		t.Fatalf("expected error for image_ref with path separators")
-+	} else if !strings.Contains(err.Error(), "path separators") {
-+		t.Fatalf("unexpected error: %v", err)
-+	}
-+}
-+
- func TestParseEvalOutputOptional_UsesProvidedOutput(t *testing.T) {
- 	spec := Spec{
- 		SchemaVersion: 1,
-
-file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index d2680e9cf89837817c3842782349649f702668c4..f77daadf4a2c6f58f2a92ec142e51714f59d0085
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -6,6 +6,7 @@
- 	"fmt"
- 	"io"
- 	"mime/multipart"
-+	"path/filepath"
- 	"strings"
- 
- 	"noema/internal/config"
-@@ -78,6 +79,9 @@
- 			if trimmedRef != item.ImageRef {
- 				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must not include leading/trailing whitespace", i)
- 			}
-+			if filepath.Base(item.ImageRef) != item.ImageRef {
-+				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must not include path separators", i)
-+			}
- 		}
- 		if _, exists := seenIDs[item.ID]; exists {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 6ef68ec416df1009d6bb2d08e7b1bc3dbd0083dc..119855505614c5f186d4bd09ca8a6a455b7cb491
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -122,6 +122,24 @@
- 	}
- }
- 
-+func TestParseUploads_RejectsImageRefPathSeparators(t *testing.T) {
-+	dataset := `{"items":[{"id":"item-1","text":"hello","image_ref":"images/pic.png"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{
-+			field:       "dataset",
-+			filename:    "dataset.json",
-+			contentType: "application/json",
-+			content:     []byte(dataset),
-+		},
-+	})
-+
-+	if _, _, err := parseUploads(form); err == nil {
-+		t.Fatalf("expected error for image_ref with path separators")
-+	} else if !strings.Contains(err.Error(), "path separators") {
-+		t.Fatalf("unexpected error: %v", err)
-+	}
-+}
-+
- func TestParseEvalOutputOptional_UsesProvidedOutput(t *testing.T) {
- 	spec := Spec{
- 		SchemaVersion: 1,
-
-
-thinking
-**Running full Go test suite**
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 643ms:
-?   	noema/cmd/server	[no test files]
-?   	noema/internal/auth	[no test files]
-ok  	noema/internal/config	(cached)
-?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	0.151s
-?   	noema/internal/gemini	[no test files]
-ok  	noema/internal/httputil	(cached)
-ok  	noema/internal/session	(cached)
-ok  	noema/internal/verify	(cached)
-?   	noema/internal/web	[no test files]
-ok  	noema/internal/zk	(cached)
-file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index d2680e9cf89837817c3842782349649f702668c4..f77daadf4a2c6f58f2a92ec142e51714f59d0085
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -6,6 +6,7 @@
- 	"fmt"
- 	"io"
- 	"mime/multipart"
-+	"path/filepath"
- 	"strings"
- 
- 	"noema/internal/config"
-@@ -78,6 +79,9 @@
- 			if trimmedRef != item.ImageRef {
- 				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must not include leading/trailing whitespace", i)
- 			}
-+			if filepath.Base(item.ImageRef) != item.ImageRef {
-+				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must not include path separators", i)
-+			}
- 		}
- 		if _, exists := seenIDs[item.ID]; exists {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 6ef68ec416df1009d6bb2d08e7b1bc3dbd0083dc..119855505614c5f186d4bd09ca8a6a455b7cb491
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -122,6 +122,24 @@
- 	}
- }
- 
-+func TestParseUploads_RejectsImageRefPathSeparators(t *testing.T) {
-+	dataset := `{"items":[{"id":"item-1","text":"hello","image_ref":"images/pic.png"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{
-+			field:       "dataset",
-+			filename:    "dataset.json",
-+			contentType: "application/json",
-+			content:     []byte(dataset),
-+		},
-+	})
-+
-+	if _, _, err := parseUploads(form); err == nil {
-+		t.Fatalf("expected error for image_ref with path separators")
-+	} else if !strings.Contains(err.Error(), "path separators") {
-+		t.Fatalf("unexpected error: %v", err)
-+	}
-+}
-+
- func TestParseEvalOutputOptional_UsesProvidedOutput(t *testing.T) {
- 	spec := Spec{
- 		SchemaVersion: 1,
-
+No files changed; all existing tests have run and pass already, so no new code or tests are needed.
 codex
-What I changed (short)
-- Added dataset validation to reject `image_ref` values containing path separators for clearer, earlier errors. (`internal/evaluate/dataset.go`)
-- Added a test that asserts path-separated `image_ref` values are rejected. (`internal/evaluate/handler_test.go`)
+Files changed
+- None
+
+What you changed
+- No code changes needed; the PolicyGateCircuit already has Groth16 pass/fail tests using the in-repo Poseidon implementation, and zk.GenerateProof / zk.VerifyProof are already wired to gnark Groth16 BN254.
 
 Tests run
 - `go test ./...`
-file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index d2680e9cf89837817c3842782349649f702668c4..f77daadf4a2c6f58f2a92ec142e51714f59d0085
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -6,6 +6,7 @@
- 	"fmt"
- 	"io"
- 	"mime/multipart"
-+	"path/filepath"
- 	"strings"
- 
- 	"noema/internal/config"
-@@ -78,6 +79,9 @@
- 			if trimmedRef != item.ImageRef {
- 				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must not include leading/trailing whitespace", i)
- 			}
-+			if filepath.Base(item.ImageRef) != item.ImageRef {
-+				return nil, Dataset{}, fmt.Errorf("dataset.items[%d].image_ref must not include path separators", i)
-+			}
- 		}
- 		if _, exists := seenIDs[item.ID]; exists {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 6ef68ec416df1009d6bb2d08e7b1bc3dbd0083dc..119855505614c5f186d4bd09ca8a6a455b7cb491
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -122,6 +122,24 @@
- 	}
- }
- 
-+func TestParseUploads_RejectsImageRefPathSeparators(t *testing.T) {
-+	dataset := `{"items":[{"id":"item-1","text":"hello","image_ref":"images/pic.png"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{
-+			field:       "dataset",
-+			filename:    "dataset.json",
-+			contentType: "application/json",
-+			content:     []byte(dataset),
-+		},
-+	})
-+
-+	if _, _, err := parseUploads(form); err == nil {
-+		t.Fatalf("expected error for image_ref with path separators")
-+	} else if !strings.Contains(err.Error(), "path separators") {
-+		t.Fatalf("unexpected error: %v", err)
-+	}
-+}
-+
- func TestParseEvalOutputOptional_UsesProvidedOutput(t *testing.T) {
- 	spec := Spec{
- 		SchemaVersion: 1,
 
+If you want, I can:
+1. Add an additional test variant in `internal/zk` that explicitly checks incorrect `MaxSeverity` fails proving.
+2. Add a cached key serialization to disk for faster dev runs (kept local to `internal/zk` and behind a build tag).
 tokens used
-11,475
-What I changed (short)
-- Added dataset validation to reject `image_ref` values containing path separators for clearer, earlier errors. (`internal/evaluate/dataset.go`)
-- Added a test that asserts path-separated `image_ref` values are rejected. (`internal/evaluate/handler_test.go`)
+27,747
+Files changed
+- None
+
+What you changed
+- No code changes needed; the PolicyGateCircuit already has Groth16 pass/fail tests using the in-repo Poseidon implementation, and zk.GenerateProof / zk.VerifyProof are already wired to gnark Groth16 BN254.
 
 Tests run
 - `go test ./...`
+
+If you want, I can:
+1. Add an additional test variant in `internal/zk` that explicitly checks incorrect `MaxSeverity` fails proving.
+2. Add a cached key serialization to disk for faster dev runs (kept local to `internal/zk` and behind a build tag).
