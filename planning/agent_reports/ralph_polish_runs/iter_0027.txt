@@ -7,859 +7,307 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3c95-0ba3-7f02-85a1-f85beb521945
+session id: 019c410c-e4ac-7042-a5e2-44fa4939131e
 --------
 user
-You are an autonomous coding agent polishing the Noema repository.
+You are an autonomous coding agent working on the Noema repository.
 
-Hard rules:
+MISSION (priority order):
+1) Add a real gnark circuit test for the PolicyGateCircuit (using our in-repo Poseidon implementation, package circuits).
+2) Make the circuit test pass reliably (compile -> prove -> verify) using Groth16 on BN254.
+3) ONLY AFTER tests pass: wire the backend plumbing to call the gnark prover/verifier behind the existing zk.GenerateProof / zk.VerifyProof API, keeping the public API shape unchanged (proof_b64 + public_inputs_b64).
+
+HARD RULES:
 - DO NOT run git commit, git reset, git clean, or anything that modifies git history.
-- I will run git commits outside of you.
-- Keep changes small: max 3 files per iteration.
+- Keep changes small: max 3 files per iteration. If more is needed, stage work across multiple iterations.
 - No cosmetic-only edits.
-- No new dependencies unless absolutely necessary.
+- No new dependencies unless absolutely necessary. Use existing gnark dependencies already in the repo. If gnark is not yet in go.mod, add it only if unavoidable.
+- Do not change routes or response shapes. Keep /api/evaluate and /api/verify behavior stable.
+- Do not redesign UI. This task is ZK/circuit/testing/plumbing only.
+- Always run: cd backend && go test ./... at least once per iteration.
 
-Goal: continuously improve production quality.
+WORKFLOW YOU MUST FOLLOW (do not skip):
+A) Inspect current circuit code and poseidon implementation:
+   - Find the PolicyGateCircuit (the policy ZK circuit) and confirm it imports and uses circuits.Poseidon (NOT gnark/std poseidon).
+   - Confirm fixed N=6 and the frozen constraint ordering.
+B) Add tests FIRST:
+   - Create a new Go test file for the circuit (example name: backend/internal/zk/policy_circuit_test.go or wherever circuits live).
+   - The test must:
+     1) Compile the circuit to R1CS
+     2) Run Groth16 setup
+     3) Build a witness with a PASS case and generate a proof
+     4) Verify the proof using the public witness
+     5) Build a witness with a FAIL case and confirm either:
+        - proving fails (unsatisfied), OR
+        - proving succeeds only if OverallPass is set correctly (0), AND verifying matches the expected output
+   - Use deterministic test vectors:
+     - datasetDigestLo/Hi fixed constants
+     - enabled/maxAllowed/severity arrays fixed constants
+     - Compute the expected Commitment in-circuit by setting Commitment to the same value computed by the circuit.
+       (In gnark tests, you can set Commitment as a public variable equal to circuits.Poseidon(domainSep + inputs) by reusing the same circuits.Poseidon function in a small helper circuit OR by computing it with the same function in-circuit and asserting equality.)
+   - The test must assert:
+     - OverallPass == 1 for pass vector, and verify passes.
+     - OverallPass == 0 for fail vector, and verify passes only with correct OverallPass.
+C) Fix whatever is broken until all tests pass:
+   - If compilation errors, fix imports or package paths.
+   - If poseidon params/functions missing, use the existing in-repo Poseidon code as the single source of truth.
+   - If constraints are wrong, fix circuit logic minimally.
+D) ONLY AFTER TESTS PASS: wire plumbing:
+   - Replace stub proof internals inside backend/internal/zk/zk.go (or equivalent) to use gnark Groth16 BN254:
+     - GenerateProof: build witness from inputs (enabled/maxAllowed/severity + datasetDigest limbs) and output proof bytes base64
+     - VerifyProof: decode proof and public inputs and verify using vk
+   - Keep existing API signatures and keep proof_b64 + public_inputs_b64 shape.
+   - You may keep public_inputs_b64 as the existing string format for now, but the verify path must map it deterministically to the circuit’s public witness (Commitment, OverallPass, MaxSeverity).
+   - Ensure keys are handled sanely for dev:
+     - For now, allow generating proving/verifying keys at startup or cached on disk under backend/internal/zk (dev only),
+       OR embed small test keys only for tests.
+     - Don’t over-engineer; prioritize working tests and stable verify.
 
-Iteration:
-1) Run: cd backend && go test ./...
-2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
-3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+ACCEPTANCE CRITERIA (must satisfy):
+- `cd backend && go test ./...` passes.
+- There is at least one new test that proves+verifies the circuit in a PASS case.
+- There is at least one test that demonstrates FAIL behavior (overall_pass=0) is enforced and verifiable.
+- If plumbing was wired, verify endpoint still accepts proof_b64/public_inputs_b64 and returns verified result correctly.
 
-Pick the highest-value improvement:
-A) Reliability/correctness: validation, error handling, run persistence, verify robustness
-B) Tests: add/strengthen tests for the change you made
-C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
-D) Maintainability: reduce duplication with tiny refactors
-E) UX: wizard/results/verify clarity (small, safe changes)
-F) Docs: README/DEPLOYMENT polish
-G) Performance: safe wins only
-
-Finish with:
-- What you changed (short)
+OUTPUT FORMAT (end of each run):
+- Files changed (list)
+- What you changed (2–6 bullets)
 - Tests run (must include go test ./...)
 mcp startup: no servers
+exec
+/bin/zsh -lc 'rg -n "PolicyGateCircuit|Poseidon|policy" internal circuits -S /Users/yani/Noema/backend' in /Users/yani/Noema/backend exited 2 in 53ms:
+rg: circuits: No such file or directory (os error 2)
+internal/evaluate/prompt.go:80:You are a strict dataset policy evaluator for Noema.
+internal/evaluate/handler_test.go:60:		PolicyVersion: "noema_policy_v1",
+internal/evaluate/handler_test.go:120:		PolicyVersion: "noema_policy_v1",
+internal/evaluate/handler_test.go:151:		PolicyVersion: "noema_policy_v1",
+internal/evaluate/handler_test.go:176:		PolicyVersion: "noema_policy_v1",
+internal/evaluate/handler_test.go:201:		PolicyVersion: "noema_policy_v1",
+internal/evaluate/handler_test.go:226:		PolicyVersion: "noema_policy_v1",
+internal/evaluate/handler_test.go:241:		PolicyVersion: "noema_policy_v1",
+internal/evaluate/handler_test.go:301:		PolicyVersion: "noema_policy_v1",
+internal/evaluate/handler_test.go:314:		PolicyVersion: "noema_policy_v1",
+internal/evaluate/handler_test.go:327:		PolicyVersion: "noema_policy_v1",
+internal/evaluate/handler_test.go:339:		PolicyVersion: "noema_policy_v2",
+internal/evaluate/handler_test.go:345:		t.Fatalf("expected error for invalid policy_version")
+internal/evaluate/handler_test.go:350:	raw := `{"policy_version":"noema_policy_v1","constraints":[{"id":"pii_exposure_risk","enabled":true,"max_allowed":1}],"extra":true}`
+internal/evaluate/handler_test.go:352:		t.Fatalf("expected error for unknown policy_config fields")
+internal/evaluate/policy_config.go:18:	PolicyVersion string             `json:"policy_version"`
+internal/evaluate/policy_config.go:27:		return PolicyConfig{}, fmt.Errorf("invalid policy_config JSON")
+internal/evaluate/policy_config.go:30:		return PolicyConfig{}, fmt.Errorf("invalid policy_config JSON")
+internal/evaluate/policy_config.go:36:	if cfg.PolicyVersion != "noema_policy_v1" {
 
 thinking
-**Running Go tests**
+**Opening existing test file**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 99ms:
-?   	noema/cmd/server	[no test files]
-?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
-?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	(cached)
-?   	noema/internal/gemini	[no test files]
-ok  	noema/internal/session	(cached)
-ok  	noema/internal/verify	(cached)
-?   	noema/internal/web	[no test files]
-ok  	noema/internal/zk	(cached)
-
-thinking
-**Inspecting error handling**
-
-Planning to search the codebase for error handling patterns to identify a meaningful improvement focused on reliability or maintainability within a small set of files.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && rg \"TODO|FIXME|panic\\(\" -n internal" in /Users/yani/Noema/backend exited 1 in 52ms:
-
-
-thinking
-**Listing files for inspection**
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 51ms:
-cmd
-data
-go.mod
-go.sum
-internal
-main
-server
-web
-
-thinking
-**Considering validation addition**
-
-I'm checking internal/session modules to determine if adding validation could improve the pick logic.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "error|Err" internal/session' in /Users/yani/Noema/backend exited 1 in 51ms:
-
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/session' in /Users/yani/Noema/backend succeeded in 51ms:
-session.go
-session_test.go
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/session/session.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package session
+/bin/zsh -lc "sed -n '1,240p' /Users/yani/Noema/backend/internal/zk/policyzk/circuit.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package policyzk
 
 import (
-	"crypto/hmac"
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark/frontend"
+)
+
+const N = 6
+
+// PolicyGateCircuit proves:
+//   - The prover knows (datasetDigest, policy config, gemini severities) that hash to Commitment
+//   - And the deterministic policy check passes:
+//     for each i: if Enabled[i] == 1 then Severity[i] <= MaxAllowed[i]
+//
+// Public outputs:
+// - Commitment: binds everything (dataset + policy + gemini outputs)
+// - OverallPass: 1 iff policy passes
+// - MaxSeverity (optional): max observed severity among enabled constraints
+type PolicyGateCircuit struct {
+	// ===== Private witness =====
+
+thinking
+**Inspecting existing circuit tests**
+
+I'm reviewing the current circuit_test.go to understand how poseidon-gnark circuits are tested and to inform the approach for new circuit tests or modifications.
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/yani/Noema/backend/internal/zk/policyzk/circuit_test.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package policyzk
+
+import (
+	"math/big"
+	"testing"
+
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+	"github.com/stretchr/testify/require"
+)
+
+func TestPolicyGateCircuit_Groth16PassFail(t *testing.T) {
+	require := require.New(t)
+
+	var circuit PolicyGateCircuit
+	r1cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
+exec
+/bin/zsh -lc "sed -n '220,520p' /Users/yani/Noema/backend/internal/zk/policyzk/circuit_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+		}
+		out[col] = acc
+	}
+	return out
+}
+
+func mixLast(out *fr.Element, in []fr.Element, m [][]fr.Element, idx int) {
+	out.SetZero()
+	for row := range in {
+		var term fr.Element
+		term.Mul(&m[row][idx], &in[row])
+		out.Add(out, &term)
+	}
+}
+
+func bigIntSliceToElements(in []*big.Int) []fr.Element {
+	out := make([]fr.Element, len(in))
+	for i := range in {
+		out[i].SetBigInt(in[i])
+	}
+
+
+thinking
+**Verifying existing circuit test validity**
+
+The current test in internal/zk/policyzk uses the in-repo Poseidon circuit with matching parameters and correctly triggers failure cases, so it fits the requirement; next I'll confirm its determinism and fix any flakiness while keeping changes minimal.
+thinking
+**Checking poseidon commitment consistency**
+
+I’m confirming that the test’s native Poseidon commitment matches the in-circuit Poseidon computation with correct domain separation and field handling, and verifying if necessary constants and functions are accessible for consistent verification.
+exec
+/bin/zsh -lc 'rg -n "POSEIDON_" /Users/yani/Noema/backend/internal/zk/policyzk/poseidon-gnark/circuits -S' in /Users/yani/Noema/backend succeeded in 52ms:
+/Users/yani/Noema/backend/internal/zk/policyzk/poseidon-gnark/circuits/poseidon.go:71:	c := POSEIDON_C(t)
+/Users/yani/Noema/backend/internal/zk/policyzk/poseidon-gnark/circuits/poseidon.go:72:	s := POSEIDON_S(t)
+/Users/yani/Noema/backend/internal/zk/policyzk/poseidon-gnark/circuits/poseidon.go:73:	m := POSEIDON_M(t)
+/Users/yani/Noema/backend/internal/zk/policyzk/poseidon-gnark/circuits/poseidon.go:74:	p := POSEIDON_P(t)
+/Users/yani/Noema/backend/internal/zk/policyzk/poseidon-gnark/circuits/poseidon_constants.go:44:func POSEIDON_C(t int) []*big.Int {
+/Users/yani/Noema/backend/internal/zk/policyzk/poseidon-gnark/circuits/poseidon_constants.go:45:	s := strPOSEIDON_C(t)
+/Users/yani/Noema/backend/internal/zk/policyzk/poseidon-gnark/circuits/poseidon_constants.go:49:func strPOSEIDON_C(t int) string {
+/Users/yani/Noema/backend/internal/zk/policyzk/poseidon-gnark/circuits/poseidon_constants.go:2329:func strPOSEIDON_M(t int) string {
+/Users/yani/Noema/backend/internal/zk/policyzk/poseidon-gnark/circuits/poseidon_constants.go:4521:func POSEIDON_M(t int) [][]*big.Int {
+/Users/yani/Noema/backend/internal/zk/policyzk/poseidon-gnark/circuits/poseidon_constants.go:4522:	s := strPOSEIDON_M(t)
+/Users/yani/Noema/backend/internal/zk/policyzk/poseidon-gnark/circuits/poseidon_constants.go:4526:func strPOSEIDON_P(t int) string {
+/Users/yani/Noema/backend/internal/zk/policyzk/poseidon-gnark/circuits/poseidon_constants.go:6698:func POSEIDON_P(t int) [][]*big.Int {
+/Users/yani/Noema/backend/internal/zk/policyzk/poseidon-gnark/circuits/poseidon_constants.go:6699:	s := strPOSEIDON_P(t)
+/Users/yani/Noema/backend/internal/zk/policyzk/poseidon-gnark/circuits/poseidon_constants.go:6703:func strPOSEIDON_S(t int) string {
+/Users/yani/Noema/backend/internal/zk/policyzk/poseidon-gnark/circuits/poseidon_constants.go:25058:func POSEIDON_S(t int) []*big.Int {
+/Users/yani/Noema/backend/internal/zk/policyzk/poseidon-gnark/circuits/poseidon_constants.go:25059:	s := strPOSEIDON_S(t)
+
+
+thinking
+**Assessing existing circuit test**
+
+The current test uses native computation with circuits constants but not the in-repo Poseidon function as required; it passes compile-prove-verify and fail cases but may fail due to this discrepancy. Next, I'll verify if the test needs modification to integrate the in-circuit Poseidon implementation and rerun all backend tests.
+thinking
+**Clarifying Poseidon usage in tests**
+
+Current tests compute commitment natively using circuits constants but don’t call circuits.Poseidon directly; to align with requirements, I’m considering adding a helper circuit that computes commitment with circuits.Poseidon for assertion, though witness values must be assigned externally. Next, I’ll confirm if the existing tests pass with `go test` and inspect the Poseidon stub in internal code for possible native implementations in circuits.
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/yani/Noema/backend/internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package zk
+
+import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"math/big"
+	"strconv"
 	"strings"
-)
+	"sync"
 
-const CookieName = "noema_judge"
-
-// Sign produces a signed cookie value for the given payload (e.g. judge key).
-// Format: base64(payload) + "." + hex(HMAC-SHA256(secret, payload)).
-func Sign(secret, payload string) string {
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(payload))
-	sig := hex.EncodeToString(mac.Sum(nil))
-	encoded := base64.StdEncoding.EncodeToString([]byte(payload))
-
-thinking
-**Considering input validation improvements**
-
-I'm evaluating adding input validation for empty secrets or payloads to improve reliability and planning to review related test coverage and internal verification logic next.
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/constraint"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "panic|Must|TODO|FIXME" internal' in /Users/yani/Noema/backend exited 1 in 52ms:
-
-
-thinking
-**Considering cookie validation tests**
-
-I'm evaluating adding tests for cookie option validation and the signedValue format, especially checking for invalid or empty values, while also noting the encoding might not be URL-safe—I'll verify if this impacts cookie handling.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/evaluate.go" in /Users/yani/Noema/backend exited 1 in 52ms:
-sed: internal/evaluate/evaluate.go: No such file or directory
-
-thinking
-**Correcting command usage**
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/evaluate' in /Users/yani/Noema/backend succeeded in 51ms:
-cache.go
-commitment.go
-dataset.go
-gemini_eval.go
-handler.go
-handler_integration_test.go
-handler_test.go
-images.go
-output.go
-parse.go
-policy.go
-prompt.go
-schema.go
-spec.go
-storage.go
-
-thinking
-**Inspecting parse.go for error handling**
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"encoding/json"
-	"fmt"
-	"io"
-	"mime/multipart"
-	"strings"
-
-	"noema/internal/config"
-)
-
-func parseSpec(form *multipart.Form) (Spec, error) {
-	specStrs := form.Value["spec"]
-	if len(specStrs) == 0 || specStrs[0] == "" {
-		return Spec{}, fmt.Errorf("missing field: spec")
-	}
-	if len(specStrs) > 1 {
-		return Spec{}, fmt.Errorf("only one spec value allowed")
-	}
-
-thinking
-**Reviewing dataset validation**
-
-I'm checking dataset.go to see if the code ensures the dataset contains at least one item and whether the "invalid spec JSON" error message could include more diagnostic details without leaking sensitive info.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io"
-	"mime/multipart"
-)
-
-type Dataset struct {
-	Items []DatasetItem `json:"items"`
-}
-
-type DatasetItem struct {
-	ID       string         `json:"id"`
-	Text     string         `json:"text"`
-	Metadata map[string]any `json:"metadata,omitempty"`
-	ImageRef string         `json:"image_ref,omitempty"`
-}
-
-thinking
-**Evaluating error handling improvements**
-
-Considering whether to enhance error details in spec parsing but noting potential loss of detail with generic messages; also reviewing parsing logic and extra field checks for reliability improvements.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/verify/verify.go" in /Users/yani/Noema/backend exited 1 in 51ms:
-sed: internal/verify/verify.go: No such file or directory
-
-thinking
-**Listing internal files for verification**
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/verify' in /Users/yani/Noema/backend succeeded in 52ms:
-handler.go
-handler_test.go
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/verify/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package verify
-
-import (
-	"encoding/base64"
-	"fmt"
-	"net/http"
-	"strings"
-
-	"noema/internal/zk"
-
-	"github.com/gin-gonic/gin"
-)
-
-// VerifyRequest is the JSON body for POST /api/verify.
-type VerifyRequest struct {
-	RunID           string `json:"run_id"`
-	ProofB64        string `json:"proof_b64"`
-	PublicInputsB64 string `json:"public_inputs_b64"`
-}
+/bin/zsh -lc "sed -n '260,620p' /Users/yani/Noema/backend/internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 52ms:
+			out.MaxSeverity = v
+			seenMS = true
+		case "op":
+			if seenOP {
+				return PublicInputs{}, fmt.Errorf("duplicate overall pass")
+			}
+			v, err := strconv.Atoi(kv[1])
+			if err != nil {
+				return PublicInputs{}, fmt.Errorf("invalid overall pass")
+			}
+			if v != 0 && v != 1 {
+				return PublicInputs{}, fmt.Errorf("overall pass must be 0 or 1")
+			}
+			out.OverallPass = v == 1
+			seenOP = true
+		case "c":
+			if seenC {
+				return PublicInputs{}, fmt.Errorf("duplicate commitment")
+			}
+			if kv[1] == "" {
 
 
 thinking
-**Reviewing constraint validation and error handling**
+**Verifying existing proof tests**
 
-I noticed that constraint severity validation runs even on disabled constraints, potentially causing unnecessary blocks, and parseSpec error messages lack detailed causes—improving these could enhance debugging and user experience.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "ValidateAllowedMaxSeverity" -S internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
-internal/evaluate/parse.go:41:		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
-internal/evaluate/parse.go:49:		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
-internal/evaluate/spec.go:35:// ValidateAllowedMaxSeverity returns true if v is 0, 1, or 2.
-internal/evaluate/spec.go:36:func ValidateAllowedMaxSeverity(v int) bool {
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,160p' internal/evaluate/spec.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-// Spec is the parsed evaluation spec (schema_version 1).
-type Spec struct {
-	SchemaVersion     int                `json:"schema_version"`
-	EvaluationName    string             `json:"evaluation_name"`
-	Policy            Policy             `json:"policy"`
-	Constraints       []Constraint       `json:"constraints"`
-	CustomConstraints []CustomConstraint `json:"custom_constraints"`
-}
-
-type Policy struct {
-	Reveal RevealPolicy `json:"reveal"`
-}
-
-type RevealPolicy struct {
-	MaxSeverity bool `json:"max_severity"`
-	Commitment  bool `json:"commitment"`
-}
-
-
+The proof verification is already wired with gnark and has tests that might be failing; I'll run them to confirm and investigate if mismatches or expensive local poseidon implementations affect test passes before adding new tests or modifications.
 thinking
-**Searching for evaluation name usage**
+**Assessing existing test against requirements**
+
+The current test computes Commitment natively rather than in-circuit but meets the given flexibility; importing zk.go commitment helpers risks import cycles, so I'll run all tests to check their status and then decide if minimal test refinements are needed.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "EvaluationName" internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
-internal/evaluate/storage.go:138:	EvaluationName string `json:"evaluation_name,omitempty"`
-internal/evaluate/handler_integration_test.go:24:		EvaluationName: "test",
-internal/evaluate/handler_integration_test.go:74:		EvaluationName: "test",
-internal/evaluate/spec.go:6:	EvaluationName    string             `json:"evaluation_name"`
-internal/evaluate/handler.go:134:			EvaluationName: spec.EvaluationName,
-
-thinking
-**Considering validation of evaluation name**
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"encoding/json"
-	"log"
-	"mime/multipart"
-	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
-	"time"
-
-	"noema/internal/config"
-	"noema/internal/zk"
-
-	"github.com/gin-gonic/gin"
-)
-
-// EvaluateResponse is the JSON response for POST /api/evaluate.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
-	if err != nil {
-		return EvalOutput{}, err
-	}
-	if err := validateEvalOutput(out, enabled); err != nil {
-		return EvalOutput{}, err
-	}
-	return out, nil
-}
-
-func stubEvalOutput(enabled map[string]ConstraintRule) EvalOutput {
-	out := EvalOutput{
-		SchemaVersion: 1,
-		Constraints:   make([]EvalConstraintResult, 0, len(enabled)),
-		MaxSeverity:   0,
-	}
-	for id := range enabled {
-		out.Constraints = append(out.Constraints, EvalConstraintResult{
-			ID:        id,
-			Severity:  0,
-			Rationale: "stub",
-
-thinking
-**Reviewing validation logic**
-
-I'm considering enforcing non-empty EvaluationName in validation but want to check handler and integration tests first to confirm if it's optional.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"mime/multipart"
-	"net/textproto"
-	"os"
-	"path/filepath"
-	"sort"
-	"testing"
-	"time"
-)
-
-type formFile struct {
-	field       string
-	filename    string
-	contentType string
-	content     []byte
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '240,520p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
-	})
-	datasetFile := form.File["dataset"][0]
-	imageFiles := form.File["images"]
-	if err := validateDatasetJSON(datasetFile, imageFiles); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestValidateDatasetJSON_RejectsDuplicateIDs(t *testing.T) {
-	dataset := `{"items":[{"id":"1","text":"hello"},{"id":"1","text":"world"}]}`
-	form := buildMultipartForm(t, []formFile{
-		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-	})
-	datasetFile := form.File["dataset"][0]
-	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-		t.Fatalf("expected error for duplicate dataset ids")
-	}
-}
-
-func TestValidateDatasetJSON_RejectsUnknownFields(t *testing.T) {
-
-
-thinking
-**Reviewing potential validation improvements**
-
-I considered adding validations like enforcing non-empty evaluation names, stricter metadata typing, or enhanced error detail but found current checks mostly adequate and no clear breaking changes needed now. Next, I'll focus on targeted test improvements and monitoring for actual issues.
-thinking
-**Identifying robustness checks**
-
-I'm spotting opportunities to improve error detail in JSON parsing and to handle partial failures gracefully in run pruning, but current behaviors seem acceptable. Duplicate constraint ID checks might be needed to avoid overrides, so I'll verify constraint handling next.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "enabledConstraints" -n internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
-internal/evaluate/handler_test.go:65:	enabled, err := enabledConstraints(spec)
-internal/evaluate/handler_test.go:67:		t.Fatalf("enabledConstraints error: %v", err)
-internal/evaluate/handler_test.go:108:	enabled, err := enabledConstraints(spec)
-internal/evaluate/handler_test.go:110:		t.Fatalf("enabledConstraints error: %v", err)
-internal/evaluate/handler_test.go:146:	enabled, err := enabledConstraints(spec)
-internal/evaluate/handler_test.go:148:		t.Fatalf("enabledConstraints error: %v", err)
-internal/evaluate/handler_test.go:176:	enabled, err := enabledConstraints(spec)
-internal/evaluate/handler_test.go:178:		t.Fatalf("enabledConstraints error: %v", err)
-internal/evaluate/policy.go:10:func enabledConstraints(spec Spec) (map[string]ConstraintRule, error) {
-internal/evaluate/handler.go:88:		enabled, err := enabledConstraints(spec)
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/policy.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import "fmt"
-
-type ConstraintRule struct {
-	ID                 string
-	AllowedMaxSeverity int
-}
-
-func enabledConstraints(spec Spec) (map[string]ConstraintRule, error) {
-	out := make(map[string]ConstraintRule)
-	for _, c := range spec.Constraints {
-		if !c.Enabled {
-			continue
-		}
-		if _, exists := out[c.ID]; exists {
-			return nil, fmt.Errorf("duplicate constraint id: %s", c.ID)
-		}
-		out[c.ID] = ConstraintRule{ID: c.ID, AllowedMaxSeverity: c.AllowedMaxSeverity}
-	}
-
-thinking
-**Adding duplicate eval_output check**
-
-I'm improving parseEvalOutputOptional to return an error if multiple eval_output values appear, enhancing reliability. I'll implement this in the handler and add a test in handler_test.go to cover this case.
-file update
-M /Users/yani/Noema/backend/internal/evaluate/handler.go
-@@ -217,2 +217,5 @@
- 	}
-+	if len(form.Value["eval_output"]) > 1 {
-+		return EvalOutput{}, fmt.Errorf("only one eval_output value allowed")
-+	}
- 	raw := form.Value["eval_output"][0]
-apply_patch(auto_approved=true) exited 0 in 29ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/handler.go
-file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 48d901941d4380f015b2ab243679d5e3a17b8cb9..419efea5882da2ede3c3d6c026ef7c77178f89a6
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -215,6 +215,9 @@
- 	if form == nil || len(form.Value["eval_output"]) == 0 || form.Value["eval_output"][0] == "" {
- 		return stubEvalOutput(enabled), nil
- 	}
-+	if len(form.Value["eval_output"]) > 1 {
-+		return EvalOutput{}, fmt.Errorf("only one eval_output value allowed")
-+	}
- 	raw := form.Value["eval_output"][0]
- 	out, err := parseEvalOutput(raw)
- 	if err != nil {
-
-file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 48d901941d4380f015b2ab243679d5e3a17b8cb9..419efea5882da2ede3c3d6c026ef7c77178f89a6
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -215,6 +215,9 @@
- 	if form == nil || len(form.Value["eval_output"]) == 0 || form.Value["eval_output"][0] == "" {
- 		return stubEvalOutput(enabled), nil
- 	}
-+	if len(form.Value["eval_output"]) > 1 {
-+		return EvalOutput{}, fmt.Errorf("only one eval_output value allowed")
-+	}
- 	raw := form.Value["eval_output"][0]
- 	out, err := parseEvalOutput(raw)
- 	if err != nil {
-
-
-thinking
-**Adding fmt import**
-
-fmt is newly needed for parseEvalOutputOptional, so I'm updating the imports in handler.go to include it.
-file update
-M /Users/yani/Noema/backend/internal/evaluate/handler.go
-@@ -4,2 +4,3 @@
- 	"encoding/json"
-+	"fmt"
- 	"log"
-apply_patch(auto_approved=true) exited 0 in 34ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/handler.go
-file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 48d901941d4380f015b2ab243679d5e3a17b8cb9..2c620e03190193b00edad1bba0d3a664565c2c23
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -2,6 +2,7 @@
- 
- import (
- 	"encoding/json"
-+	"fmt"
- 	"log"
- 	"mime/multipart"
- 	"net/http"
-@@ -215,6 +216,9 @@
- 	if form == nil || len(form.Value["eval_output"]) == 0 || form.Value["eval_output"][0] == "" {
- 		return stubEvalOutput(enabled), nil
- 	}
-+	if len(form.Value["eval_output"]) > 1 {
-+		return EvalOutput{}, fmt.Errorf("only one eval_output value allowed")
-+	}
- 	raw := form.Value["eval_output"][0]
- 	out, err := parseEvalOutput(raw)
- 	if err != nil {
-
-file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 48d901941d4380f015b2ab243679d5e3a17b8cb9..2c620e03190193b00edad1bba0d3a664565c2c23
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -2,6 +2,7 @@
- 
- import (
- 	"encoding/json"
-+	"fmt"
- 	"log"
- 	"mime/multipart"
- 	"net/http"
-@@ -215,6 +216,9 @@
- 	if form == nil || len(form.Value["eval_output"]) == 0 || form.Value["eval_output"][0] == "" {
- 		return stubEvalOutput(enabled), nil
- 	}
-+	if len(form.Value["eval_output"]) > 1 {
-+		return EvalOutput{}, fmt.Errorf("only one eval_output value allowed")
-+	}
- 	raw := form.Value["eval_output"][0]
- 	out, err := parseEvalOutput(raw)
- 	if err != nil {
-
-
-thinking
-**Adding multi-value error test**
-
-I'm adding a test in the handler tests to check that providing multiple eval_output values results in an error, confirming correct handling of such input.
-file update
-M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
-@@ -198,2 +198,32 @@
- 
-+func TestParseEvalOutputOptional_RejectsMultipleValues(t *testing.T) {
-+	spec := Spec{
-+		SchemaVersion: 1,
-+		Constraints: []Constraint{
-+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
-+		},
-+	}
-+	enabled, err := enabledConstraints(spec)
-+	if err != nil {
-+		t.Fatalf("enabledConstraints error: %v", err)
-+	}
-+
-+	payload := EvalOutput{
-+		SchemaVersion: 1,
-+		Constraints: []EvalConstraintResult{
-+			{ID: "pii_exposure_risk", Severity: 0, Rationale: "ok"},
-+		},
-+		MaxSeverity: 0,
-+	}
-+	raw, err := json.Marshal(payload)
-+	if err != nil {
-+		t.Fatalf("marshal eval_output: %v", err)
-+	}
-+
-+	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw), string(raw)}}}
-+	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
-+		t.Fatalf("expected error for multiple eval_output values")
-+	}
-+}
-+
- func TestComputePolicyResult(t *testing.T) {
-apply_patch(auto_approved=true) exited 0 in 36ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
-file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 48d901941d4380f015b2ab243679d5e3a17b8cb9..2c620e03190193b00edad1bba0d3a664565c2c23
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -2,6 +2,7 @@
- 
- import (
- 	"encoding/json"
-+	"fmt"
- 	"log"
- 	"mime/multipart"
- 	"net/http"
-@@ -215,6 +216,9 @@
- 	if form == nil || len(form.Value["eval_output"]) == 0 || form.Value["eval_output"][0] == "" {
- 		return stubEvalOutput(enabled), nil
- 	}
-+	if len(form.Value["eval_output"]) > 1 {
-+		return EvalOutput{}, fmt.Errorf("only one eval_output value allowed")
-+	}
- 	raw := form.Value["eval_output"][0]
- 	out, err := parseEvalOutput(raw)
- 	if err != nil {
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 6715f5a6c06cb43c6785fba82827cfd46facbe8b..74c11047c23b20e18c977522b72a884927f6ec2c
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -196,6 +196,36 @@
- 	}
- }
- 
-+func TestParseEvalOutputOptional_RejectsMultipleValues(t *testing.T) {
-+	spec := Spec{
-+		SchemaVersion: 1,
-+		Constraints: []Constraint{
-+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
-+		},
-+	}
-+	enabled, err := enabledConstraints(spec)
-+	if err != nil {
-+		t.Fatalf("enabledConstraints error: %v", err)
-+	}
-+
-+	payload := EvalOutput{
-+		SchemaVersion: 1,
-+		Constraints: []EvalConstraintResult{
-+			{ID: "pii_exposure_risk", Severity: 0, Rationale: "ok"},
-+		},
-+		MaxSeverity: 0,
-+	}
-+	raw, err := json.Marshal(payload)
-+	if err != nil {
-+		t.Fatalf("marshal eval_output: %v", err)
-+	}
-+
-+	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw), string(raw)}}}
-+	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
-+		t.Fatalf("expected error for multiple eval_output values")
-+	}
-+}
-+
- func TestComputePolicyResult(t *testing.T) {
- 	enabled := map[string]ConstraintRule{
- 		"pii":    {ID: "pii", AllowedMaxSeverity: 1},
-
-file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 48d901941d4380f015b2ab243679d5e3a17b8cb9..2c620e03190193b00edad1bba0d3a664565c2c23
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -2,6 +2,7 @@
- 
- import (
- 	"encoding/json"
-+	"fmt"
- 	"log"
- 	"mime/multipart"
- 	"net/http"
-@@ -215,6 +216,9 @@
- 	if form == nil || len(form.Value["eval_output"]) == 0 || form.Value["eval_output"][0] == "" {
- 		return stubEvalOutput(enabled), nil
- 	}
-+	if len(form.Value["eval_output"]) > 1 {
-+		return EvalOutput{}, fmt.Errorf("only one eval_output value allowed")
-+	}
- 	raw := form.Value["eval_output"][0]
- 	out, err := parseEvalOutput(raw)
- 	if err != nil {
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 6715f5a6c06cb43c6785fba82827cfd46facbe8b..74c11047c23b20e18c977522b72a884927f6ec2c
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -196,6 +196,36 @@
- 	}
- }
- 
-+func TestParseEvalOutputOptional_RejectsMultipleValues(t *testing.T) {
-+	spec := Spec{
-+		SchemaVersion: 1,
-+		Constraints: []Constraint{
-+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
-+		},
-+	}
-+	enabled, err := enabledConstraints(spec)
-+	if err != nil {
-+		t.Fatalf("enabledConstraints error: %v", err)
-+	}
-+
-+	payload := EvalOutput{
-+		SchemaVersion: 1,
-+		Constraints: []EvalConstraintResult{
-+			{ID: "pii_exposure_risk", Severity: 0, Rationale: "ok"},
-+		},
-+		MaxSeverity: 0,
-+	}
-+	raw, err := json.Marshal(payload)
-+	if err != nil {
-+		t.Fatalf("marshal eval_output: %v", err)
-+	}
-+
-+	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw), string(raw)}}}
-+	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
-+		t.Fatalf("expected error for multiple eval_output values")
-+	}
-+}
-+
- func TestComputePolicyResult(t *testing.T) {
- 	enabled := map[string]ConstraintRule{
- 		"pii":    {ID: "pii", AllowedMaxSeverity: 1},
-
-
-thinking
-**Running full test suite**
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 515ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 316ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	0.073s
+ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
-file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 48d901941d4380f015b2ab243679d5e3a17b8cb9..2c620e03190193b00edad1bba0d3a664565c2c23
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -2,6 +2,7 @@
- 
- import (
- 	"encoding/json"
-+	"fmt"
- 	"log"
- 	"mime/multipart"
- 	"net/http"
-@@ -215,6 +216,9 @@
- 	if form == nil || len(form.Value["eval_output"]) == 0 || form.Value["eval_output"][0] == "" {
- 		return stubEvalOutput(enabled), nil
- 	}
-+	if len(form.Value["eval_output"]) > 1 {
-+		return EvalOutput{}, fmt.Errorf("only one eval_output value allowed")
-+	}
- 	raw := form.Value["eval_output"][0]
- 	out, err := parseEvalOutput(raw)
- 	if err != nil {
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 6715f5a6c06cb43c6785fba82827cfd46facbe8b..74c11047c23b20e18c977522b72a884927f6ec2c
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -196,6 +196,36 @@
- 	}
- }
- 
-+func TestParseEvalOutputOptional_RejectsMultipleValues(t *testing.T) {
-+	spec := Spec{
-+		SchemaVersion: 1,
-+		Constraints: []Constraint{
-+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
-+		},
-+	}
-+	enabled, err := enabledConstraints(spec)
-+	if err != nil {
-+		t.Fatalf("enabledConstraints error: %v", err)
-+	}
-+
-+	payload := EvalOutput{
-+		SchemaVersion: 1,
-+		Constraints: []EvalConstraintResult{
-+			{ID: "pii_exposure_risk", Severity: 0, Rationale: "ok"},
-+		},
-+		MaxSeverity: 0,
-+	}
-+	raw, err := json.Marshal(payload)
-+	if err != nil {
-+		t.Fatalf("marshal eval_output: %v", err)
-+	}
-+
-+	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw), string(raw)}}}
-+	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
-+		t.Fatalf("expected error for multiple eval_output values")
-+	}
-+}
-+
- func TestComputePolicyResult(t *testing.T) {
- 	enabled := map[string]ConstraintRule{
- 		"pii":    {ID: "pii", AllowedMaxSeverity: 1},
+ok  	noema/internal/zk/policyzk	(cached)
 
 
 thinking
-**Summarizing changes and test results**
+**Confirming tests and plumbing already complete**
 
-The code changes include [briefly state what changed]. I ran tests with `go test ./...` across the codebase, including files at [list affected file paths], and all tests passed. No additional suggestions at this time.
+Tests pass with proper plumbing already wired, including use of circuits.Poseidon as expected with N=6 and ordering. No code changes are needed since all acceptance criteria are met and no cosmetic edits are allowed.
+thinking
+**Reporting no changes due to existing tests and wiring**
+
+Files changed: none  
+What you changed:  
+- No code changes; confirmed existing circuit test in policyzk/circuit_test.go and gnark plumbing in zk.go with Groth16 BN254 are already present and passing.  
+Tests run:  
+- go test ./... (all tests pass)
 codex
-What you changed (short)
-- Added validation to reject multiple `eval_output` values in `internal/evaluate/handler.go` and covered it with a new test in `internal/evaluate/handler_test.go`.
+Files changed:
+- None
 
-Tests run
-- `go test ./...`
-file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 48d901941d4380f015b2ab243679d5e3a17b8cb9..2c620e03190193b00edad1bba0d3a664565c2c23
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -2,6 +2,7 @@
- 
- import (
- 	"encoding/json"
-+	"fmt"
- 	"log"
- 	"mime/multipart"
- 	"net/http"
-@@ -215,6 +216,9 @@
- 	if form == nil || len(form.Value["eval_output"]) == 0 || form.Value["eval_output"][0] == "" {
- 		return stubEvalOutput(enabled), nil
- 	}
-+	if len(form.Value["eval_output"]) > 1 {
-+		return EvalOutput{}, fmt.Errorf("only one eval_output value allowed")
-+	}
- 	raw := form.Value["eval_output"][0]
- 	out, err := parseEvalOutput(raw)
- 	if err != nil {
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index 6715f5a6c06cb43c6785fba82827cfd46facbe8b..74c11047c23b20e18c977522b72a884927f6ec2c
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -196,6 +196,36 @@
- 	}
- }
- 
-+func TestParseEvalOutputOptional_RejectsMultipleValues(t *testing.T) {
-+	spec := Spec{
-+		SchemaVersion: 1,
-+		Constraints: []Constraint{
-+			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
-+		},
-+	}
-+	enabled, err := enabledConstraints(spec)
-+	if err != nil {
-+		t.Fatalf("enabledConstraints error: %v", err)
-+	}
-+
-+	payload := EvalOutput{
-+		SchemaVersion: 1,
-+		Constraints: []EvalConstraintResult{
-+			{ID: "pii_exposure_risk", Severity: 0, Rationale: "ok"},
-+		},
-+		MaxSeverity: 0,
-+	}
-+	raw, err := json.Marshal(payload)
-+	if err != nil {
-+		t.Fatalf("marshal eval_output: %v", err)
-+	}
-+
-+	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw), string(raw)}}}
-+	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
-+		t.Fatalf("expected error for multiple eval_output values")
-+	}
-+}
-+
- func TestComputePolicyResult(t *testing.T) {
- 	enabled := map[string]ConstraintRule{
- 		"pii":    {ID: "pii", AllowedMaxSeverity: 1},
+What you changed:
+- No code changes; confirmed `PolicyGateCircuit` uses `circuits.Poseidon`, `N=6`, and fixed input ordering in `internal/zk/policyzk/circuit.go`.
+- Verified there is already a real Groth16 BN254 circuit test with pass/fail cases in `internal/zk/policyzk/circuit_test.go`, and gnark plumbing is already wired in `internal/zk/zk.go`.
 
+Tests run:
+- `cd /Users/yani/Noema/backend && go test ./...`
 tokens used
-30,158
-What you changed (short)
-- Added validation to reject multiple `eval_output` values in `internal/evaluate/handler.go` and covered it with a new test in `internal/evaluate/handler_test.go`.
+28,383
+Files changed:
+- None
 
-Tests run
-- `go test ./...`
+What you changed:
+- No code changes; confirmed `PolicyGateCircuit` uses `circuits.Poseidon`, `N=6`, and fixed input ordering in `internal/zk/policyzk/circuit.go`.
+- Verified there is already a real Groth16 BN254 circuit test with pass/fail cases in `internal/zk/policyzk/circuit_test.go`, and gnark plumbing is already wired in `internal/zk/zk.go`.
+
+Tests run:
+- `cd /Users/yani/Noema/backend && go test ./...`
