@@ -7,44 +7,871 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c40ee-4afa-7203-8ea1-d02a1db6e00c
+session id: 019c40ef-ceb0-7310-8c4d-dde3c2c6f483
 --------
 user
-You are an autonomous coding agent polishing the Noema repository.
+You are an autonomous coding agent working on the Noema repository.
 
-Hard rules:
+MISSION (priority order):
+1) Add a real gnark circuit test for the PolicyGateCircuit (using our in-repo Poseidon implementation, package circuits).
+2) Make the circuit test pass reliably (compile -> prove -> verify) using Groth16 on BN254.
+3) ONLY AFTER tests pass: wire the backend plumbing to call the gnark prover/verifier behind the existing zk.GenerateProof / zk.VerifyProof API, keeping the public API shape unchanged (proof_b64 + public_inputs_b64).
+
+HARD RULES:
 - DO NOT run git commit, git reset, git clean, or anything that modifies git history.
-- I will run git commits outside of you.
-- Keep changes small: max 3 files per iteration.
+- Keep changes small: max 3 files per iteration. If more is needed, stage work across multiple iterations.
 - No cosmetic-only edits.
-- No new dependencies unless absolutely necessary.
-- keep all the same ui functionality, the end user should be able to do the same stuff but the experiance and design should be better.
+- No new dependencies unless absolutely necessary. Use existing gnark dependencies already in the repo. If gnark is not yet in go.mod, add it only if unavoidable.
+- Do not change routes or response shapes. Keep /api/evaluate and /api/verify behavior stable.
+- Do not redesign UI. This task is ZK/circuit/testing/plumbing only.
+- Always run: cd backend && go test ./... at least once per iteration.
 
-Goal: continuously improve production quality. continuously improve front end quality and polish.
+WORKFLOW YOU MUST FOLLOW (do not skip):
+A) Inspect current circuit code and poseidon implementation:
+   - Find the PolicyGateCircuit (the policy ZK circuit) and confirm it imports and uses circuits.Poseidon (NOT gnark/std poseidon).
+   - Confirm fixed N=6 and the frozen constraint ordering.
+B) Add tests FIRST:
+   - Create a new Go test file for the circuit (example name: backend/internal/zk/policy_circuit_test.go or wherever circuits live).
+   - The test must:
+     1) Compile the circuit to R1CS
+     2) Run Groth16 setup
+     3) Build a witness with a PASS case and generate a proof
+     4) Verify the proof using the public witness
+     5) Build a witness with a FAIL case and confirm either:
+        - proving fails (unsatisfied), OR
+        - proving succeeds only if OverallPass is set correctly (0), AND verifying matches the expected output
+   - Use deterministic test vectors:
+     - datasetDigestLo/Hi fixed constants
+     - enabled/maxAllowed/severity arrays fixed constants
+     - Compute the expected Commitment in-circuit by setting Commitment to the same value computed by the circuit.
+       (In gnark tests, you can set Commitment as a public variable equal to circuits.Poseidon(domainSep + inputs) by reusing the same circuits.Poseidon function in a small helper circuit OR by computing it with the same function in-circuit and asserting equality.)
+   - The test must assert:
+     - OverallPass == 1 for pass vector, and verify passes.
+     - OverallPass == 0 for fail vector, and verify passes only with correct OverallPass.
+C) Fix whatever is broken until all tests pass:
+   - If compilation errors, fix imports or package paths.
+   - If poseidon params/functions missing, use the existing in-repo Poseidon code as the single source of truth.
+   - If constraints are wrong, fix circuit logic minimally.
+D) ONLY AFTER TESTS PASS: wire plumbing:
+   - Replace stub proof internals inside backend/internal/zk/zk.go (or equivalent) to use gnark Groth16 BN254:
+     - GenerateProof: build witness from inputs (enabled/maxAllowed/severity + datasetDigest limbs) and output proof bytes base64
+     - VerifyProof: decode proof and public inputs and verify using vk
+   - Keep existing API signatures and keep proof_b64 + public_inputs_b64 shape.
+   - You may keep public_inputs_b64 as the existing string format for now, but the verify path must map it deterministically to the circuit’s public witness (Commitment, OverallPass, MaxSeverity).
+   - Ensure keys are handled sanely for dev:
+     - For now, allow generating proving/verifying keys at startup or cached on disk under backend/internal/zk (dev only),
+       OR embed small test keys only for tests.
+     - Don’t over-engineer; prioritize working tests and stable verify.
 
-Iteration:
-1) Run: cd backend && go test ./...
-2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
-3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+ACCEPTANCE CRITERIA (must satisfy):
+- `cd backend && go test ./...` passes.
+- There is at least one new test that proves+verifies the circuit in a PASS case.
+- There is at least one test that demonstrates FAIL behavior (overall_pass=0) is enforced and verifiable.
+- If plumbing was wired, verify endpoint still accepts proof_b64/public_inputs_b64 and returns verified result correctly.
 
-Pick the highest-value improvement:
-A) Reliability/correctness: validation, error handling, run persistence, verify robustness
-B) Tests: add/strengthen tests for the change you made
-C) upgrading the user interface so that it looks better.
-D) Maintainability: reduce duplication with tiny refactors
-E) UX: wizard/results/verify clarity (small, safe changes)
-F) Docs: README/DEPLOYMENT polish
-G) Performance: safe wins only
-
-Finish with:
-- What you changed (short)
+OUTPUT FORMAT (end of each run):
+- Files changed (list)
+- What you changed (2–6 bullets)
 - Tests run (must include go test ./...)
 mcp startup: no servers
+exec
+/bin/zsh -lc ls in /Users/yani/Noema/backend succeeded in 52ms:
+cmd
+data
+go.mod
+go.sum
+internal
+web
+exec
+/bin/zsh -lc 'rg -n "PolicyGateCircuit|PolicyGate" internal' in /Users/yani/Noema/backend succeeded in 51ms:
+internal/zk/policyzk/circuit.go:10:// PolicyGateCircuit proves:
+internal/zk/policyzk/circuit.go:19:type PolicyGateCircuit struct {
+internal/zk/policyzk/circuit.go:41:func (c *PolicyGateCircuit) Define(api frontend.API) error {
+exec
+/bin/zsh -lc "sed -n '1,220p' internal/zk/policyzk/circuit.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package policyzk
+
+import (
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark/frontend"
+)
+
+const N = 6
+
+// PolicyGateCircuit proves:
+//   - The prover knows (datasetDigest, policy config, gemini severities) that hash to Commitment
+//   - And the deterministic policy check passes:
+//     for each i: if Enabled[i] == 1 then Severity[i] <= MaxAllowed[i]
+//
+// Public outputs:
+// - Commitment: binds everything (dataset + policy + gemini outputs)
+// - OverallPass: 1 iff policy passes
+// - MaxSeverity (optional): max observed severity among enabled constraints
+type PolicyGateCircuit struct {
+	// ===== Private witness =====
 
 thinking
-**Running tests using exec_command**
+**Checking Poseidon implementation**
+
+I'm locating the circuits package to verify the Poseidon hash implementation and understand its integration.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 281ms:
+/bin/zsh -lc 'rg -n "package circuits|Poseidon" internal | head' in /Users/yani/Noema/backend succeeded in 51ms:
+internal/zk/policyzk/poseidon-gnark/README.md:1:# Poseidon Hash Gnark Circuit Implementation
+internal/zk/policyzk/poseidon-gnark/README.md:3:This repository contains the gnark circuit implementation of the Poseidon hash function, designed for integration into the [zk-Harness project](https://github.com/zkCollective/zk-Harness).
+internal/zk/policyzk/poseidon-gnark/README.md:7:The Poseidon hash function is a cryptographic primitive designed for efficient computation in zero-knowledge proofs. This repository provides a gnark circuit implementation of Poseidon, which can be used with the zk-Harness project to create, verify, and benchmark zero-knowledge proofs.
+internal/zk/policyzk/poseidon-gnark/README.md:21:After installation, you can import the Poseidon hash gnark circuit into your Go projects like this:
+internal/zk/policyzk/poseidon-gnark/README.md:27:You can then use the poseidon.Hash function to compute Poseidon hashes in your gnark circuits.
+internal/zk/policyzk/poseidon-gnark/README.md:31:This implementation is designed for integration with the zk-Harness project. To use it within zk-Harness, you'll need to import the Poseidon gnark circuit and use it in the construction of your zk-SNARK. For more information on using gnark with zk-Harness, see the zk-Harness documentation.
+internal/zk/policyzk/poseidon-gnark/circuits/poseidon.go:1:package circuits
+internal/zk/policyzk/poseidon-gnark/circuits/poseidon.go:61:func PoseidonEx(api frontend.API, inputs []frontend.Variable, initialState frontend.Variable, nOuts int) []frontend.Variable {
+internal/zk/policyzk/poseidon-gnark/circuits/poseidon.go:135:func Poseidon(api frontend.API, inputs []frontend.Variable) frontend.Variable {
+internal/zk/policyzk/poseidon-gnark/circuits/poseidon.go:136:	out := PoseidonEx(api, inputs, 0, 1)
+exec
+/bin/zsh -lc "sed -n '1,220p' internal/zk/policyzk/poseidon-gnark/circuits/poseidon.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package circuits
+
+import (
+	"math/big"
+
+	"github.com/consensys/gnark/frontend"
+)
+
+func Sigma(api frontend.API, in frontend.Variable) frontend.Variable {
+	return api.Mul(in, in, in, in, in)
+}
+
+func Ark(api frontend.API, in []frontend.Variable, c []*big.Int, r int) []frontend.Variable {
+	for i := range in {
+		in[i] = api.Add(in[i], c[i+r])
+	}
+	return in
+}
+
+// Shared logic of multiplication and addition
+
+thinking
+**Checking dependency presence**
+
+I'm verifying that gnark is listed in go.mod to ensure the necessary dependency is declared before adding tests.
+exec
+/bin/zsh -lc 'rg -n "gnark" go.mod internal/zk -S' in /Users/yani/Noema/backend succeeded in 50ms:
+go.mod:8:	github.com/AlpinYukseloglu/poseidon-gnark v0.0.0-20230513045146-69f5c852ef54
+go.mod:9:	github.com/consensys/gnark v0.14.0
+go.mod:25:	github.com/consensys/gnark-crypto v0.19.0 // indirect
+go.mod:41:	github.com/ingonyama-zk/icicle-gnark/v3 v3.2.2 // indirect
+go.mod:75:replace github.com/AlpinYukseloglu/poseidon-gnark => ./internal/zk/policyzk/poseidon-gnark
+internal/zk/README_GNARK.md:1:# ZK Stub Flow + Gnark (BN254) Sketch
+internal/zk/README_GNARK.md:63:## Gnark (BN254) integration sketch
+internal/zk/README_GNARK.md:67:- Use gnark to generate and verify a real proof using BN254.
+internal/zk/README_GNARK.md:79:understand the gnark field encoding; it can keep submitting the base64 blob.
+internal/zk/README_GNARK.md:82:GenerateProof parse it into field elements for gnark. This is simplest to keep
+internal/zk/README_GNARK.md:85:### Circuit sketch (gnark)
+internal/zk/README_GNARK.md:103:Implement gnark under the hood:
+internal/zk/README_GNARK.md:151:### Where to wire gnark
+internal/zk/README_GNARK.md:154:  compatibility. Or swap them for a gnark-optimized public inputs format.
+internal/zk/policyzk/poseidon-gnark/README.md:1:# Poseidon Hash Gnark Circuit Implementation
+internal/zk/policyzk/poseidon-gnark/README.md:3:This repository contains the gnark circuit implementation of the Poseidon hash function, designed for integration into the [zk-Harness project](https://github.com/zkCollective/zk-Harness).
+internal/zk/policyzk/poseidon-gnark/README.md:7:The Poseidon hash function is a cryptographic primitive designed for efficient computation in zero-knowledge proofs. This repository provides a gnark circuit implementation of Poseidon, which can be used with the zk-Harness project to create, verify, and benchmark zero-knowledge proofs.
+internal/zk/policyzk/poseidon-gnark/README.md:14:git clone https://github.com/AlpinYukseloglu/poseidon-gnark
+internal/zk/policyzk/poseidon-gnark/README.md:15:cd poseidon-gnark
+internal/zk/policyzk/poseidon-gnark/README.md:21:After installation, you can import the Poseidon hash gnark circuit into your Go projects like this:
+
+thinking
+**Planning tests for policyzk**
+
+I'll add tests in policyzk using the gnark backend with groth16 and bn254 curves, starting by reviewing existing zk stubs for reference.
+exec
+/bin/zsh -lc "sed -n '1,240p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package zk
+
+import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+const (
+	ProofSystem = "groth16"
+	ProofCurve  = "bn254"
+
+	publicInputsPrefix = "noema_public_inputs_v1|"
+	proofPrefix        = "noema_stub_proof_v1|"
+)
+
+// PublicInputs define the public inputs for policy aggregation.
+
+thinking
+**Locating existing tests**
+
+I'm searching for existing tests to understand the current coverage and structure before adding new tests.
+exec
+/bin/zsh -lc 'rg -n "policyzk" internal/zk -S' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/zk/policyzk/circuit.go:1:package policyzk
+
+thinking
+**Planning circuit test with poseidon**
+
+I'm preparing to create a test file to compute commitments using Poseidon within a helper circuit, leveraging gnark groth16 bn254 and frontend.NewWitness from gnark v0.14, while reviewing existing Poseidon tests in the vendored code for reference.
+exec
+/bin/zsh -lc "sed -n '1,220p' internal/zk/policyzk/poseidon-gnark/circuits/poseidon_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package circuits
+
+import (
+	"math/big"
+	"testing"
+
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark/backend"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+	"github.com/consensys/gnark/test"
+	"github.com/iden3/go-iden3-crypto/poseidon"
+)
+
+// TestPoseidon tests the Gnark Poseidon implementation against Iden3's Go implementation on all the test
+// vectors outlined in the original paper's reference repository, which can be found here: https://extgit.iaik.tugraz.at/krypto/hadeshash/-/tree/master/code
+//
+// The actual test vectors are outlined here: https://extgit.iaik.tugraz.at/krypto/hadeshash/-/blob/master/code/test_vectors.txt
+// We have included more for the sake of robustness.
+// Note that our implementation is focused on the 3-input variant with an x^5 S-box, so not all the test vectors apply.
+
+thinking
+**Planning Groth16 integration**
+
+I'm confirming to use gnark's groth16 backend directly following the compile-setup-prove-verify flow and will reference gnark v0.14 docs and code for proper usage next.
+exec
+/bin/zsh -lc 'rg -n "groth16" internal -S' in /Users/yani/Noema/backend succeeded in 51ms:
+internal/zk/README_GNARK.md:109:  - Run groth16.Prove and return proof bytes (base64)
+internal/zk/README_GNARK.md:115:  - Run groth16.Verify
+internal/zk/README_GNARK.md:133:  proof, err := groth16.Prove(r1cs, pk, full)
+internal/zk/README_GNARK.md:139:  return Proof{System: "groth16", Curve: "bn254", ProofB64: proofB64, PublicInputsB64: publicInputsB64}, nil
+internal/zk/README_GNARK.md:145:  ok, err := groth16.Verify(proof, vk, pub)
+internal/zk/zk.go:13:	ProofSystem = "groth16"
+internal/zk/policyzk/poseidon-gnark/circuits/poseidon_test.go:64:		}, test.WithCurves(ecc.BN254), test.WithBackends(backend.GROTH16))
+exec
+/bin/zsh -lc "sed -n '90,200p' internal/zk/README_GNARK.md" in /Users/yani/Noema/backend succeeded in 52ms:
+
+- Constraints:
+  - Enforce pt in [0..2], ms in [0..2], op in {0,1}
+  - Enforce commitment is hash(spec_json, eval_json) inside the circuit, or
+    equivalently enforce a relationship that binds private inputs to commitment.
+
+### Go API sketch
+
+Keep the existing signatures in zk.go:
+
+func GenerateProof(pi PublicInputs) (Proof, error)
+func VerifyProof(proofB64, publicInputsB64 string) (bool, string, error)
+
+Implement gnark under the hood:
+
+- GenerateProof:
+  - Parse pi.Commitment (0x hex) into big.Int
+  - Build public inputs in order: pt, ms, op, commitment
+  - Build witness with private inputs (spec + eval data, or hashes derived from them)
+  - Run groth16.Prove and return proof bytes (base64)
+
+
+thinking
+**Planning commitment computation for tests**
+
+Considering ways to compute the Poseidon commitment needed as a public input in tests, weighing in-circuit helper circuits versus off-circuit calculation using gnark-crypto or the frontend API; leaning toward using gnark's frontend.NewWitness to generate the witness deterministically within the test setup.
+thinking
+**Evaluating commitment computation options**
+
+Confirming the need to compute the commitment value off-circuit for correct witness setup, as the circuit asserts equality with the public input; considering implementing or finding a native Poseidon hash compatible with the circuit’s to produce the commitment in Go for tests.
+exec
+/bin/zsh -lc 'rg -n "Poseidon|poseidon" internal -S | head' in /Users/yani/Noema/backend succeeded in 51ms:
+internal/zk/policyzk/circuit.go:4:	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+internal/zk/policyzk/circuit.go:34:	Commitment  frontend.Variable `gnark:",public"` // Poseidon(domain, datasetDigest, enabled, maxAllowed, severity)
+internal/zk/policyzk/circuit.go:103:	// Commitment = Poseidon(domainSep, datasetDigestLo, datasetDigestHi,
+internal/zk/policyzk/circuit.go:122:	commit := poseidonHashChunks(api, inputs)
+internal/zk/policyzk/circuit.go:167:func poseidonHashChunks(api frontend.API, inputs []frontend.Variable) frontend.Variable {
+internal/zk/policyzk/circuit.go:170:		return circuits.Poseidon(api, inputs)
+internal/zk/policyzk/circuit.go:172:	h := circuits.Poseidon(api, inputs[:maxInputs])
+internal/zk/policyzk/circuit.go:176:	return circuits.Poseidon(api, rest)
+internal/zk/policyzk/poseidon-gnark/README.md:1:# Poseidon Hash Gnark Circuit Implementation
+internal/zk/policyzk/poseidon-gnark/README.md:3:This repository contains the gnark circuit implementation of the Poseidon hash function, designed for integration into the [zk-Harness project](https://github.com/zkCollective/zk-Harness).
+
+
+thinking
+**Evaluating Poseidon commitment approaches**
+
+The native Poseidon is missing, so computing commitments using gnark-crypto's Poseidon with in-repo constants is a likely path; implementing a small native Poseidon function using those constants seems most feasible despite complexity.
+thinking
+**Confirming gnark lacks automatic witness solving**
+
+Gnark requires full witness assignments and doesn't compute public outputs from private inputs automatically, so using gnark to compute the Poseidon commitment directly isn't feasible; implementing a native Poseidon function with in-repo constants remains the simplest approach.
+exec
+/bin/zsh -lc 'rg -n "Poseidon" internal/zk/policyzk/poseidon-gnark -S' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/zk/policyzk/poseidon-gnark/README.md:1:# Poseidon Hash Gnark Circuit Implementation
+internal/zk/policyzk/poseidon-gnark/README.md:3:This repository contains the gnark circuit implementation of the Poseidon hash function, designed for integration into the [zk-Harness project](https://github.com/zkCollective/zk-Harness).
+internal/zk/policyzk/poseidon-gnark/README.md:7:The Poseidon hash function is a cryptographic primitive designed for efficient computation in zero-knowledge proofs. This repository provides a gnark circuit implementation of Poseidon, which can be used with the zk-Harness project to create, verify, and benchmark zero-knowledge proofs.
+internal/zk/policyzk/poseidon-gnark/README.md:21:After installation, you can import the Poseidon hash gnark circuit into your Go projects like this:
+internal/zk/policyzk/poseidon-gnark/README.md:27:You can then use the poseidon.Hash function to compute Poseidon hashes in your gnark circuits.
+internal/zk/policyzk/poseidon-gnark/README.md:31:This implementation is designed for integration with the zk-Harness project. To use it within zk-Harness, you'll need to import the Poseidon gnark circuit and use it in the construction of your zk-SNARK. For more information on using gnark with zk-Harness, see the zk-Harness documentation.
+internal/zk/policyzk/poseidon-gnark/circuits/poseidon.go:61:func PoseidonEx(api frontend.API, inputs []frontend.Variable, initialState frontend.Variable, nOuts int) []frontend.Variable {
+internal/zk/policyzk/poseidon-gnark/circuits/poseidon.go:135:func Poseidon(api frontend.API, inputs []frontend.Variable) frontend.Variable {
+internal/zk/policyzk/poseidon-gnark/circuits/poseidon.go:136:	out := PoseidonEx(api, inputs, 0, 1)
+internal/zk/policyzk/poseidon-gnark/circuits/poseidon_test.go:15:// TestPoseidon tests the Gnark Poseidon implementation against Iden3's Go implementation on all the test
+internal/zk/policyzk/poseidon-gnark/circuits/poseidon_test.go:21:func TestPoseidon(t *testing.T) {
+internal/zk/policyzk/poseidon-gnark/circuits/poseidon_test.go:23:		gnarkPoseidonInput     [3]frontend.Variable
+internal/zk/policyzk/poseidon-gnark/circuits/poseidon_test.go:24:		referencePoseidonInput []*big.Int
+internal/zk/policyzk/poseidon-gnark/circuits/poseidon_test.go:27:			gnarkPoseidonInput:     [3]frontend.Variable{1, 2, 3},
+internal/zk/policyzk/poseidon-gnark/circuits/poseidon_test.go:28:			referencePoseidonInput: []*big.Int{big.NewInt(1), big.NewInt(2), big.NewInt(3)},
+internal/zk/policyzk/poseidon-gnark/circuits/poseidon_test.go:31:			gnarkPoseidonInput:     [3]frontend.Variable{0, 1, 2},
+internal/zk/policyzk/poseidon-gnark/circuits/poseidon_test.go:32:			referencePoseidonInput: []*big.Int{big.NewInt(0), big.NewInt(1), big.NewInt(2)},
+internal/zk/policyzk/poseidon-gnark/circuits/poseidon_test.go:35:			gnarkPoseidonInput:     [3]frontend.Variable{0, 0, 0},
+internal/zk/policyzk/poseidon-gnark/circuits/poseidon_test.go:36:			referencePoseidonInput: []*big.Int{big.NewInt(0), big.NewInt(0), big.NewInt(0)},
+internal/zk/policyzk/poseidon-gnark/circuits/poseidon_test.go:39:			gnarkPoseidonInput:     [3]frontend.Variable{129048, 990217, 2234383333},
+
+thinking
+**Considering commitment computation strategies**
+
+I'm weighing implementing a native Poseidon hash in Go using existing constants as the simplest approach versus trying to derive commitments via gnark circuit evaluation or witness extraction, which may be more complex or infeasible. Next, I'll review the constants file to assess native implementation scope.
+exec
+/bin/zsh -lc "sed -n '1,120p' internal/zk/policyzk/poseidon-gnark/circuits/poseidon_constants.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package circuits
+
+import (
+	"fmt"
+	"math/big"
+	"strings"
+)
+
+// Parameters are generated by a reference script https://extgit.iaik.tugraz.at/krypto/hadeshash/-/blob/master/code/generate_parameters_grain.sage
+// Used like so: sage generate_parameters_grain.sage 1 0 254 2 8 56 0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001
+// The core functions used for parsing these constants mirror the following implementation, which thoroughly tests their
+// properties: https://github.com/liyue201/gnark-circomlib/blob/main/circuits/poseidon_constants.go
+
+func parseOneDimensionArray(s string) []*big.Int {
+	ss := strings.ReplaceAll(s, "[", "")
+	ss = strings.ReplaceAll(ss, "]", "")
+	ss = strings.TrimSpace(ss)
+	slist := strings.Split(ss, ",")
+
+	poseidonc := make([]*big.Int, len(slist))
+
+
+thinking
+**Evaluating commitment computation strategies**
+
+Considering generating commitments inside the circuit or using gnark's witness and hints to avoid precomputing; changing the public commitment to private for tests conflicts with requirements but might be the simplest workaround.
+thinking
+**Investigating gnark witness solving for commitments**
+
+Exploring using gnark's backend solver and witness building to compute commitments from constraints and partial assignments, planning to inspect module code and docs for relevant APIs.
+exec
+/bin/zsh -lc "rg -n \"func Solve|Solve\\(\" "'$(go env GOPATH)/pkg/mod -S | head' in /Users/yani/Noema/backend succeeded in 868ms:
+/Users/yani/go/pkg/mod/github.com/leanovate/gopter@v0.2.11/arbitrary/example_quadratic_test.go:20:func (q *QudraticEquation) Solve() (complex128, complex128, error) {
+/Users/yani/go/pkg/mod/github.com/leanovate/gopter@v0.2.11/arbitrary/example_quadratic_test.go:39:			x1, x2, err := quadratic.Solve()
+/Users/yani/go/pkg/mod/github.com/leanovate/gopter@v0.2.11/arbitrary/example_quadratic_test.go:49:			x1, x2, err := quadratic.Solve()
+/Users/yani/go/pkg/mod/github.com/leanovate/gopter@v0.2.11/arbitrary/example_quadratic_test.go:64:			x1, x2, err := quadratic.Solve()
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/constraint/babybear/r1cs_test.go:145:func BenchmarkSolve(b *testing.B) {
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/constraint/babybear/system.go:55:func (cs *system) Solve(witness witness.Witness, opts ...csolver.Option) (any, error) {
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/constraint/babybear/system.go:108:// Deprecated: use _, err := Solve(...) instead
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/constraint/babybear/system.go:110:	_, err := cs.Solve(witness, opts...)
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/constraint/babybear/solver.go:27:// solver represent the state of the solver during a call to System.Solve(...)
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/constraint/babybear/solver.go:391:		if err := bc.Solve(s, inst); err != nil {
+
+thinking
+**Checking witness requirements in constraints**
+
+I'm verifying whether the Solve operation in the constraint system needs a full or partial witness by reviewing the documentation.
+exec
+/bin/zsh -lc "sed -n '1,140p' "'$(go env GOPATH)/pkg/mod/github.com/consensys/gnark@v0.14.0/constraint/bn254/system.go' in /Users/yani/Noema/backend succeeded in 52ms:
+// Copyright 2020-2025 Consensys Software Inc.
+// Licensed under the Apache License, Version 2.0. See the LICENSE file for details.
+
+// Code generated by gnark DO NOT EDIT
+
+package cs
+
+import (
+	"io"
+	"time"
+
+	"github.com/consensys/gnark/backend/witness"
+	"github.com/consensys/gnark/constraint"
+	csolver "github.com/consensys/gnark/constraint/solver"
+	"github.com/consensys/gnark/internal/gkr/gkrinfo"
+	"github.com/consensys/gnark/logger"
+
+	"github.com/consensys/gnark-crypto/ecc"
+
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+
+
+thinking
+**Confirming use of iden3 poseidon hash for commitment**
+
+The iden3 go-iden3-crypto poseidon hash supports variable-length inputs and aligns with poseidon-gnark parameters, enabling commitment computation from the witness vector; dependency is found in an internal submodule with its own go.mod inside a replace directive, confirming integration within the monorepo.
+thinking
+**Evaluating dependency options for computing commitment**
+
+Running tests from the root skips nested modules like poseidon-gnark, so its tests don’t run by default; to avoid adding new external dependencies, implementing a minimal native Poseidon hash using existing constants and math/big is viable, though more code-intensive. Alternatively, leveraging gnark’s test utilities to compute commitments from the circuit output could sidestep new dependencies.
+exec
+/bin/zsh -lc 'rg -n "ProverSucceeded" $(go env GOPATH)/pkg/mod/github.com/consensys/gnark@v0.14.0/test -S' in /Users/yani/Noema/backend succeeded in 52ms:
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/test/assert.go:42:// the first call to assert.ProverSucceeded/Failed will compile the circuit for n curves, m backends
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/test/assert.go:63:// ProverSucceeded is deprecated: use [Assert.CheckCircuit] instead
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/test/assert.go:64:func (assert *Assert) ProverSucceeded(circuit frontend.Circuit, validAssignment frontend.Circuit, opts ...TestingOption) {
+exec
+/bin/zsh -lc "sed -n '1,140p' "'$(go env GOPATH)/pkg/mod/github.com/consensys/gnark@v0.14.0/test/assert.go' in /Users/yani/Noema/backend succeeded in 52ms:
+// Copyright 2020-2025 Consensys Software Inc.
+// Licensed under the Apache License, Version 2.0. See the LICENSE file for details.
+
+package test
+
+import (
+	"errors"
+	"fmt"
+	"math/big"
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark/backend"
+	"github.com/consensys/gnark/backend/witness"
+	"github.com/consensys/gnark/constraint"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+	"github.com/consensys/gnark/frontend/cs/scs"
+
+
+thinking
+**Planning native Poseidon implementation for tests**
+
+I'll implement a minimal native Poseidon hash using the same constants as the circuit version, handling variable input arity via chunking and big.Int modulo arithmetic over BN254's field, enabling native output computation in tests.
+thinking
+**Considering gnark-crypto Poseidon usage**
+
+I'm checking if the gnark-crypto Poseidon library can compute hashes with the same constants, which could simplify native implementation by avoiding a full port to big.Int operations.
+exec
+/bin/zsh -lc 'rg -n "poseidon" $(go env GOPATH)/pkg/mod/github.com/consensys/gnark-crypto@v0.19.0 -S | head' in /Users/yani/Noema/backend succeeded in 52ms:
+/Users/yani/go/pkg/mod/github.com/consensys/gnark-crypto@v0.19.0/ecc/bw6-633/fr/poseidon2/hash.go:6:package poseidon2
+/Users/yani/go/pkg/mod/github.com/consensys/gnark-crypto@v0.19.0/ecc/bw6-633/fr/poseidon2/hash.go:15:// NewMerkleDamgardHasher returns a Poseidon2 hasher using the Merkle-Damgard
+/Users/yani/go/pkg/mod/github.com/consensys/gnark-crypto@v0.19.0/ecc/bw6-633/fr/poseidon2/hash.go:22:// GetDefaultParameters returns a set of parameters for the Poseidon2 permutation.
+/Users/yani/go/pkg/mod/github.com/consensys/gnark-crypto@v0.19.0/ecc/bw6-633/fr/poseidon2/hash.go:32:	gnarkHash.RegisterHash(gnarkHash.POSEIDON2_BW6_633, func() hash.Hash {
+/Users/yani/go/pkg/mod/github.com/consensys/gnark-crypto@v0.19.0/ecc/bw6-633/fr/poseidon2/poseidon2.go:6:package poseidon2
+/Users/yani/go/pkg/mod/github.com/consensys/gnark-crypto@v0.19.0/ecc/bw6-633/fr/poseidon2/poseidon2.go:21:// reference implementation: https://github.com/HorizenLabs/poseidon2/blob/main/plain_implementations/src/poseidon2/poseidon2.rs
+/Users/yani/go/pkg/mod/github.com/consensys/gnark-crypto@v0.19.0/ecc/bw6-633/fr/poseidon2/poseidon2.go:22:// specifications: https://github.com/argumentcomputer/neptune/blob/main/spec/poseidon_spec.pdf
+/Users/yani/go/pkg/mod/github.com/consensys/gnark-crypto@v0.19.0/ecc/bw6-633/fr/poseidon2/poseidon2.go:29:// DegreeSBox returns the degree of the sBox function used in the Poseidon2
+/Users/yani/go/pkg/mod/github.com/consensys/gnark-crypto@v0.19.0/ecc/bw6-633/fr/poseidon2/poseidon2.go:35:// Parameters describing the Poseidon2 implementation. Use [NewParameters] or
+/Users/yani/go/pkg/mod/github.com/consensys/gnark-crypto@v0.19.0/ecc/bw6-633/fr/poseidon2/poseidon2.go:52:// NewParameters returns a new set of parameters for the Poseidon2 permutation.
+
+
+thinking
+**Planning native Poseidon for tests**
+
+I'm deciding to implement Poseidon natively in test code using existing circuit constants and gnark-crypto's fr.Element for BN254 modular arithmetic to keep changes minimal and avoid new dependencies outside tests. Next, I'll create a test file with big.Int and fr.Element operations replicating Poseidon's Sigma, Ark, and Mix steps.
+thinking
+**Detailing native Poseidon implementation and test plan**
+
+I'm planning a native Poseidon using fr.Element for field ops, porting circuits' PoseidonEx logic including Sigma, Ark, Mix, MixS, and MixLast with constants converted to fr.Element. The test will build deterministic inputs reflecting pass/fail policy conditions, compute commitments natively, compile and prove the zk circuit with Groth16 setup, and verify proofs and witness correctness under expected pass/fail scenarios.
+exec
+/bin/zsh -lc 'rg -n "func Setup|func Prove|func Verify" $(go env GOPATH)/pkg/mod/github.com/consensys/gnark@v0.14.0/backend/groth16 -S' in /Users/yani/Noema/backend succeeded in 52ms:
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/backend/groth16/bw6-633/verify.go:31:func Verify(proof *Proof, vk *VerifyingKey, publicWitness fr.Vector, opts ...backend.VerifierOption) error {
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/backend/groth16/groth16.go:124:func Verify(proof Proof, vk VerifyingKey, publicWitness witness.Witness, opts ...backend.VerifierOption) error {
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/backend/groth16/groth16.go:181:func Prove(r1cs constraint.ConstraintSystem, pk ProvingKey, fullWitness witness.Witness, opts ...backend.ProverOption) (Proof, error) {
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/backend/groth16/groth16.go:220:func Setup(r1cs constraint.ConstraintSystem) (ProvingKey, VerifyingKey, error) {
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/backend/groth16/bw6-633/setup.go:75:func Setup(r1cs *cs.R1CS, pk *ProvingKey, vk *VerifyingKey) error {
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/backend/groth16/bw6-633/prove.go:52:func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...backend.ProverOption) (*Proof, error) {
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/backend/groth16/bls12-377/verify.go:31:func Verify(proof *Proof, vk *VerifyingKey, publicWitness fr.Vector, opts ...backend.VerifierOption) error {
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/backend/groth16/bls24-317/verify.go:31:func Verify(proof *Proof, vk *VerifyingKey, publicWitness fr.Vector, opts ...backend.VerifierOption) error {
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/backend/groth16/bw6-633/mpcsetup/phase1.go:172:func VerifyPhase1(N uint64, beaconChallenge []byte, c ...*Phase1) (SrsCommons, error) {
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/backend/groth16/bw6-761/verify.go:31:func Verify(proof *Proof, vk *VerifyingKey, publicWitness fr.Vector, opts ...backend.VerifierOption) error {
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/backend/groth16/bls12-381/verify.go:31:func Verify(proof *Proof, vk *VerifyingKey, publicWitness fr.Vector, opts ...backend.VerifierOption) error {
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/backend/groth16/bls24-315/verify.go:31:func Verify(proof *Proof, vk *VerifyingKey, publicWitness fr.Vector, opts ...backend.VerifierOption) error {
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/backend/groth16/bls24-317/prove.go:52:func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...backend.ProverOption) (*Proof, error) {
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/backend/groth16/bn254/verify.go:38:func Verify(proof *Proof, vk *VerifyingKey, publicWitness fr.Vector, opts ...backend.VerifierOption) error {
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/backend/groth16/bn254/prove.go:52:func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...backend.ProverOption) (*Proof, error) {
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/backend/groth16/bls24-315/prove.go:52:func Prove(r1cs *cs.R1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...backend.ProverOption) (*Proof, error) {
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/backend/groth16/bw6-633/mpcsetup/phase2.go:319:func VerifyPhase2(r1cs *cs.R1CS, commons *SrsCommons, beaconChallenge []byte, c ...*Phase2) (groth16.ProvingKey, groth16.VerifyingKey, error) {
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/backend/groth16/bls24-315/setup.go:75:func Setup(r1cs *cs.R1CS, pk *ProvingKey, vk *VerifyingKey) error {
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/backend/groth16/bw6-761/mpcsetup/phase2.go:319:func VerifyPhase2(r1cs *cs.R1CS, commons *SrsCommons, beaconChallenge []byte, c ...*Phase2) (groth16.ProvingKey, groth16.VerifyingKey, error) {
+/Users/yani/go/pkg/mod/github.com/consensys/gnark@v0.14.0/backend/groth16/bls24-317/mpcsetup/phase2.go:319:func VerifyPhase2(r1cs *cs.R1CS, commons *SrsCommons, beaconChallenge []byte, c ...*Phase2) (groth16.ProvingKey, groth16.VerifyingKey, error) {
+
+thinking
+**Exploring curve interface in groth16**
+exec
+/bin/zsh -lc "sed -n '100,230p' "'$(go env GOPATH)/pkg/mod/github.com/consensys/gnark@v0.14.0/backend/groth16/groth16.go' in /Users/yani/Noema/backend succeeded in 52ms:
+
+	// Raw methods for faster serialization-deserialization. Does not perform checks on the data.
+	// Only use if you are sure of the data you are reading comes from trusted source.
+	gnarkio.WriterRawTo
+	gnarkio.UnsafeReaderFrom
+
+	// VerifyingKey are the methods required for generating the Solidity
+	// verifier contract from the VerifyingKey. This will return an error if not
+	// supported on the CurveID().
+	solidity.VerifyingKey
+
+	// NbPublicWitness returns number of elements expected in the public witness
+	NbPublicWitness() int
+
+	// NbG1 returns the number of G1 elements in the VerifyingKey
+	NbG1() int
+
+	// NbG2 returns the number of G2 elements in the VerifyingKey
+	NbG2() int
+
+
+
+thinking
+**Planning groth16 test vectors and inputs**
+
+I'm designing test vectors with enabled, maxAllowed, severity arrays for passing and failing cases, ensuring severity respects maxAllowed where enabled, and setting dataset digest constants as big.Int. Commitments will be computed via native Poseidon using ordered inputs including domain separation and these arrays, verifying commitment differences between pass and fail cases.
+thinking
+**Confirming circuit compilation parameters**
+
+I'm verifying the correct use of the BN254 scalar field in the frontend.Compile call to build the circuit's R1CS, checking whether to pass `ecc.BN254` or `ecc.BN254.ScalarField()` based on the function signature and gnark version.
+exec
+/bin/zsh -lc 'rg -n "func Compile" $(go env GOPATH)/pkg/mod/github.com/consensys/gnark@v0.14.0/frontend/compile.go -S' in /Users/yani/Noema/backend succeeded in 52ms:
+38:func Compile(field *big.Int, newBuilder NewBuilder, circuit Circuit, opts ...CompileOption) (constraint.ConstraintSystem, error) {
+54:func CompileU32(field *big.Int, newBuilder NewBuilderU32, circuit Circuit, opts ...CompileOption) (constraint.ConstraintSystemU32, error) {
+69:func CompileGeneric[E constraint.Element](field *big.Int, newBuilder NewBuilderGeneric[E], circuit Circuit, opts ...CompileOption) (constraint.ConstraintSystemGeneric[E], error) {
+exec
+/bin/zsh -lc "sed -n '1,80p' "'$(go env GOPATH)/pkg/mod/github.com/consensys/gnark@v0.14.0/frontend/compile.go' in /Users/yani/Noema/backend succeeded in 52ms:
+package frontend
+
+import (
+	"errors"
+	"fmt"
+	"math/big"
+	"reflect"
+	"strings"
+
+	"github.com/consensys/gnark"
+	"github.com/consensys/gnark/constraint"
+	"github.com/consensys/gnark/debug"
+	"github.com/consensys/gnark/frontend/schema"
+	"github.com/consensys/gnark/internal/circuitdefer"
+	"github.com/consensys/gnark/internal/smallfields"
+	"github.com/consensys/gnark/logger"
+)
+
+// Compile will generate a ConstraintSystem from the given circuit
+//
+
+thinking
+**Planning gnark circuit compilation**
+
+I'm preparing to compile the circuit with the BN254 ScalarField from the ecc package and adding a test using t.Run to ensure successful compilation, while also verifying how to create a witness using gnark's frontend.NewWitness.
+exec
+/bin/zsh -lc 'rg -n "func NewWitness" $(go env GOPATH)/pkg/mod/github.com/consensys/gnark@v0.14.0/frontend/witness.go -S' in /Users/yani/Noema/backend succeeded in 52ms:
+16:func NewWitness(assignment Circuit, field *big.Int, opts ...WitnessOption) (witness.Witness, error) {
+exec
+/bin/zsh -lc "sed -n '1,80p' "'$(go env GOPATH)/pkg/mod/github.com/consensys/gnark@v0.14.0/frontend/witness.go' in /Users/yani/Noema/backend succeeded in 52ms:
+package frontend
+
+import (
+	"math/big"
+	"reflect"
+
+	"github.com/consensys/gnark/backend/witness"
+	"github.com/consensys/gnark/frontend/schema"
+)
+
+// NewWitness build an ordered vector of field elements from the given assignment (Circuit)
+// if PublicOnly is specified, returns the public part of the witness only
+// else returns [public | secret]. The result can then be serialized to / from json & binary.
+//
+// See ExampleWitness in witness package for usage.
+func NewWitness(assignment Circuit, field *big.Int, opts ...WitnessOption) (witness.Witness, error) {
+	opt, err := options(opts...)
+	if err != nil {
+		return nil, err
+	}
+
+
+thinking
+**Planning test failure cases**
+
+Planning to test that proving fails with invalid witness data by setting OverallPass=1 on failing data, expecting Prove to return an error since constraints enforce correctness; also considering verifying success with OverallPass=0 on the same data.
+thinking
+**Designing native Poseidon hash implementation**
+
+Planning a native Poseidon hash in tests using fr.Element with big.Int inputs, converting constants once to fr.Element for efficiency, and precisely mirroring circuit operations per round. This ensures commitment calculations align with the circuit's Poseidon constraints while enabling proof generation and verification tests with valid and invalid witnesses.
+exec
+/bin/zsh -lc 'rg -n "testify" go.mod' in /Users/yani/Noema/backend succeeded in 51ms:
+55:	github.com/stretchr/testify v1.11.1 // indirect
+
+thinking
+**Drafting test file with native Poseidon and helpers**
+
+I'm preparing a new test file that uses require for assertions and runs full tests each iteration. It will implement native Poseidon functions and helpers like commitment inputs in Go, importing necessary cryptography and testing packages, ensuring alignment with the circuit package constants.
+exec
+/bin/zsh -lc "cat <<'EOF' > internal/zk/policyzk/circuit_test.go
+package policyzk
+
+import (
+	\"math/big\"
+	\"testing\"
+
+	\"github.com/AlpinYukseloglu/poseidon-gnark/circuits\"
+	\"github.com/consensys/gnark-crypto/ecc\"
+	\"github.com/consensys/gnark-crypto/ecc/bn254/fr\"
+	\"github.com/consensys/gnark/backend/groth16\"
+	\"github.com/consensys/gnark/frontend\"
+	\"github.com/consensys/gnark/frontend/cs/r1cs\"
+	\"github.com/stretchr/testify/require\"
+)
+
+func TestPolicyGateCircuit_Groth16PassFail(t *testing.T) {
+	require := require.New(t)
+
+	var circuit PolicyGateCircuit
+	r1cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
+	require.NoError(err)
+
+	pk, vk, err := groth16.Setup(r1cs)
+	require.NoError(err)
+
+	datasetLo := big.NewInt(123456789)
+	datasetHi := big.NewInt(987654321)
+
+	enabled := []uint64{1, 1, 1, 0, 1, 0}
+	maxAllowed := []uint64{1, 2, 0, 1, 2, 0}
+
+	passSeverity := []uint64{1, 2, 0, 2, 1, 2}
+	passCommitment := commitmentForCase(datasetLo, datasetHi, enabled, maxAllowed, passSeverity)
+	passAssignment := PolicyGateCircuit{
+		DatasetDigestLo: datasetLo,
+		DatasetDigestHi: datasetHi,
+		Enabled:         toVarArray(enabled),
+		MaxAllowed:      toVarArray(maxAllowed),
+		Severity:        toVarArray(passSeverity),
+		Commitment:      passCommitment,
+		OverallPass:     1,
+		MaxSeverity:     2,
+	}
+
+	fullPass, err := frontend.NewWitness(&passAssignment, ecc.BN254.ScalarField())
+	require.NoError(err)
+	passProof, err := groth16.Prove(r1cs, pk, fullPass)
+	require.NoError(err)
+	passPublic, err := fullPass.Public()
+	require.NoError(err)
+	require.NoError(groth16.Verify(passProof, vk, passPublic))
+
+	failSeverity := []uint64{1, 2, 1, 2, 1, 2}
+	failCommitment := commitmentForCase(datasetLo, datasetHi, enabled, maxAllowed, failSeverity)
+	failAssignment := PolicyGateCircuit{
+		DatasetDigestLo: datasetLo,
+		DatasetDigestHi: datasetHi,
+		Enabled:         toVarArray(enabled),
+		MaxAllowed:      toVarArray(maxAllowed),
+		Severity:        toVarArray(failSeverity),
+		Commitment:      failCommitment,
+		OverallPass:     0,
+		MaxSeverity:     2,
+	}
+
+	fullFail, err := frontend.NewWitness(&failAssignment, ecc.BN254.ScalarField())
+	require.NoError(err)
+	failProof, err := groth16.Prove(r1cs, pk, fullFail)
+	require.NoError(err)
+	failPublic, err := fullFail.Public()
+	require.NoError(err)
+	require.NoError(groth16.Verify(failProof, vk, failPublic))
+
+	// Same failing inputs but incorrect OverallPass should not satisfy constraints.
+	badAssignment := failAssignment
+	badAssignment.OverallPass = 1
+	fullBad, err := frontend.NewWitness(&badAssignment, ecc.BN254.ScalarField())
+	require.NoError(err)
+	_, err = groth16.Prove(r1cs, pk, fullBad)
+	require.Error(err)
+}
+
+func toVarArray(vals []uint64) [N]frontend.Variable {
+	var out [N]frontend.Variable
+	for i := 0; i < N; i++ {
+		out[i] = vals[i]
+	}
+	return out
+}
+
+func commitmentForCase(datasetLo, datasetHi *big.Int, enabled, maxAllowed, severity []uint64) *big.Int {
+	inputs := make([]*big.Int, 0, 3+3*N)
+	inputs = append(inputs, big.NewInt(20260208))
+	inputs = append(inputs, new(big.Int).Set(datasetLo))
+	inputs = append(inputs, new(big.Int).Set(datasetHi))
+	for i := 0; i < N; i++ {
+		inputs = append(inputs, new(big.Int).SetUint64(enabled[i]))
+	}
+	for i := 0; i < N; i++ {
+		inputs = append(inputs, new(big.Int).SetUint64(maxAllowed[i]))
+	}
+	for i := 0; i < N; i++ {
+		inputs = append(inputs, new(big.Int).SetUint64(severity[i]))
+	}
+	return poseidonHashChunksNative(inputs)
+}
+
+func poseidonHashChunksNative(inputs []*big.Int) *big.Int {
+	const maxInputs = 16
+	if len(inputs) <= maxInputs {
+		return poseidonNative(inputs)
+	}
+	h := poseidonNative(inputs[:maxInputs])
+	rest := make([]*big.Int, 0, 1+len(inputs[maxInputs:]))
+	rest = append(rest, h)
+	rest = append(rest, inputs[maxInputs:]...)
+	return poseidonNative(rest)
+}
+
+func poseidonNative(inputs []*big.Int) *big.Int {
+	out := poseidonExNative(inputs, big.NewInt(0), 1)
+	return out[0]
+}
+
+func poseidonExNative(inputs []*big.Int, initialState *big.Int, nOuts int) []*big.Int {
+	t := len(inputs) + 1
+	nRoundsPC := [16]int{56, 57, 56, 60, 60, 63, 64, 63, 60, 66, 60, 65, 70, 60, 64, 68}
+	nRoundsF := 8
+	nRoundsP := nRoundsPC[t-2]
+
+	c := bigIntSliceToElements(circuits.POSEIDON_C(t))
+	s := bigIntSliceToElements(circuits.POSEIDON_S(t))
+	m := bigIntMatrixToElements(circuits.POSEIDON_M(t))
+	p := bigIntMatrixToElements(circuits.POSEIDON_P(t))
+
+	state := make([]fr.Element, t)
+	state[0].SetBigInt(initialState)
+	for i := 1; i < t; i++ {
+		state[i].SetBigInt(inputs[i-1])
+	}
+	ark(&state, c, 0)
+
+	for r := 0; r < nRoundsF/2-1; r++ {
+		for j := 0; j < t; j++ {
+			sigma(&state[j])
+		}
+		ark(&state, c, (r+1)*t)
+		state = mix(state, m)
+	}
+
+	for j := 0; j < t; j++ {
+		sigma(&state[j])
+	}
+	ark(&state, c, nRoundsF/2*t)
+	state = mix(state, p)
+
+	for r := 0; r < nRoundsP; r++ {
+		sigma(&state[0])
+		state[0].Add(&state[0], &c[(nRoundsF/2+1)*t+r])
+
+		var newState0 fr.Element
+		for j := 0; j < t; j++ {
+			var mul fr.Element
+			mul.Mul(&s[(t*2-1)*r+j], &state[j])
+			newState0.Add(&newState0, &mul)
+		}
+
+		for k := 1; k < t; k++ {
+			var mul fr.Element
+			mul.Mul(&state[0], &s[(t*2-1)*r+t+k-1])
+			state[k].Add(&state[k], &mul)
+		}
+		state[0] = newState0
+	}
+
+	for r := 0; r < nRoundsF/2-1; r++ {
+		for j := 0; j < t; j++ {
+			sigma(&state[j])
+		}
+		ark(&state, c, (nRoundsF/2+1)*t+nRoundsP+r*t)
+		state = mix(state, m)
+	}
+
+	for j := 0; j < t; j++ {
+		sigma(&state[j])
+	}
+
+	outs := make([]*big.Int, nOuts)
+	for i := 0; i < nOuts; i++ {
+		var out fr.Element
+		mixLast(&out, state, m, i)
+		outs[i] = elementToBigInt(out)
+	}
+	return outs
+}
+
+func sigma(x *fr.Element) {
+	var x2 fr.Element
+	x2.Square(x)
+	var x4 fr.Element
+	x4.Square(&x2)
+	x.Mul(&x4, x)
+}
+
+func ark(state *[]fr.Element, c []fr.Element, r int) {
+	s := *state
+	for i := range s {
+		s[i].Add(&s[i], &c[i+r])
+	}
+}
+
+func mix(in []fr.Element, m [][]fr.Element) []fr.Element {
+	out := make([]fr.Element, len(in))
+	for col := range in {
+		var acc fr.Element
+		for row := range in {
+			var term fr.Element
+			term.Mul(&m[row][col], &in[row])
+			acc.Add(&acc, &term)
+		}
+		out[col] = acc
+	}
+	return out
+}
+
+func mixLast(out *fr.Element, in []fr.Element, m [][]fr.Element, idx int) {
+	out.SetZero()
+	for row := range in {
+		var term fr.Element
+		term.Mul(&m[row][idx], &in[row])
+		out.Add(out, &term)
+	}
+}
+
+func bigIntSliceToElements(in []*big.Int) []fr.Element {
+	out := make([]fr.Element, len(in))
+	for i := range in {
+		out[i].SetBigInt(in[i])
+	}
+	return out
+}
+
+func bigIntMatrixToElements(in [][]*big.Int) [][]fr.Element {
+	out := make([][]fr.Element, len(in))
+	for i := range in {
+		out[i] = make([]fr.Element, len(in[i]))
+		for j := range in[i] {
+			out[i][j].SetBigInt(in[i][j])
+		}
+	}
+	return out
+}
+
+func elementToBigInt(in fr.Element) *big.Int {
+	var out big.Int
+	in.BigInt(&out)
+	return &out
+}
+EOF
+" in /Users/yani/Noema/backend succeeded in 52ms:
+
+
+thinking
+**Running all Go tests**
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 934ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
 ok  	noema/internal/config	(cached)
@@ -56,301 +883,32 @@ ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
-?   	noema/internal/zk/policyzk	[no test files]
+ok  	noema/internal/zk/policyzk	0.144s
 
 thinking
-**Confirming tests pass, planning UI search**
+**Summarizing test results and changes**
 
-Tests have passed successfully. Next, I'll locate the relevant frontend UI components to identify where I can make a meaningful improvement.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "frontend|ui|css|tailwind|react|svelte|vue|template" .' in /Users/yani/Noema/backend succeeded in 52ms:
-./go.sum:82:github.com/google/uuid v1.1.2/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
-./go.sum:95:github.com/klauspost/cpuid/v2 v2.3.0 h1:S4CRMLnYUhGeDFDqkGriYKdfoFlDnMtqTiI/sFzhA9Y=
-./go.sum:96:github.com/klauspost/cpuid/v2 v2.3.0/go.mod h1:hqwkgyIinND0mEev00jJYCxPNVRVXFQeu1XKlok6oO0=
-./go.sum:122:github.com/quic-go/qpack v0.5.1 h1:giqksBPnT/HDtZ6VhtFKgoLOWmlyo9Ei6u9PqzIMbhI=
-./go.sum:123:github.com/quic-go/qpack v0.5.1/go.mod h1:+PC4XFrEskIVkcLzpEkbLqq1uCoxPhQuvK5rH1ZgaEg=
-./go.sum:124:github.com/quic-go/quic-go v0.54.0 h1:6s1YB9QotYI6Ospeiguknbp2Znb/jZYjZLRXn9kMQBg=
-./go.sum:125:github.com/quic-go/quic-go v0.54.0/go.mod h1:e68ZEaCdyviluZmy44P6Iey98v/Wfz6HCjQEm+l8zTY=
-./go.sum:142:github.com/twitchyliquid64/golang-asm v0.15.1 h1:SU5vSMR7hnwNxj24w34ZyCi/FmDZTkS4MhqMhdFk5YI=
-./go.sum:143:github.com/twitchyliquid64/golang-asm v0.15.1/go.mod h1:a1lVb/DtPvCB8fslRZhAngC2+aY1QWCk3Cedj/Gdt08=
-./internal/gemini/gemini.go:62:func buildConfig(req EvalRequest) *genai.GenerateContentConfig {
-./internal/gemini/gemini.go:77:func buildContents(req EvalRequest) []*genai.Content {
-./internal/gemini/gemini.go:129:	result, err := client.Models.GenerateContent(ctx, model, buildContents(req), buildConfig(req))
-./internal/gemini/gemini.go:147:	var sb strings.Builder
-./internal/gemini/gemini.go:149:	for result, err := range client.Models.GenerateContentStream(ctx, model, buildContents(req), buildConfig(req)) {
-./internal/auth/middleware.go:48:			abortCookieAuth(c, "Session required")
-./internal/web/auth.go:13:// IndexData is passed to the landing template.
-./internal/evaluate/prompt.go:51:		Description: "Assess whether the dataset contains safety-critical guidance such as medical, legal, engineering, or operational instructions that could cause harm if followed incorrectly.",
-./internal/evaluate/prompt.go:78:func buildSystemPrompt() string {
-./internal/evaluate/prompt.go:88:func buildUserPrompt(cfg PolicyConfig, datasetJSON []byte, images []ImageInfo) string {
-./internal/evaluate/handler_integration_test.go:35:	body, contentType := buildMultipartEvalRequest(t, cfg, evalOut, true)
-
-thinking
-**Planning meaningful CSS improvements**
-
-I'm targeting the main stylesheet to enhance form focus styles, button states, and spacing for better UX and accessibility without changing functionality. Next, I'll inspect the CSS for suitable adjustments.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap');
-
-:root {
-  --bg: #05060a;
-  --bg-card: rgba(9, 12, 18, 0.9);
-  --text: #f4f6fb;
-  --text-muted: #9aa3b2;
-  --accent: #45d4ff;
-  --accent-strong: #2c7bff;
-  --accent-glow: rgba(69, 212, 255, 0.35);
-  --border: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(69, 212, 255, 0.4);
-  --error: #f87171;
-  --success: #22c55e;
-  --warning: #fbbf24;
-  --shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
-}
-
-*,
-*::before,
-
-thinking
-**Inspecting input styles**
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "input|textarea|select|button|focus" web/static/styles.css' in /Users/yani/Noema/backend succeeded in 52ms:
-253:.input {
-264:.input::placeholder { color: var(--text-muted); }
-265:.input:hover { border-color: rgba(255,255,255,0.18); }
-266:.input:focus {
-271:.input.is-invalid {
-276:.textarea { min-height: 160px; resize: vertical; }
-342:.btn:focus-visible,
-343:.nav-link:focus-visible,
-344:.input:focus-visible,
-345:.segmented-btn:focus-visible,
-346:.stepper-step:focus-visible,
-347:.severity-select:focus-visible,
-348:.upload-zone:focus-visible,
-349:.recent-run-item:focus-visible,
-350:.recent-run-link:focus-visible,
-351:.verify-run-id:focus-visible,
-352:.logo:focus-visible,
-353:.constraint-details summary:focus-visible {
-358:.switch input:focus-visible + .switch-track {
-482:.upload-zone:focus-within {
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '230,380p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 51ms:
-  gap: 0.75rem;
-  align-items: center;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  margin-bottom: 1.2rem;
-}
-
-.label {
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: var(--text);
-}
-
-.form-hint {
-  margin: 0;
-  font-size: 0.85rem;
-
-thinking
-**Adding reduced motion support**
-
-I'm planning to add prefers-reduced-motion styles to disable animations and transitions for better accessibility, focusing on one CSS file and also improving focus outlines on buttons and possibly enhancing upload zone drag state feedback.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '430,560p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
-.status-pill {
-  font-size: 0.7rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  padding: 0.2rem 0.55rem;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-.status-pill-pass {
-  color: #86efac;
-  border-color: rgba(34, 197, 94, 0.5);
-  background: rgba(34, 197, 94, 0.12);
-}
-.status-pill-fail {
-  color: #fca5a5;
-  border-color: rgba(248, 113, 113, 0.5);
-  background: rgba(248, 113, 113, 0.12);
-}
-
-thinking
-**Adding reduced motion CSS**
-
-I'm preparing a small CSS addition at the file's end to disable animations, transitions, and transforms under prefers-reduced-motion, improving accessibility without altering existing UI functionality.
-file update
-M /Users/yani/Noema/backend/web/static/styles.css
-@@ -361,2 +361,16 @@
- 
-+@media (prefers-reduced-motion: reduce) {
-+  *,
-+  *::before,
-+  *::after {
-+    animation-duration: 0.01ms !important;
-+    animation-iteration-count: 1 !important;
-+    transition-duration: 0.01ms !important;
-+    scroll-behavior: auto !important;
-+  }
-+
-+  .loading-state::before { animation: none !important; }
-+  .btn:active { transform: none; }
-+}
-+
- /* ===== Dashboard ===== */
-apply_patch(auto_approved=true) exited 0 in 35ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/web/static/styles.css
-file update:
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 8bbb7187a7a6d33dac814417a6f72d82667c0f77..b373263d0f8abf71250cb7dc67106d3d92003433
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -359,6 +359,20 @@
-   box-shadow: 0 0 0 3px var(--accent-glow);
- }
- 
-+@media (prefers-reduced-motion: reduce) {
-+  *,
-+  *::before,
-+  *::after {
-+    animation-duration: 0.01ms !important;
-+    animation-iteration-count: 1 !important;
-+    transition-duration: 0.01ms !important;
-+    scroll-behavior: auto !important;
-+  }
-+
-+  .loading-state::before { animation: none !important; }
-+  .btn:active { transform: none; }
-+}
-+
- /* ===== Dashboard ===== */
- .main-dashboard {
-   align-items: flex-start;
-
-file update:
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 8bbb7187a7a6d33dac814417a6f72d82667c0f77..b373263d0f8abf71250cb7dc67106d3d92003433
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -359,6 +359,20 @@
-   box-shadow: 0 0 0 3px var(--accent-glow);
- }
- 
-+@media (prefers-reduced-motion: reduce) {
-+  *,
-+  *::before,
-+  *::after {
-+    animation-duration: 0.01ms !important;
-+    animation-iteration-count: 1 !important;
-+    transition-duration: 0.01ms !important;
-+    scroll-behavior: auto !important;
-+  }
-+
-+  .loading-state::before { animation: none !important; }
-+  .btn:active { transform: none; }
-+}
-+
- /* ===== Dashboard ===== */
- .main-dashboard {
-   align-items: flex-start;
-
-
-thinking
-**Running full Go test suite**
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 316ms:
-?   	noema/cmd/server	[no test files]
-?   	noema/internal/auth	[no test files]
-ok  	noema/internal/config	(cached)
-?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	(cached)
-?   	noema/internal/gemini	[no test files]
-ok  	noema/internal/httputil	(cached)
-ok  	noema/internal/session	(cached)
-ok  	noema/internal/verify	(cached)
-?   	noema/internal/web	[no test files]
-ok  	noema/internal/zk	(cached)
-?   	noema/internal/zk/policyzk	[no test files]
-file update:
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 8bbb7187a7a6d33dac814417a6f72d82667c0f77..b373263d0f8abf71250cb7dc67106d3d92003433
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -359,6 +359,20 @@
-   box-shadow: 0 0 0 3px var(--accent-glow);
- }
- 
-+@media (prefers-reduced-motion: reduce) {
-+  *,
-+  *::before,
-+  *::after {
-+    animation-duration: 0.01ms !important;
-+    animation-iteration-count: 1 !important;
-+    transition-duration: 0.01ms !important;
-+    scroll-behavior: auto !important;
-+  }
-+
-+  .loading-state::before { animation: none !important; }
-+  .btn:active { transform: none; }
-+}
-+
- /* ===== Dashboard ===== */
- .main-dashboard {
-   align-items: flex-start;
-
+Tests pass cleanly with one new file added; changes span 2-6 key bullet points describing what's modified. All tests run include `go test ./...`. No plumbing or integration work done yet. Next steps may involve wiring but aren't required now.
 codex
-What you changed (short)
-- Added reduced-motion handling in `web/static/styles.css` to improve accessibility and UX by minimizing animations/transitions for users who prefer reduced motion.
+Files changed
+- `internal/zk/policyzk/circuit_test.go`
+
+What you changed
+- Added a Groth16 BN254 end-to-end test for `PolicyGateCircuit` covering compile, setup, prove, and verify.
+- Implemented deterministic PASS and FAIL witness cases with fixed vectors and enforced `OverallPass` behavior.
+- Added a native Poseidon hash helper (using in-repo constants) to compute the expected public `Commitment` deterministically.
 
 Tests run
-- `go test ./...`
-
-If you want a second polish pass, I can target input/validation feedback or wizard step clarity next.
-file update:
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 8bbb7187a7a6d33dac814417a6f72d82667c0f77..b373263d0f8abf71250cb7dc67106d3d92003433
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -359,6 +359,20 @@
-   box-shadow: 0 0 0 3px var(--accent-glow);
- }
- 
-+@media (prefers-reduced-motion: reduce) {
-+  *,
-+  *::before,
-+  *::after {
-+    animation-duration: 0.01ms !important;
-+    animation-iteration-count: 1 !important;
-+    transition-duration: 0.01ms !important;
-+    scroll-behavior: auto !important;
-+  }
-+
-+  .loading-state::before { animation: none !important; }
-+  .btn:active { transform: none; }
-+}
-+
- /* ===== Dashboard ===== */
- .main-dashboard {
-   align-items: flex-start;
-
+- `cd backend && go test ./...`
 tokens used
-22,611
-What you changed (short)
-- Added reduced-motion handling in `web/static/styles.css` to improve accessibility and UX by minimizing animations/transitions for users who prefer reduced motion.
+69,138
+Files changed
+- `internal/zk/policyzk/circuit_test.go`
+
+What you changed
+- Added a Groth16 BN254 end-to-end test for `PolicyGateCircuit` covering compile, setup, prove, and verify.
+- Implemented deterministic PASS and FAIL witness cases with fixed vectors and enforced `OverallPass` behavior.
+- Added a native Poseidon hash helper (using in-repo constants) to compute the expected public `Commitment` deterministically.
 
 Tests run
-- `go test ./...`
-
-If you want a second polish pass, I can target input/validation feedback or wizard step clarity next.
+- `cd backend && go test ./...`
