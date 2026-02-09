@@ -7,45 +7,241 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3cb2-11d5-7a30-9427-b5cf4c88f3c9
+session id: 019c411e-fda6-7440-84e4-f69b7a658c65
 --------
 user
-You are an autonomous coding agent polishing the Noema repository.
+You are an autonomous coding agent working on the Noema repository.
 
-Hard rules:
+MISSION (priority order):
+1) Add a real gnark circuit test for the PolicyGateCircuit (using our in-repo Poseidon implementation, package circuits).
+2) Make the circuit test pass reliably (compile -> prove -> verify) using Groth16 on BN254.
+3) ONLY AFTER tests pass: wire the backend plumbing to call the gnark prover/verifier behind the existing zk.GenerateProof / zk.VerifyProof API, keeping the public API shape unchanged (proof_b64 + public_inputs_b64).
+
+HARD RULES:
 - DO NOT run git commit, git reset, git clean, or anything that modifies git history.
-- I will run git commits outside of you.
-- Keep changes small: max 3 files per iteration.
+- Keep changes small: max 3 files per iteration. If more is needed, stage work across multiple iterations.
 - No cosmetic-only edits.
-- No new dependencies unless absolutely necessary.
+- No new dependencies unless absolutely necessary. Use existing gnark dependencies already in the repo. If gnark is not yet in go.mod, add it only if unavoidable.
+- Do not change routes or response shapes. Keep /api/evaluate and /api/verify behavior stable.
+- Do not redesign UI. This task is ZK/circuit/testing/plumbing only.
+- Always run: cd backend && go test ./... at least once per iteration.
 
-Goal: continuously improve production quality.
+WORKFLOW YOU MUST FOLLOW (do not skip):
+A) Inspect current circuit code and poseidon implementation:
+   - Find the PolicyGateCircuit (the policy ZK circuit) and confirm it imports and uses circuits.Poseidon (NOT gnark/std poseidon).
+   - Confirm fixed N=6 and the frozen constraint ordering.
+B) Add tests FIRST:
+   - Create a new Go test file for the circuit (example name: backend/internal/zk/policy_circuit_test.go or wherever circuits live).
+   - The test must:
+     1) Compile the circuit to R1CS
+     2) Run Groth16 setup
+     3) Build a witness with a PASS case and generate a proof
+     4) Verify the proof using the public witness
+     5) Build a witness with a FAIL case and confirm either:
+        - proving fails (unsatisfied), OR
+        - proving succeeds only if OverallPass is set correctly (0), AND verifying matches the expected output
+   - Use deterministic test vectors:
+     - datasetDigestLo/Hi fixed constants
+     - enabled/maxAllowed/severity arrays fixed constants
+     - Compute the expected Commitment in-circuit by setting Commitment to the same value computed by the circuit.
+       (In gnark tests, you can set Commitment as a public variable equal to circuits.Poseidon(domainSep + inputs) by reusing the same circuits.Poseidon function in a small helper circuit OR by computing it with the same function in-circuit and asserting equality.)
+   - The test must assert:
+     - OverallPass == 1 for pass vector, and verify passes.
+     - OverallPass == 0 for fail vector, and verify passes only with correct OverallPass.
+C) Fix whatever is broken until all tests pass:
+   - If compilation errors, fix imports or package paths.
+   - If poseidon params/functions missing, use the existing in-repo Poseidon code as the single source of truth.
+   - If constraints are wrong, fix circuit logic minimally.
+D) ONLY AFTER TESTS PASS: wire plumbing:
+   - Replace stub proof internals inside backend/internal/zk/zk.go (or equivalent) to use gnark Groth16 BN254:
+     - GenerateProof: build witness from inputs (enabled/maxAllowed/severity + datasetDigest limbs) and output proof bytes base64
+     - VerifyProof: decode proof and public inputs and verify using vk
+   - Keep existing API signatures and keep proof_b64 + public_inputs_b64 shape.
+   - You may keep public_inputs_b64 as the existing string format for now, but the verify path must map it deterministically to the circuit’s public witness (Commitment, OverallPass, MaxSeverity).
+   - Ensure keys are handled sanely for dev:
+     - For now, allow generating proving/verifying keys at startup or cached on disk under backend/internal/zk (dev only),
+       OR embed small test keys only for tests.
+     - Don’t over-engineer; prioritize working tests and stable verify.
 
-Iteration:
-1) Run: cd backend && go test ./...
-2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
-3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+ACCEPTANCE CRITERIA (must satisfy):
+- `cd backend && go test ./...` passes.
+- There is at least one new test that proves+verifies the circuit in a PASS case.
+- There is at least one test that demonstrates FAIL behavior (overall_pass=0) is enforced and verifiable.
+- If plumbing was wired, verify endpoint still accepts proof_b64/public_inputs_b64 and returns verified result correctly.
 
-Pick the highest-value improvement:
-A) Reliability/correctness: validation, error handling, run persistence, verify robustness
-B) Tests: add/strengthen tests for the change you made
-C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
-D) Maintainability: reduce duplication with tiny refactors
-E) UX: wizard/results/verify clarity (small, safe changes)
-F) Docs: README/DEPLOYMENT polish
-G) Performance: safe wins only
-
-Finish with:
-- What you changed (short)
+OUTPUT FORMAT (end of each run):
+- Files changed (list)
+- What you changed (2–6 bullets)
 - Tests run (must include go test ./...)
 mcp startup: no servers
 
 thinking
-**Requesting clear instructions**
-
-The user states lacking skill and needs explicit instructions to run tests using exec.
+**Preparing to inspect files**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 273ms:
+/bin/zsh -lc ls in /Users/yani/Noema/backend succeeded in 51ms:
+cmd
+data
+go.mod
+go.sum
+internal
+web
+exec
+/bin/zsh -lc 'rg -n "PolicyGateCircuit|Poseidon" internal' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/handler.go:158:		commitment, err := zk.CommitmentPoseidon(datasetDigest, witness.Enabled, witness.MaxAllowed, witness.Severity)
+internal/zk/policy_circuit_groth16_test.go:14:func TestPolicyGateCircuit_Groth16PassFail(t *testing.T) {
+internal/zk/policy_circuit_groth16_test.go:15:	var circuit policyzk.PolicyGateCircuit
+internal/zk/policy_circuit_groth16_test.go:31:	passCommitment, err := CommitmentPoseidon(datasetDigestHex, enabled, maxAllowed, passSeverity)
+internal/zk/policy_circuit_groth16_test.go:47:	passAssignment := policyzk.PolicyGateCircuit{
+internal/zk/policy_circuit_groth16_test.go:75:	failCommitment, err := CommitmentPoseidon(datasetDigestHex, enabled, maxAllowed, failSeverity)
+internal/zk/policy_circuit_groth16_test.go:86:	failAssignment := policyzk.PolicyGateCircuit{
+internal/zk/zk_test.go:10:	commitment, err := CommitmentPoseidon(witness.DatasetDigestHex, witness.Enabled, witness.MaxAllowed, witness.Severity)
+internal/zk/zk_test.go:12:		t.Fatalf("CommitmentPoseidon error: %v", err)
+internal/zk/zk_test.go:36:	commitment, err := CommitmentPoseidon(witness.DatasetDigestHex, witness.Enabled, witness.MaxAllowed, witness.Severity)
+internal/zk/zk_test.go:38:		t.Fatalf("CommitmentPoseidon error: %v", err)
+internal/zk/zk.go:33:// PolicyGateConstraintCount is the fixed N for the PolicyGateCircuit.
+internal/zk/zk.go:55:// WitnessInputs carries the private inputs for the PolicyGateCircuit.
+internal/zk/zk.go:81:		var circuit policyzk.PolicyGateCircuit
+internal/zk/zk.go:108:	computedCommitment, err := CommitmentPoseidon(pi.Witness.DatasetDigestHex, pi.Witness.Enabled, pi.Witness.MaxAllowed, pi.Witness.Severity)
+internal/zk/zk.go:121:	assignment := policyzk.PolicyGateCircuit{
+internal/zk/zk.go:180:	assignment := policyzk.PolicyGateCircuit{
+internal/zk/zk.go:354:// CommitmentPoseidon computes the PolicyGateCircuit commitment.
+internal/zk/zk.go:355:func CommitmentPoseidon(datasetDigestHex string, enabled, maxAllowed, severity [PolicyGateConstraintCount]uint64) (string, error) {
+internal/zk/policyzk/circuit.go:10:// PolicyGateCircuit proves:
+
+thinking
+**Inspecting existing circuit tests**
+exec
+/bin/zsh -lc "sed -n '1,260p' internal/zk/policyzk/circuit.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package policyzk
+
+import (
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark/frontend"
+)
+
+const N = 6
+
+// PolicyGateCircuit proves:
+//   - The prover knows (datasetDigest, policy config, gemini severities) that hash to Commitment
+//   - And the deterministic policy check passes:
+//     for each i: if Enabled[i] == 1 then Severity[i] <= MaxAllowed[i]
+//
+// Public outputs:
+// - Commitment: binds everything (dataset + policy + gemini outputs)
+// - OverallPass: 1 iff policy passes
+// - MaxSeverity (optional): max observed severity among enabled constraints
+type PolicyGateCircuit struct {
+	// ===== Private witness =====
+
+thinking
+**Confirming Poseidon import source**
+
+Discovered Poseidon circuits are imported externally from GitHub rather than using the internal copy; next step is to check go.mod for any module replacement directives.
+exec
+/bin/zsh -lc 'rg -n "poseidon-gnark|gnark" go.mod internal/zk' in /Users/yani/Noema/backend succeeded in 53ms:
+go.mod:8:	github.com/AlpinYukseloglu/poseidon-gnark v0.0.0-20230513045146-69f5c852ef54
+go.mod:9:	github.com/consensys/gnark v0.14.0
+go.mod:25:	github.com/consensys/gnark-crypto v0.19.0 // indirect
+go.mod:41:	github.com/ingonyama-zk/icicle-gnark/v3 v3.2.2 // indirect
+go.mod:75:replace github.com/AlpinYukseloglu/poseidon-gnark => ./internal/zk/policyzk/poseidon-gnark
+internal/zk/policy_circuit_groth16_test.go:6:	"github.com/consensys/gnark-crypto/ecc"
+internal/zk/policy_circuit_groth16_test.go:7:	"github.com/consensys/gnark/backend/groth16"
+internal/zk/policy_circuit_groth16_test.go:8:	"github.com/consensys/gnark/frontend"
+internal/zk/policy_circuit_groth16_test.go:9:	"github.com/consensys/gnark/frontend/cs/r1cs"
+internal/zk/README_GNARK.md:67:- Use gnark to generate and verify a real proof using BN254.
+internal/zk/README_GNARK.md:79:understand the gnark field encoding; it can keep submitting the base64 blob.
+internal/zk/README_GNARK.md:82:GenerateProof parse it into field elements for gnark. This is simplest to keep
+internal/zk/README_GNARK.md:85:### Circuit sketch (gnark)
+internal/zk/README_GNARK.md:103:Implement gnark under the hood:
+internal/zk/README_GNARK.md:151:### Where to wire gnark
+internal/zk/README_GNARK.md:154:  compatibility. Or swap them for a gnark-optimized public inputs format.
+internal/zk/zk.go:14:	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+internal/zk/zk.go:15:	"github.com/consensys/gnark-crypto/ecc"
+internal/zk/zk.go:16:	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+internal/zk/zk.go:17:	"github.com/consensys/gnark/backend/groth16"
+
+thinking
+**Identifying existing tests**
+
+I'm locating relevant tests in internal/zk/policyzk/circuit_test.go and internal/zk/policy_circuit_groth16_test.go to understand current coverage and validation approaches.
+exec
+/bin/zsh -lc "sed -n '1,220p' internal/zk/policyzk/circuit_test.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package policyzk
+
+import (
+	"math/big"
+	"testing"
+
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+	"github.com/stretchr/testify/require"
+)
+
+func TestPolicyGateCircuit_Groth16PassFail(t *testing.T) {
+	require := require.New(t)
+
+	var circuit PolicyGateCircuit
+	r1cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
+exec
+/bin/zsh -lc "sed -n '220,520p' internal/zk/policyzk/circuit_test.go" in /Users/yani/Noema/backend succeeded in 53ms:
+		}
+		out[col] = acc
+	}
+	return out
+}
+
+func mixLast(out *fr.Element, in []fr.Element, m [][]fr.Element, idx int) {
+	out.SetZero()
+	for row := range in {
+		var term fr.Element
+		term.Mul(&m[row][idx], &in[row])
+		out.Add(out, &term)
+	}
+}
+
+func bigIntSliceToElements(in []*big.Int) []fr.Element {
+	out := make([]fr.Element, len(in))
+	for i := range in {
+		out[i].SetBigInt(in[i])
+	}
+
+thinking
+**Identifying existing tests**
+
+I found tests already exist in the codebase and will check the specific policy circuit test file next to understand coverage.
+exec
+/bin/zsh -lc "sed -n '1,200p' internal/zk/policy_circuit_groth16_test.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package zk
+
+import (
+	"testing"
+
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+
+	"noema/internal/zk/policyzk"
+)
+
+func TestPolicyGateCircuit_Groth16PassFail(t *testing.T) {
+	var circuit policyzk.PolicyGateCircuit
+	r1cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
+	if err != nil {
+		t.Fatalf("compile circuit: %v", err)
+	}
+
+
+thinking
+**Running full test suite**
+
+I'm running all tests with `go test ./...` to check for any existing failures in the codebase.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 310ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
 ok  	noema/internal/config	(cached)
@@ -57,92 +253,54 @@ ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
+ok  	noema/internal/zk/policyzk	(cached)
 
 thinking
-**Planning targeted reliability improvements**
+**Reviewing zk.go for circuit integration**
 
-Tests pass, so I'll inspect the repo using precise searches to identify small, focused reliability improvements affecting at most three files.
+Tests pass, but I'll inspect zk.go to check if it's fully wired or still stubbed, ensuring the real gnark circuit test uses the in-repo Poseidon as intended.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"TODO|FIXME|panic\\(\" internal" in /Users/yani/Noema/backend exited 1 in 51ms:
-
-
-thinking
-**Considering error handling improvements**
-
-I'm exploring whether adding error handling or inspecting internal/session errors can improve the current process, and planning to use searches focused on ignored errors to investigate further.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"_ =|\\bignore\\b|TODO\" internal" in /Users/yani/Noema/backend succeeded in 52ms:
-internal/evaluate/storage.go:87:			_ = os.Remove(tmpName)
-internal/evaluate/storage.go:91:		_ = tmp.Close()
-internal/evaluate/storage.go:95:		_ = tmp.Close()
-internal/evaluate/storage.go:99:		_ = tmp.Close()
-internal/evaluate/storage.go:110:		_ = dirFile.Sync()
-internal/evaluate/storage.go:111:		_ = dirFile.Close()
-internal/evaluate/gemini_eval.go:48:		_ = os.Remove(cachePath(runsDir, key))
-internal/evaluate/gemini_eval.go:50:		_ = os.Remove(cachePath(runsDir, key))
-internal/evaluate/handler.go:89:				_ = os.RemoveAll(runPath)
-internal/zk/zk.go:177:		_, _ = h.Write(p)
-
-thinking
-**Checking logging possibilities in storage.go**
-
-I'm looking into adding best-effort logging for ignored errors in evaluate/storage.go but need to verify if a logger is available for use.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
+/bin/zsh -lc "sed -n '1,240p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package zk
 
 import (
-	"crypto/rand"
-	"encoding/json"
+	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
-	"io"
 	"math/big"
-	"mime/multipart"
-	"os"
-	"path/filepath"
 	"strconv"
-	"sync/atomic"
-	"time"
-)
+	"strings"
+	"sync"
 
-var runIDCounter uint64
-
-func genRunID() string {
-	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
-
-thinking
-**Considering error handling improvements**
-
-Thinking about adding error returns on directory sync failures and possibly handling errors during cleanup, but deciding it's not critical; also planning to check error handling in the Gemini evaluation next.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/gemini_eval.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"context"
-	"log"
-	"mime/multipart"
-	"os"
-	"time"
-
-	"noema/internal/config"
-	"noema/internal/gemini"
-)
-
-const geminiEvalTimeout = 45 * time.Second
-
-func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
-	if out, provided, err := parseEvalOutputProvided(form, enabled); err != nil {
-		return EvalOutput{}, err
-	} else if provided {
-		return out, nil
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/constraint"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
 
 thinking
-**Reviewing error handling around file sync and updates**
+**Verifying gnark poseidon usage in tests**
 
-I'm assessing if syncing the directory after renaming in writeAtomic should handle errors or just ignore them for reliability; also verifying updateRunsIndex error returns, noting that corrupted error is only returned if saveJSON succeeds. Next, I'll check internal/zk/zk.go for similar patterns with ignored errors.
+I'm confirming CommitmentPoseidon in zk.go leverages poseidon-gnark circuits to ensure internal tests match the in-repo poseidon implementation used in policyzk/circuit_test.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '130,220p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 52ms:
+/bin/zsh -lc "sed -n '240,460p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+			v, err := strconv.Atoi(kv[1])
+			if err != nil {
+				return PublicInputs{}, fmt.Errorf("invalid policy threshold")
+			}
+			if v < 0 || v > 2 {
+				return PublicInputs{}, fmt.Errorf("policy threshold must be 0..2")
+			}
+			out.PolicyThreshold = v
+			seenPT = true
+		case "ms":
+			if seenMS {
+				return PublicInputs{}, fmt.Errorf("duplicate max severity")
+			}
 			v, err := strconv.Atoi(kv[1])
 			if err != nil {
 				return PublicInputs{}, fmt.Errorf("invalid max severity")
@@ -150,264 +308,34 @@ exec
 			if v < 0 || v > 2 {
 				return PublicInputs{}, fmt.Errorf("max severity must be 0..2")
 			}
-			out.MaxSeverity = v
-			seenMS = true
-		case "op":
-			v, err := strconv.Atoi(kv[1])
-			if err != nil {
-				return PublicInputs{}, fmt.Errorf("invalid overall pass")
-			}
-			if v != 0 && v != 1 {
-				return PublicInputs{}, fmt.Errorf("overall pass must be 0 or 1")
-			}
-			out.OverallPass = v == 1
-			seenOP = true
-		case "c":
-
-thinking
-**Reviewing error handling and validation**
-
-I'm noting that the hash write error is ignored safely but considering adding validation in saving uploads, such as dataset file size checks, while avoiding new dependencies. Next, I'll inspect file operations like os.MkdirAll in evaluate/handler for similar silent error handling to improve reliability.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package evaluate
-
-import (
-	"encoding/json"
-	"fmt"
-	"log"
-	"mime/multipart"
-	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
-	"time"
-
-	"noema/internal/config"
-	"noema/internal/httputil"
-	"noema/internal/zk"
-
-	"github.com/gin-gonic/gin"
-)
 
 
 thinking
-**Reviewing error handling and durability improvements**
+**Confirming existing ZK circuit tests**
 
-I'm considering adding mild logging for verification errors to aid reliability and ensuring better temp file closure on early write errors. Also, syncing the directory after rename in updateRunsIndex might improve durability, though it risks strict failures on some systems and may need a best-effort approach.
+The repo already includes a real gnark circuit test with PolicyGateCircuit using circuits.Poseidon, satisfying the requirement with existing tests; no code changes are needed.
 thinking
-**Considering best-effort logging without error returns**
+**Confirming no code changes needed**
 
-I'll keep directory syncing best-effort with logging only to avoid API failures despite successful saves, and verify if parseEvalOutputProvided fully validates data to decide if extra validation in resolveEvalOutput is needed.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"encoding/json"
-	"fmt"
-	"io"
-	"mime/multipart"
-	"path/filepath"
-	"strings"
-
-	"noema/internal/config"
-)
-
-func parseSpec(form *multipart.Form) (Spec, error) {
-	specStrs := form.Value["spec"]
-	if len(specStrs) == 0 || specStrs[0] == "" {
-		return Spec{}, fmt.Errorf("missing field: spec")
-	}
-	if len(specStrs) > 1 {
-		return Spec{}, fmt.Errorf("only one spec value allowed")
-
-
-thinking
-**Identifying potential validation and error handling improvements**
-
-Noticed opportunities to improve validation by checking dataset file size >0 for reliability and considering filename validation against path traversal. Also spotted silent error ignores in pruneRuns that could benefit from logging, and identified a potential race in pruneRuns removing the current run without exclusion. Observed updateRunsIndex might assume runsDir exists, suggesting a need for explicit directory existence checks.
-thinking
-**Improving error handling and validation for reliability**
-
-Planning to enforce dataset file size and filename presence in uploads for better validation. Noticed gemini eval’s cache removal ignores errors without logging; adding logs could help detect stale caches. Also targeting proof verification to check errors explicitly and return 500 on failure instead of silently proceeding, enhancing correctness.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "func VerifyProof" -n internal/zk/zk.go' in /Users/yani/Noema/backend succeeded in 51ms:
-59:func VerifyProof(proofB64, publicInputsB64 string) (bool, string, error) {
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,120p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package zk
-
-import (
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
-	"fmt"
-	"strconv"
-	"strings"
-)
-
-const (
-	ProofSystem = "groth16"
-	ProofCurve  = "bn254"
-
-	publicInputsPrefix = "noema_public_inputs_v1|"
-	proofPrefix        = "noema_stub_proof_v1|"
-)
-
-// PublicInputs define the public inputs for policy aggregation.
-
-thinking
-**Changing proof verification error handling**
-
-I'll update the handler to return a 500 error if proof verification errors or fails, ensuring responses only succeed for valid proofs; this improves correctness by treating verification failure as an internal error. Next, I'll update the handler, add minimal logging, and rerun tests.
-file update
-M /Users/yani/Noema/backend/internal/evaluate/handler.go
-@@ -136,3 +136,13 @@
- 		}
--		verified, _, _ := zk.VerifyProof(proof.ProofB64, proof.PublicInputsB64)
-+		verified, reason, err := zk.VerifyProof(proof.ProofB64, proof.PublicInputsB64)
-+		if err != nil {
-+			log.Printf("proof verify error: %v", err)
-+			c.JSON(http.StatusInternalServerError, gin.H{"error": "proof verification failed"})
-+			return
-+		}
-+		if !verified {
-+			log.Printf("proof verify failed: %s", reason)
-+			c.JSON(http.StatusInternalServerError, gin.H{"error": "proof verification failed"})
-+			return
-+		}
- 
-apply_patch(auto_approved=true) exited 0 in 29ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/handler.go
-file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 6d4b14cc79eac50f8cfe6d93ae30aa660e4b86e8..f2b309e8d060d9a5c2c1704ea1624f889812bb14
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -134,7 +134,17 @@
- 			c.JSON(http.StatusInternalServerError, gin.H{"error": "proof generation failed"})
- 			return
- 		}
--		verified, _, _ := zk.VerifyProof(proof.ProofB64, proof.PublicInputsB64)
-+		verified, reason, err := zk.VerifyProof(proof.ProofB64, proof.PublicInputsB64)
-+		if err != nil {
-+			log.Printf("proof verify error: %v", err)
-+			c.JSON(http.StatusInternalServerError, gin.H{"error": "proof verification failed"})
-+			return
-+		}
-+		if !verified {
-+			log.Printf("proof verify failed: %s", reason)
-+			c.JSON(http.StatusInternalServerError, gin.H{"error": "proof verification failed"})
-+			return
-+		}
- 
- 		cleanupRun = false
- 		if err := updateRunsIndex(runsDir, config.RunsIndexLimit(), RunIndexEntry{
-
-file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 6d4b14cc79eac50f8cfe6d93ae30aa660e4b86e8..f2b309e8d060d9a5c2c1704ea1624f889812bb14
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -134,7 +134,17 @@
- 			c.JSON(http.StatusInternalServerError, gin.H{"error": "proof generation failed"})
- 			return
- 		}
--		verified, _, _ := zk.VerifyProof(proof.ProofB64, proof.PublicInputsB64)
-+		verified, reason, err := zk.VerifyProof(proof.ProofB64, proof.PublicInputsB64)
-+		if err != nil {
-+			log.Printf("proof verify error: %v", err)
-+			c.JSON(http.StatusInternalServerError, gin.H{"error": "proof verification failed"})
-+			return
-+		}
-+		if !verified {
-+			log.Printf("proof verify failed: %s", reason)
-+			c.JSON(http.StatusInternalServerError, gin.H{"error": "proof verification failed"})
-+			return
-+		}
- 
- 		cleanupRun = false
- 		if err := updateRunsIndex(runsDir, config.RunsIndexLimit(), RunIndexEntry{
-
-
-thinking
-**Rerunning tests**
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 618ms:
-?   	noema/cmd/server	[no test files]
-?   	noema/internal/auth	[no test files]
-ok  	noema/internal/config	(cached)
-?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	0.103s
-?   	noema/internal/gemini	[no test files]
-ok  	noema/internal/httputil	(cached)
-ok  	noema/internal/session	(cached)
-ok  	noema/internal/verify	(cached)
-?   	noema/internal/web	[no test files]
-ok  	noema/internal/zk	(cached)
-file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 6d4b14cc79eac50f8cfe6d93ae30aa660e4b86e8..f2b309e8d060d9a5c2c1704ea1624f889812bb14
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -134,7 +134,17 @@
- 			c.JSON(http.StatusInternalServerError, gin.H{"error": "proof generation failed"})
- 			return
- 		}
--		verified, _, _ := zk.VerifyProof(proof.ProofB64, proof.PublicInputsB64)
-+		verified, reason, err := zk.VerifyProof(proof.ProofB64, proof.PublicInputsB64)
-+		if err != nil {
-+			log.Printf("proof verify error: %v", err)
-+			c.JSON(http.StatusInternalServerError, gin.H{"error": "proof verification failed"})
-+			return
-+		}
-+		if !verified {
-+			log.Printf("proof verify failed: %s", reason)
-+			c.JSON(http.StatusInternalServerError, gin.H{"error": "proof verification failed"})
-+			return
-+		}
- 
- 		cleanupRun = false
- 		if err := updateRunsIndex(runsDir, config.RunsIndexLimit(), RunIndexEntry{
-
+No code changes are required; existing gnark circuit tests already cover proof generation and verification. I verified the backend plumbing in zk.GenerateProof and zk.VerifyProof is already implemented and integrated.
 codex
-What you changed (short)
-- Fail the request if proof verification errors or returns false, and log the reason for faster diagnosis.
+Files changed
+- None
+
+What you changed
+- No code changes required; existing gnark Groth16 pass/fail circuit tests are already present and using the in-repo Poseidon implementation via the module replace.
+- Verified that `zk.GenerateProof` and `zk.VerifyProof` are already wired to gnark Groth16 over BN254 while preserving `proof_b64` and `public_inputs_b64`.
 
 Tests run
-- `go test ./...`
-file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 6d4b14cc79eac50f8cfe6d93ae30aa660e4b86e8..f2b309e8d060d9a5c2c1704ea1624f889812bb14
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -134,7 +134,17 @@
- 			c.JSON(http.StatusInternalServerError, gin.H{"error": "proof generation failed"})
- 			return
- 		}
--		verified, _, _ := zk.VerifyProof(proof.ProofB64, proof.PublicInputsB64)
-+		verified, reason, err := zk.VerifyProof(proof.ProofB64, proof.PublicInputsB64)
-+		if err != nil {
-+			log.Printf("proof verify error: %v", err)
-+			c.JSON(http.StatusInternalServerError, gin.H{"error": "proof verification failed"})
-+			return
-+		}
-+		if !verified {
-+			log.Printf("proof verify failed: %s", reason)
-+			c.JSON(http.StatusInternalServerError, gin.H{"error": "proof verification failed"})
-+			return
-+		}
- 
- 		cleanupRun = false
- 		if err := updateRunsIndex(runsDir, config.RunsIndexLimit(), RunIndexEntry{
-
+- `cd /Users/yani/Noema/backend && go test ./...`
 tokens used
-12,580
-What you changed (short)
-- Fail the request if proof verification errors or returns false, and log the reason for faster diagnosis.
+32,370
+Files changed
+- None
+
+What you changed
+- No code changes required; existing gnark Groth16 pass/fail circuit tests are already present and using the in-repo Poseidon implementation via the module replace.
+- Verified that `zk.GenerateProof` and `zk.VerifyProof` are already wired to gnark Groth16 over BN254 while preserving `proof_b64` and `public_inputs_b64`.
 
 Tests run
-- `go test ./...`
+- `cd /Users/yani/Noema/backend && go test ./...`
