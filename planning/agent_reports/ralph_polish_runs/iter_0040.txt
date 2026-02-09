@@ -7,48 +7,273 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3ca4-3254-7623-84d1-494775861da6
+session id: 019c4117-fff7-7913-8fde-47dbb57fbaea
 --------
 user
-You are an autonomous coding agent polishing the Noema repository.
+You are an autonomous coding agent working on the Noema repository.
 
-Hard rules:
+MISSION (priority order):
+1) Add a real gnark circuit test for the PolicyGateCircuit (using our in-repo Poseidon implementation, package circuits).
+2) Make the circuit test pass reliably (compile -> prove -> verify) using Groth16 on BN254.
+3) ONLY AFTER tests pass: wire the backend plumbing to call the gnark prover/verifier behind the existing zk.GenerateProof / zk.VerifyProof API, keeping the public API shape unchanged (proof_b64 + public_inputs_b64).
+
+HARD RULES:
 - DO NOT run git commit, git reset, git clean, or anything that modifies git history.
-- I will run git commits outside of you.
-- Keep changes small: max 3 files per iteration.
+- Keep changes small: max 3 files per iteration. If more is needed, stage work across multiple iterations.
 - No cosmetic-only edits.
-- No new dependencies unless absolutely necessary.
+- No new dependencies unless absolutely necessary. Use existing gnark dependencies already in the repo. If gnark is not yet in go.mod, add it only if unavoidable.
+- Do not change routes or response shapes. Keep /api/evaluate and /api/verify behavior stable.
+- Do not redesign UI. This task is ZK/circuit/testing/plumbing only.
+- Always run: cd backend && go test ./... at least once per iteration.
 
-Goal: continuously improve production quality.
+WORKFLOW YOU MUST FOLLOW (do not skip):
+A) Inspect current circuit code and poseidon implementation:
+   - Find the PolicyGateCircuit (the policy ZK circuit) and confirm it imports and uses circuits.Poseidon (NOT gnark/std poseidon).
+   - Confirm fixed N=6 and the frozen constraint ordering.
+B) Add tests FIRST:
+   - Create a new Go test file for the circuit (example name: backend/internal/zk/policy_circuit_test.go or wherever circuits live).
+   - The test must:
+     1) Compile the circuit to R1CS
+     2) Run Groth16 setup
+     3) Build a witness with a PASS case and generate a proof
+     4) Verify the proof using the public witness
+     5) Build a witness with a FAIL case and confirm either:
+        - proving fails (unsatisfied), OR
+        - proving succeeds only if OverallPass is set correctly (0), AND verifying matches the expected output
+   - Use deterministic test vectors:
+     - datasetDigestLo/Hi fixed constants
+     - enabled/maxAllowed/severity arrays fixed constants
+     - Compute the expected Commitment in-circuit by setting Commitment to the same value computed by the circuit.
+       (In gnark tests, you can set Commitment as a public variable equal to circuits.Poseidon(domainSep + inputs) by reusing the same circuits.Poseidon function in a small helper circuit OR by computing it with the same function in-circuit and asserting equality.)
+   - The test must assert:
+     - OverallPass == 1 for pass vector, and verify passes.
+     - OverallPass == 0 for fail vector, and verify passes only with correct OverallPass.
+C) Fix whatever is broken until all tests pass:
+   - If compilation errors, fix imports or package paths.
+   - If poseidon params/functions missing, use the existing in-repo Poseidon code as the single source of truth.
+   - If constraints are wrong, fix circuit logic minimally.
+D) ONLY AFTER TESTS PASS: wire plumbing:
+   - Replace stub proof internals inside backend/internal/zk/zk.go (or equivalent) to use gnark Groth16 BN254:
+     - GenerateProof: build witness from inputs (enabled/maxAllowed/severity + datasetDigest limbs) and output proof bytes base64
+     - VerifyProof: decode proof and public inputs and verify using vk
+   - Keep existing API signatures and keep proof_b64 + public_inputs_b64 shape.
+   - You may keep public_inputs_b64 as the existing string format for now, but the verify path must map it deterministically to the circuit’s public witness (Commitment, OverallPass, MaxSeverity).
+   - Ensure keys are handled sanely for dev:
+     - For now, allow generating proving/verifying keys at startup or cached on disk under backend/internal/zk (dev only),
+       OR embed small test keys only for tests.
+     - Don’t over-engineer; prioritize working tests and stable verify.
 
-Iteration:
-1) Run: cd backend && go test ./...
-2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
-3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+ACCEPTANCE CRITERIA (must satisfy):
+- `cd backend && go test ./...` passes.
+- There is at least one new test that proves+verifies the circuit in a PASS case.
+- There is at least one test that demonstrates FAIL behavior (overall_pass=0) is enforced and verifiable.
+- If plumbing was wired, verify endpoint still accepts proof_b64/public_inputs_b64 and returns verified result correctly.
 
-Pick the highest-value improvement:
-A) Reliability/correctness: validation, error handling, run persistence, verify robustness
-B) Tests: add/strengthen tests for the change you made
-C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
-D) Maintainability: reduce duplication with tiny refactors
-E) UX: wizard/results/verify clarity (small, safe changes)
-F) Docs: README/DEPLOYMENT polish
-G) Performance: safe wins only
-
-Finish with:
-- What you changed (short)
+OUTPUT FORMAT (end of each run):
+- Files changed (list)
+- What you changed (2–6 bullets)
 - Tests run (must include go test ./...)
 mcp startup: no servers
 
 thinking
-**Confirming test strategy**
-
-Tests need to run using `go test` executed via command line rather than any skill or plugin integration.
+**Preparing to run tests**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 98ms:
+/bin/zsh -lc 'rg -n "PolicyGateCircuit|Poseidon" internal circuits -S' in /Users/yani/Noema/backend exited 2 in 52ms:
+rg: circuits: No such file or directory (os error 2)
+internal/evaluate/handler.go:158:		commitment, err := zk.CommitmentPoseidon(datasetDigest, witness.Enabled, witness.MaxAllowed, witness.Severity)
+internal/zk/policy_circuit_groth16_test.go:14:func TestPolicyGateCircuit_Groth16PassFail(t *testing.T) {
+internal/zk/policy_circuit_groth16_test.go:15:	var circuit policyzk.PolicyGateCircuit
+internal/zk/policy_circuit_groth16_test.go:31:	passCommitment, err := CommitmentPoseidon(datasetDigestHex, enabled, maxAllowed, passSeverity)
+internal/zk/policy_circuit_groth16_test.go:47:	passAssignment := policyzk.PolicyGateCircuit{
+internal/zk/policy_circuit_groth16_test.go:75:	failCommitment, err := CommitmentPoseidon(datasetDigestHex, enabled, maxAllowed, failSeverity)
+internal/zk/policy_circuit_groth16_test.go:86:	failAssignment := policyzk.PolicyGateCircuit{
+internal/zk/zk_test.go:10:	commitment, err := CommitmentPoseidon(witness.DatasetDigestHex, witness.Enabled, witness.MaxAllowed, witness.Severity)
+internal/zk/zk_test.go:12:		t.Fatalf("CommitmentPoseidon error: %v", err)
+internal/zk/zk_test.go:36:	commitment, err := CommitmentPoseidon(witness.DatasetDigestHex, witness.Enabled, witness.MaxAllowed, witness.Severity)
+internal/zk/zk_test.go:38:		t.Fatalf("CommitmentPoseidon error: %v", err)
+internal/zk/policyzk/circuit.go:10:// PolicyGateCircuit proves:
+internal/zk/policyzk/circuit.go:19:type PolicyGateCircuit struct {
+internal/zk/policyzk/circuit.go:34:	Commitment  frontend.Variable `gnark:",public"` // Poseidon(domain, datasetDigest, enabled, maxAllowed, severity)
+internal/zk/policyzk/circuit.go:41:func (c *PolicyGateCircuit) Define(api frontend.API) error {
+internal/zk/policyzk/circuit.go:103:	// Commitment = Poseidon(domainSep, datasetDigestLo, datasetDigestHi,
+internal/zk/policyzk/circuit.go:170:		return circuits.Poseidon(api, inputs)
+internal/zk/policyzk/circuit.go:172:	h := circuits.Poseidon(api, inputs[:maxInputs])
+internal/zk/policyzk/circuit.go:176:	return circuits.Poseidon(api, rest)
+
+thinking
+**Reviewing existing test files**
+exec
+/bin/zsh -lc "sed -n '1,220p' internal/zk/policyzk/circuit.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package policyzk
+
+import (
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark/frontend"
+)
+
+const N = 6
+
+// PolicyGateCircuit proves:
+//   - The prover knows (datasetDigest, policy config, gemini severities) that hash to Commitment
+//   - And the deterministic policy check passes:
+//     for each i: if Enabled[i] == 1 then Severity[i] <= MaxAllowed[i]
+//
+// Public outputs:
+// - Commitment: binds everything (dataset + policy + gemini outputs)
+// - OverallPass: 1 iff policy passes
+// - MaxSeverity (optional): max observed severity among enabled constraints
+type PolicyGateCircuit struct {
+	// ===== Private witness =====
+
+thinking
+**Reviewing existing tests**
+
+I'm noting that tests for Groth16 and policy circuits exist in internal/zk; next, I'll check their coverage and relevance.
+exec
+/bin/zsh -lc "sed -n '1,220p' internal/zk/policy_circuit_groth16_test.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package zk
+
+import (
+	"testing"
+
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+
+	"noema/internal/zk/policyzk"
+)
+
+func TestPolicyGateCircuit_Groth16PassFail(t *testing.T) {
+	var circuit policyzk.PolicyGateCircuit
+	r1cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
+	if err != nil {
+		t.Fatalf("compile circuit: %v", err)
+	}
+
+
+thinking
+**Confirming existing tests**
+
+Tests for the relevant functionality already exist in internal/zk and policyzk/circuit_test.go, so no immediate new test creation is needed.
+exec
+/bin/zsh -lc "sed -n '1,220p' internal/zk/policyzk/circuit_test.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package policyzk
+
+import (
+	"math/big"
+	"testing"
+
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+	"github.com/stretchr/testify/require"
+)
+
+func TestPolicyGateCircuit_Groth16PassFail(t *testing.T) {
+	require := require.New(t)
+
+	var circuit PolicyGateCircuit
+	r1cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
+exec
+/bin/zsh -lc "sed -n '220,520p' internal/zk/policyzk/circuit_test.go" in /Users/yani/Noema/backend succeeded in 53ms:
+		}
+		out[col] = acc
+	}
+	return out
+}
+
+func mixLast(out *fr.Element, in []fr.Element, m [][]fr.Element, idx int) {
+	out.SetZero()
+	for row := range in {
+		var term fr.Element
+		term.Mul(&m[row][idx], &in[row])
+		out.Add(out, &term)
+	}
+}
+
+func bigIntSliceToElements(in []*big.Int) []fr.Element {
+	out := make([]fr.Element, len(in))
+	for i := range in {
+		out[i].SetBigInt(in[i])
+	}
+
+thinking
+**Verifying Poseidon usage in tests**
+
+I'm checking whether CommitmentPoseidon in zk.go relies on the in-repo Poseidon circuits implementation to confirm that existing tests already use it as requested.
+exec
+/bin/zsh -lc "sed -n '1,240p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package zk
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"math/big"
+	"strconv"
+	"strings"
+	"sync"
+
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/constraint"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+exec
+/bin/zsh -lc "sed -n '240,520p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+			v, err := strconv.Atoi(kv[1])
+			if err != nil {
+				return PublicInputs{}, fmt.Errorf("invalid policy threshold")
+			}
+			if v < 0 || v > 2 {
+				return PublicInputs{}, fmt.Errorf("policy threshold must be 0..2")
+			}
+			out.PolicyThreshold = v
+			seenPT = true
+		case "ms":
+			if seenMS {
+				return PublicInputs{}, fmt.Errorf("duplicate max severity")
+			}
+			v, err := strconv.Atoi(kv[1])
+			if err != nil {
+				return PublicInputs{}, fmt.Errorf("invalid max severity")
+			}
+			if v < 0 || v > 2 {
+				return PublicInputs{}, fmt.Errorf("max severity must be 0..2")
+			}
+exec
+/bin/zsh -lc "sed -n '520,980p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+		out[i] = make([]fr.Element, len(in[i]))
+		for j := range in[i] {
+			out[i][j].SetBigInt(in[i][j])
+		}
+	}
+	return out
+}
+
+func elementToBigInt(in fr.Element) *big.Int {
+	var out big.Int
+	in.BigInt(&out)
+	return &out
+}
+
+thinking
+**Verifying existing tests**
+
+I identified existing gnark tests in zk.go and will run them to check if failures relate to duplicates or errors before proceeding.
+exec
+/bin/zsh -lc 'go test ./...' in /Users/yani/Noema/backend succeeded in 302ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
 ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
@@ -57,733 +282,30 @@ ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
+ok  	noema/internal/zk/policyzk	(cached)
 
 thinking
-**Inspecting code for TODOs**
+**Confirming existing gnark circuit tests**
 
-I'm searching the repo for TODO or FIXME comments to identify meaningful improvements related to reliability or maintainability.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"TODO|FIXME|panic\\(\"" in /Users/yani/Noema/backend exited 1 in 52ms:
-
-
-thinking
-**Checking code evaluation package**
-
-I'm inspecting the evaluation package to see if adding validation in handlers can improve the current no-match issue from the search results.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
-cmd
-data
-go.mod
-go.sum
-internal
-main
-server
-web
-
-thinking
-**Exploring error handling in internal utilities**
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"Errorf|Wrap|errors\\.\" internal" in /Users/yani/Noema/backend succeeded in 52ms:
-internal/evaluate/parse.go:16:		return Spec{}, fmt.Errorf("missing field: spec")
-internal/evaluate/parse.go:19:		return Spec{}, fmt.Errorf("only one spec value allowed")
-internal/evaluate/parse.go:25:		return Spec{}, fmt.Errorf("invalid spec JSON")
-internal/evaluate/parse.go:28:		return Spec{}, fmt.Errorf("invalid spec JSON")
-internal/evaluate/parse.go:35:		return fmt.Errorf("unsupported schema_version")
-internal/evaluate/parse.go:41:			return fmt.Errorf("constraint id must be non-empty")
-internal/evaluate/parse.go:44:			return fmt.Errorf("constraint id must not include leading/trailing whitespace")
-internal/evaluate/parse.go:47:			return fmt.Errorf("duplicate constraint id: %s", id)
-internal/evaluate/parse.go:51:			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
-internal/evaluate/parse.go:57:			return fmt.Errorf("custom_constraint id must be non-empty")
-internal/evaluate/parse.go:60:			return fmt.Errorf("custom_constraint id must not include leading/trailing whitespace")
-internal/evaluate/parse.go:63:			return fmt.Errorf("duplicate constraint id: %s", id)
-internal/evaluate/parse.go:67:			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
-internal/evaluate/parse.go:76:		return nil, nil, fmt.Errorf("missing required file: dataset")
-internal/evaluate/parse.go:79:		return nil, nil, fmt.Errorf("only one dataset file allowed")
-internal/evaluate/parse.go:83:		return nil, nil, fmt.Errorf("dataset exceeds limit of %s", formatBytes(int64(config.MaxDatasetBytes)))
-internal/evaluate/parse.go:87:		return nil, nil, fmt.Errorf("maximum %d images allowed", config.MaxImages)
-internal/evaluate/parse.go:92:			return nil, nil, fmt.Errorf("image filenames must be unique")
-internal/evaluate/parse.go:96:			return nil, nil, fmt.Errorf("each image must be at most %s", formatBytes(int64(config.MaxImageBytes)))
-internal/evaluate/parse.go:113:				return fmt.Errorf("dataset.items[%d].image_ref provided but no images uploaded", i)
-
-thinking
-**Considering stricter validations**
-
-I'm reviewing adding stricter duplicate image name checks in evaluate/parse and checking if httputil's body detection enforces maxBytes for multipart uploads.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/httputil/body.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package httputil
-
-import (
-	"errors"
-	"net/http"
-	"strings"
-)
-
-// IsBodyTooLarge reports whether the error indicates the request body exceeded MaxBytesReader.
-func IsBodyTooLarge(err error) bool {
-	if err == nil {
-		return false
-	}
-	var maxBytesErr *http.MaxBytesError
-	if errors.As(err, &maxBytesErr) {
-		return true
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "request body too large") ||
-		strings.Contains(msg, "multipart: message too large")
-
-thinking
-**Considering robustness improvements**
-
-I'm thinking about handling case variations in error messages like "http: request body too large" and ensuring reliability in evaluation and storage, possibly by adding an fsync on the directory after renaming.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"crypto/rand"
-	"encoding/json"
-	"fmt"
-	"io"
-	"math/big"
-	"mime/multipart"
-	"os"
-	"path/filepath"
-	"strconv"
-	"sync/atomic"
-	"time"
-)
-
-var runIDCounter uint64
-
-func genRunID() string {
-	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
-
-thinking
-**Considering error handling for directory sync**
-
-I'm weighing whether to add directory sync error reporting in the atomic write process but leaning to keep it best-effort to avoid breaking on certain filesystems; next I'll review evaluate/handler.go for related context.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"encoding/json"
-	"fmt"
-	"log"
-	"mime/multipart"
-	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
-	"time"
-
-	"noema/internal/config"
-	"noema/internal/httputil"
-	"noema/internal/zk"
-
-	"github.com/gin-gonic/gin"
-)
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '260,560p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
-		return EvalOutput{}, false, nil
-	}
-	if len(form.Value["eval_output"]) > 1 {
-		return EvalOutput{}, true, fmt.Errorf("only one eval_output value allowed")
-	}
-	raw := strings.TrimSpace(form.Value["eval_output"][0])
-	if raw == "" {
-		return EvalOutput{}, false, nil
-	}
-	out, err := parseEvalOutput(raw)
-	if err != nil {
-		return EvalOutput{}, true, err
-	}
-	if err := validateEvalOutput(out, enabled); err != nil {
-		return EvalOutput{}, true, err
-	}
-	return out, true, nil
-}
-
-thinking
-**Planning validation and error handling**
-
-I'm considering adding validation for dataset size and error handling when MultipartForm is nil, starting by reviewing parse.go where parseSpec is used to confirm existing safeguards and determine necessary improvements.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"encoding/json"
-	"fmt"
-	"io"
-	"mime/multipart"
-	"strings"
-
-	"noema/internal/config"
-)
-
-func parseSpec(form *multipart.Form) (Spec, error) {
-	specStrs := form.Value["spec"]
-	if len(specStrs) == 0 || specStrs[0] == "" {
-		return Spec{}, fmt.Errorf("missing field: spec")
-	}
-	if len(specStrs) > 1 {
-		return Spec{}, fmt.Errorf("only one spec value allowed")
-	}
-
-thinking
-**Considering parse and handler improvements**
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/verify/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package verify
-
-import (
-	"encoding/base64"
-	"fmt"
-	"net/http"
-	"strings"
-
-	"noema/internal/config"
-	"noema/internal/httputil"
-	"noema/internal/zk"
-
-	"github.com/gin-gonic/gin"
-)
-
-// VerifyRequest is the JSON body for POST /api/verify.
-type VerifyRequest struct {
-	RunID           string `json:"run_id"`
-	ProofB64        string `json:"proof_b64"`
-	PublicInputsB64 string `json:"public_inputs_b64"`
-
-thinking
-**Inspecting resolve evaluation output**
-
-I'm checking the resolve evaluation output to see if the body-too-large error handling can be improved or incorporated there more effectively.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/output.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io"
-)
-
-type EvalConstraintResult struct {
-	ID        string `json:"id"`
-	Severity  int    `json:"severity"`
-	Rationale string `json:"rationale"`
-}
-
-type EvalOutput struct {
-	SchemaVersion int                    `json:"schema_version"`
-	Constraints   []EvalConstraintResult `json:"constraints"`
-	MaxSeverity   int                    `json:"max_severity"`
-	Confidence    *float64               `json:"confidence,omitempty"`
-
-thinking
-**Assessing error handling and constraint checks**
-
-Considering improving error detail specificity but deciding it's likely sufficient; also weighing if constraint sorting checks are needed but leaning against it. Planning to review the internal gemini integration for relevant details next.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/gemini/gemini.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package gemini
-
-import (
-	"context"
-	"fmt"
-	"log"
-	"os"
-	"strings"
-
-	"google.golang.org/genai"
-)
-
-const defaultModel = "gemini-3-pro"
-
-type ImageInput struct {
-	MIMEType string
-	Data     []byte
-}
-
-type EvalRequest struct {
-
-thinking
-**Reviewing validation and test coverage**
-
-I'm considering adding validation to enforce at least one constraint in specs and exploring gaps in testing, possibly around pruning runs or byte formatting, while checking policy-related constraint handling.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/policy.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package evaluate
-
-import "fmt"
-
-type ConstraintRule struct {
-	ID                 string
-	AllowedMaxSeverity int
-}
-
-func enabledConstraints(spec Spec) (map[string]ConstraintRule, error) {
-	out := make(map[string]ConstraintRule)
-	for _, c := range spec.Constraints {
-		if !c.Enabled {
-			continue
-		}
-		if _, exists := out[c.ID]; exists {
-			return nil, fmt.Errorf("duplicate constraint id: %s", c.ID)
-		}
-		out[c.ID] = ConstraintRule{ID: c.ID, AllowedMaxSeverity: c.AllowedMaxSeverity}
-	}
-
-thinking
-**Noting validation and error handling improvements**
-
-I observed that duplicate ID trimming aligns with spec validation, but raw IDs are used elsewhere, which is consistent due to prior whitespace checks. I’m considering enhancing error cleanup in evaluation handlers and adding detection for max bytes errors during multipart form processing. Also seeing potential edge cases in verification related to legacy tries and empty messages, with a need for tests around parsing evaluation output and validation to cover these.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
-cache.go
-commitment.go
-dataset.go
-gemini_eval.go
-handler.go
-handler_integration_test.go
-handler_test.go
-images.go
-output.go
-parse.go
-policy.go
-prompt.go
-schema.go
-spec.go
-storage.go
-
-thinking
-**Assessing multipart file handling**
-
-I'm checking multipart form limits and memory usage, noting the default 32MB limit might be fine but unsure about overlimit errors. I’m focusing on file reading in validateDatasetJSON and subsequent saveRunFiles steps to see if files are properly closed and to spot any inefficiencies or bugs.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io"
-	"mime/multipart"
-	"strings"
-)
-
-type Dataset struct {
-	Items []DatasetItem `json:"items"`
-}
-
-type DatasetItem struct {
-	ID       string         `json:"id"`
-	Text     string         `json:"text"`
-	Metadata map[string]any `json:"metadata,omitempty"`
-	ImageRef string         `json:"image_ref,omitempty"`
-
-thinking
-**Identifying potential dataset validation improvements**
-
-Noticed trimming whitespace for ID uniqueness could improve correctness since current uniqueness check uses raw IDs, allowing near-duplicates with spaces. Also spotted metadata field handling allows unknown keys without errors, which seems intentional but worth confirming. Questioned normalization of image reference names against image filenames due to possible path inclusion but leaned against changing.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/config/config.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package config
-
-import (
-	"os"
-	"strconv"
-
-	"github.com/joho/godotenv"
-)
-
-const devCookieSecret = "dev-secret-change-in-production"
-
-// Load reads .env from the current directory and sets env vars.
-// Safe to call multiple times; existing env vars are not overwritten.
-func Load() error {
-	return godotenv.Load()
-}
-
-// JudgeKey returns the judge key used to gate protected routes.
-func JudgeKey() string {
-	return os.Getenv("JUDGE_KEY")
-
-
-thinking
-**Noticing ID whitespace bug**
-
-The dataset validation trims IDs to check emptiness but compares raw IDs for uniqueness, risking duplicates differing only by whitespace; enforcing trimmed and whitespace-free IDs for both dataset item IDs and image references will fix subtle bugs.
-thinking
-**Planning strict whitespace checks**
-
-I'll enforce no leading or trailing whitespace in dataset item IDs and image references by erroring if trimmed and raw differ, keeping text fields flexible. Next, I'll confirm and update tests to cover these new validations.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"dataset\\.items\\[\" internal/evaluate" in /Users/yani/Noema/backend succeeded in 52ms:
-internal/evaluate/parse.go:113:				return fmt.Errorf("dataset.items[%d].image_ref provided but no images uploaded", i)
-internal/evaluate/parse.go:127:			return fmt.Errorf("dataset.items[%d].image_ref must match an uploaded filename", i)
-internal/evaluate/dataset.go:59:			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
-internal/evaluate/dataset.go:62:			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
-internal/evaluate/dataset.go:65:			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must be unique", i)
-
-
-thinking
-**Planning dataset ID validation and tests**
-
-I'm preparing to add trimming and whitespace checks on dataset item IDs, enforcing required non-empty IDs without leading/trailing spaces, plus uniqueness on trimmed IDs. I'll also add a new test file to cover these validations as a meaningful improvement within the three-file limit.
-thinking
-**Adding image_ref whitespace check decision**
-
-I'm deciding to enforce image_ref whitespace validation in dataset.go only, relying on existing checks for mismatches with provided images, so I'll focus on trimming validation for IDs here and plan to add relevant tests that construct multipart file inputs as needed.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "multipart.FileHeader" internal/evaluate' in /Users/yani/Noema/backend succeeded in 51ms:
-internal/evaluate/parse.go:73:func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.FileHeader, error) {
-internal/evaluate/parse.go:105:func validateDatasetJSON(fh *multipart.FileHeader, imageFiles []*multipart.FileHeader) error {
-internal/evaluate/dataset.go:23:func readDatasetFile(fh *multipart.FileHeader) ([]byte, Dataset, error) {
-internal/evaluate/storage.go:32:func saveRunFiles(runPath string, dataset *multipart.FileHeader, images []*multipart.FileHeader) error {
-internal/evaluate/storage.go:49:func saveUpload(fh *multipart.FileHeader, dst string) error {
-internal/evaluate/images.go:18:func readImages(files []*multipart.FileHeader) ([]ImageInfo, error) {
-internal/evaluate/gemini_eval.go:15:func resolveEvalOutput(ctx context.Context, form *multipart.Form, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) (EvalOutput, error) {
-internal/evaluate/gemini_eval.go:24:func evalWithGemini(ctx context.Context, enabled map[string]ConstraintRule, runsDir string, spec Spec, datasetFile *multipart.FileHeader, imageFiles []*multipart.FileHeader) EvalOutput {
-
-thinking
-**Checking handler tests for multipart writer use**
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"mime/multipart"
-	"net/textproto"
-	"os"
-	"path/filepath"
-	"sort"
-	"testing"
-	"time"
-)
-
-type formFile struct {
-	field       string
-	filename    string
-	contentType string
-	content     []byte
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' internal/evaluate/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
-		t.Fatalf("marshal eval_output: %v", err)
-	}
-
-	form := &multipart.Form{Value: map[string][]string{"eval_output": {string(raw), string(raw)}}}
-	if _, err := parseEvalOutputOptional(form, enabled); err == nil {
-		t.Fatalf("expected error for multiple eval_output values")
-	}
-}
-
-func TestParseEvalOutputOptional_IgnoresWhitespace(t *testing.T) {
-	spec := Spec{
-		SchemaVersion: 1,
-		Constraints: []Constraint{
-			{ID: "pii_exposure_risk", Enabled: true, AllowedMaxSeverity: 1},
-			{ID: "harm_enabling_content_risk", Enabled: true, AllowedMaxSeverity: 2},
-		},
-	}
-	enabled, err := enabledConstraints(spec)
-	if err != nil {
-		t.Fatalf("enabledConstraints error: %v", err)
-
-thinking
-**Planning whitespace ID validation**
-
-I'll enforce no leading/trailing whitespace in dataset item IDs by comparing trimmed IDs after TrimSpace in reading, returning an error if they differ, and add a focused test in handler_test.go to catch this case.
-file update
-M /Users/yani/Noema/backend/internal/evaluate/dataset.go
-@@ -57,5 +57,9 @@
- 	for i, item := range ds.Items {
--		if strings.TrimSpace(item.ID) == "" {
-+		trimmedID := strings.TrimSpace(item.ID)
-+		if trimmedID == "" {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
- 		}
-+		if trimmedID != item.ID {
-+			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must not include leading/trailing whitespace", i)
-+		}
- 		if strings.TrimSpace(item.Text) == "" {
-apply_patch(auto_approved=true) exited 0 in 30ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/dataset.go
-file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 80a138ef30f3ff1025228691588fc561b88ecbb4..8c0754f0757bb53fee014845a10a1cdde371a6dc
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -55,9 +55,13 @@
- 	}
- 	seenIDs := make(map[string]struct{}, len(ds.Items))
- 	for i, item := range ds.Items {
--		if strings.TrimSpace(item.ID) == "" {
-+		trimmedID := strings.TrimSpace(item.ID)
-+		if trimmedID == "" {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
- 		}
-+		if trimmedID != item.ID {
-+			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must not include leading/trailing whitespace", i)
-+		}
- 		if strings.TrimSpace(item.Text) == "" {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
- 		}
-
-file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 80a138ef30f3ff1025228691588fc561b88ecbb4..8c0754f0757bb53fee014845a10a1cdde371a6dc
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -55,9 +55,13 @@
- 	}
- 	seenIDs := make(map[string]struct{}, len(ds.Items))
- 	for i, item := range ds.Items {
--		if strings.TrimSpace(item.ID) == "" {
-+		trimmedID := strings.TrimSpace(item.ID)
-+		if trimmedID == "" {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
- 		}
-+		if trimmedID != item.ID {
-+			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must not include leading/trailing whitespace", i)
-+		}
- 		if strings.TrimSpace(item.Text) == "" {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
- 		}
-
-
-thinking
-**Adding whitespace fields test**
-
-I'm updating handler_test.go by adding a new test after the existing one for whitespace fields, using a dataset with id " 1 " and text "hello" to expect a validation error with validateDatasetJSON.
-file update
-M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
-@@ -336,2 +336,13 @@
- 
-+func TestValidateDatasetJSON_RejectsTrimmedIDs(t *testing.T) {
-+	dataset := `{"items":[{"id":" 1 ","text":"hello"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+	})
-+	datasetFile := form.File["dataset"][0]
-+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-+		t.Fatalf("expected error for trimmed dataset ids")
-+	}
-+}
-+
- func TestValidateDatasetJSON_RejectsEmptyFile(t *testing.T) {
-apply_patch(auto_approved=true) exited 0 in 35ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/handler_test.go
-file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 80a138ef30f3ff1025228691588fc561b88ecbb4..8c0754f0757bb53fee014845a10a1cdde371a6dc
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -55,9 +55,13 @@
- 	}
- 	seenIDs := make(map[string]struct{}, len(ds.Items))
- 	for i, item := range ds.Items {
--		if strings.TrimSpace(item.ID) == "" {
-+		trimmedID := strings.TrimSpace(item.ID)
-+		if trimmedID == "" {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
- 		}
-+		if trimmedID != item.ID {
-+			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must not include leading/trailing whitespace", i)
-+		}
- 		if strings.TrimSpace(item.Text) == "" {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
- 		}
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index fa1c6d8c5b39702e86d3a90d7c103c6fd5947fc3..e1ebdf6eb56136a8a4119c5f742a32178fa46bc2
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -334,6 +334,17 @@
- 	}
- }
- 
-+func TestValidateDatasetJSON_RejectsTrimmedIDs(t *testing.T) {
-+	dataset := `{"items":[{"id":" 1 ","text":"hello"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+	})
-+	datasetFile := form.File["dataset"][0]
-+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-+		t.Fatalf("expected error for trimmed dataset ids")
-+	}
-+}
-+
- func TestValidateDatasetJSON_RejectsEmptyFile(t *testing.T) {
- 	form := buildMultipartForm(t, []formFile{
- 		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte{}},
-
-file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 80a138ef30f3ff1025228691588fc561b88ecbb4..8c0754f0757bb53fee014845a10a1cdde371a6dc
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -55,9 +55,13 @@
- 	}
- 	seenIDs := make(map[string]struct{}, len(ds.Items))
- 	for i, item := range ds.Items {
--		if strings.TrimSpace(item.ID) == "" {
-+		trimmedID := strings.TrimSpace(item.ID)
-+		if trimmedID == "" {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
- 		}
-+		if trimmedID != item.ID {
-+			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must not include leading/trailing whitespace", i)
-+		}
- 		if strings.TrimSpace(item.Text) == "" {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
- 		}
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index fa1c6d8c5b39702e86d3a90d7c103c6fd5947fc3..e1ebdf6eb56136a8a4119c5f742a32178fa46bc2
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -334,6 +334,17 @@
- 	}
- }
- 
-+func TestValidateDatasetJSON_RejectsTrimmedIDs(t *testing.T) {
-+	dataset := `{"items":[{"id":" 1 ","text":"hello"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+	})
-+	datasetFile := form.File["dataset"][0]
-+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-+		t.Fatalf("expected error for trimmed dataset ids")
-+	}
-+}
-+
- func TestValidateDatasetJSON_RejectsEmptyFile(t *testing.T) {
- 	form := buildMultipartForm(t, []formFile{
- 		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte{}},
-
-
-thinking
-**Running full Go tests**
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 582ms:
-?   	noema/cmd/server	[no test files]
-?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
-?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	0.103s
-?   	noema/internal/gemini	[no test files]
-ok  	noema/internal/httputil	(cached)
-ok  	noema/internal/session	(cached)
-ok  	noema/internal/verify	(cached)
-?   	noema/internal/web	[no test files]
-ok  	noema/internal/zk	(cached)
-file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 80a138ef30f3ff1025228691588fc561b88ecbb4..8c0754f0757bb53fee014845a10a1cdde371a6dc
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -55,9 +55,13 @@
- 	}
- 	seenIDs := make(map[string]struct{}, len(ds.Items))
- 	for i, item := range ds.Items {
--		if strings.TrimSpace(item.ID) == "" {
-+		trimmedID := strings.TrimSpace(item.ID)
-+		if trimmedID == "" {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
- 		}
-+		if trimmedID != item.ID {
-+			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must not include leading/trailing whitespace", i)
-+		}
- 		if strings.TrimSpace(item.Text) == "" {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
- 		}
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index fa1c6d8c5b39702e86d3a90d7c103c6fd5947fc3..e1ebdf6eb56136a8a4119c5f742a32178fa46bc2
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -334,6 +334,17 @@
- 	}
- }
- 
-+func TestValidateDatasetJSON_RejectsTrimmedIDs(t *testing.T) {
-+	dataset := `{"items":[{"id":" 1 ","text":"hello"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+	})
-+	datasetFile := form.File["dataset"][0]
-+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-+		t.Fatalf("expected error for trimmed dataset ids")
-+	}
-+}
-+
- func TestValidateDatasetJSON_RejectsEmptyFile(t *testing.T) {
- 	form := buildMultipartForm(t, []formFile{
- 		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte{}},
-
+No code changes needed as real gnark circuit tests for the PolicyGateCircuit already exist and pass in internal/zk/policy_circuit_groth16_test.go and policyzk/circuit_test.go. All tests run successfully with `go test ./...`. Files changed: none. What you changed: none; requirement already satisfied.
 codex
-What you changed (short)
-- Enforced no leading/trailing whitespace for dataset item IDs and added a test to cover it. (`internal/evaluate/dataset.go`, `internal/evaluate/handler_test.go`)
+Files changed
+- None
 
-Tests run (must include go test ./...)
+What you changed
+- No code changes needed. The repo already has a real Groth16 BN254 circuit test for `PolicyGateCircuit` in `internal/zk/policy_circuit_groth16_test.go` and another in `internal/zk/policyzk/circuit_test.go`, both compiling, proving, and verifying with pass/fail cases.
+- The backend plumbing is already wired in `internal/zk/zk.go` to use gnark Groth16 BN254 with `ProofB64` and `PublicInputsB64`.
+
+Tests run
 - `go test ./...`
-file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 80a138ef30f3ff1025228691588fc561b88ecbb4..8c0754f0757bb53fee014845a10a1cdde371a6dc
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -55,9 +55,13 @@
- 	}
- 	seenIDs := make(map[string]struct{}, len(ds.Items))
- 	for i, item := range ds.Items {
--		if strings.TrimSpace(item.ID) == "" {
-+		trimmedID := strings.TrimSpace(item.ID)
-+		if trimmedID == "" {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id is required", i)
- 		}
-+		if trimmedID != item.ID {
-+			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].id must not include leading/trailing whitespace", i)
-+		}
- 		if strings.TrimSpace(item.Text) == "" {
- 			return nil, Dataset{}, fmt.Errorf("dataset.items[%d].text is required", i)
- 		}
-diff --git a/backend/internal/evaluate/handler_test.go b/backend/internal/evaluate/handler_test.go
-index fa1c6d8c5b39702e86d3a90d7c103c6fd5947fc3..e1ebdf6eb56136a8a4119c5f742a32178fa46bc2
---- a/backend/internal/evaluate/handler_test.go
-+++ b/backend/internal/evaluate/handler_test.go
-@@ -334,6 +334,17 @@
- 	}
- }
- 
-+func TestValidateDatasetJSON_RejectsTrimmedIDs(t *testing.T) {
-+	dataset := `{"items":[{"id":" 1 ","text":"hello"}]}`
-+	form := buildMultipartForm(t, []formFile{
-+		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte(dataset)},
-+	})
-+	datasetFile := form.File["dataset"][0]
-+	if err := validateDatasetJSON(datasetFile, nil); err == nil {
-+		t.Fatalf("expected error for trimmed dataset ids")
-+	}
-+}
-+
- func TestValidateDatasetJSON_RejectsEmptyFile(t *testing.T) {
- 	form := buildMultipartForm(t, []formFile{
- 		{field: "dataset", filename: "dataset.json", contentType: "application/json", content: []byte{}},
-
 tokens used
-35,989
-What you changed (short)
-- Enforced no leading/trailing whitespace for dataset item IDs and added a test to cover it. (`internal/evaluate/dataset.go`, `internal/evaluate/handler_test.go`)
+18,352
+Files changed
+- None
 
-Tests run (must include go test ./...)
+What you changed
+- No code changes needed. The repo already has a real Groth16 BN254 circuit test for `PolicyGateCircuit` in `internal/zk/policy_circuit_groth16_test.go` and another in `internal/zk/policyzk/circuit_test.go`, both compiling, proving, and verifying with pass/fail cases.
+- The backend plumbing is already wired in `internal/zk/zk.go` to use gnark Groth16 BN254 with `ProofB64` and `PublicInputsB64`.
+
+Tests run
 - `go test ./...`
