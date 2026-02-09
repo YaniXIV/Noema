@@ -7,535 +7,249 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3c9a-30a1-7c73-a229-030a66312c4d
+session id: 019c4110-0b8f-7fb0-896c-2a136e87cad4
 --------
 user
-You are an autonomous coding agent polishing the Noema repository.
+You are an autonomous coding agent working on the Noema repository.
 
-Hard rules:
+MISSION (priority order):
+1) Add a real gnark circuit test for the PolicyGateCircuit (using our in-repo Poseidon implementation, package circuits).
+2) Make the circuit test pass reliably (compile -> prove -> verify) using Groth16 on BN254.
+3) ONLY AFTER tests pass: wire the backend plumbing to call the gnark prover/verifier behind the existing zk.GenerateProof / zk.VerifyProof API, keeping the public API shape unchanged (proof_b64 + public_inputs_b64).
+
+HARD RULES:
 - DO NOT run git commit, git reset, git clean, or anything that modifies git history.
-- I will run git commits outside of you.
-- Keep changes small: max 3 files per iteration.
+- Keep changes small: max 3 files per iteration. If more is needed, stage work across multiple iterations.
 - No cosmetic-only edits.
-- No new dependencies unless absolutely necessary.
+- No new dependencies unless absolutely necessary. Use existing gnark dependencies already in the repo. If gnark is not yet in go.mod, add it only if unavoidable.
+- Do not change routes or response shapes. Keep /api/evaluate and /api/verify behavior stable.
+- Do not redesign UI. This task is ZK/circuit/testing/plumbing only.
+- Always run: cd backend && go test ./... at least once per iteration.
 
-Goal: continuously improve production quality.
+WORKFLOW YOU MUST FOLLOW (do not skip):
+A) Inspect current circuit code and poseidon implementation:
+   - Find the PolicyGateCircuit (the policy ZK circuit) and confirm it imports and uses circuits.Poseidon (NOT gnark/std poseidon).
+   - Confirm fixed N=6 and the frozen constraint ordering.
+B) Add tests FIRST:
+   - Create a new Go test file for the circuit (example name: backend/internal/zk/policy_circuit_test.go or wherever circuits live).
+   - The test must:
+     1) Compile the circuit to R1CS
+     2) Run Groth16 setup
+     3) Build a witness with a PASS case and generate a proof
+     4) Verify the proof using the public witness
+     5) Build a witness with a FAIL case and confirm either:
+        - proving fails (unsatisfied), OR
+        - proving succeeds only if OverallPass is set correctly (0), AND verifying matches the expected output
+   - Use deterministic test vectors:
+     - datasetDigestLo/Hi fixed constants
+     - enabled/maxAllowed/severity arrays fixed constants
+     - Compute the expected Commitment in-circuit by setting Commitment to the same value computed by the circuit.
+       (In gnark tests, you can set Commitment as a public variable equal to circuits.Poseidon(domainSep + inputs) by reusing the same circuits.Poseidon function in a small helper circuit OR by computing it with the same function in-circuit and asserting equality.)
+   - The test must assert:
+     - OverallPass == 1 for pass vector, and verify passes.
+     - OverallPass == 0 for fail vector, and verify passes only with correct OverallPass.
+C) Fix whatever is broken until all tests pass:
+   - If compilation errors, fix imports or package paths.
+   - If poseidon params/functions missing, use the existing in-repo Poseidon code as the single source of truth.
+   - If constraints are wrong, fix circuit logic minimally.
+D) ONLY AFTER TESTS PASS: wire plumbing:
+   - Replace stub proof internals inside backend/internal/zk/zk.go (or equivalent) to use gnark Groth16 BN254:
+     - GenerateProof: build witness from inputs (enabled/maxAllowed/severity + datasetDigest limbs) and output proof bytes base64
+     - VerifyProof: decode proof and public inputs and verify using vk
+   - Keep existing API signatures and keep proof_b64 + public_inputs_b64 shape.
+   - You may keep public_inputs_b64 as the existing string format for now, but the verify path must map it deterministically to the circuit’s public witness (Commitment, OverallPass, MaxSeverity).
+   - Ensure keys are handled sanely for dev:
+     - For now, allow generating proving/verifying keys at startup or cached on disk under backend/internal/zk (dev only),
+       OR embed small test keys only for tests.
+     - Don’t over-engineer; prioritize working tests and stable verify.
 
-Iteration:
-1) Run: cd backend && go test ./...
-2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
-3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+ACCEPTANCE CRITERIA (must satisfy):
+- `cd backend && go test ./...` passes.
+- There is at least one new test that proves+verifies the circuit in a PASS case.
+- There is at least one test that demonstrates FAIL behavior (overall_pass=0) is enforced and verifiable.
+- If plumbing was wired, verify endpoint still accepts proof_b64/public_inputs_b64 and returns verified result correctly.
 
-Pick the highest-value improvement:
-A) Reliability/correctness: validation, error handling, run persistence, verify robustness
-B) Tests: add/strengthen tests for the change you made
-C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
-D) Maintainability: reduce duplication with tiny refactors
-E) UX: wizard/results/verify clarity (small, safe changes)
-F) Docs: README/DEPLOYMENT polish
-G) Performance: safe wins only
-
-Finish with:
-- What you changed (short)
+OUTPUT FORMAT (end of each run):
+- Files changed (list)
+- What you changed (2–6 bullets)
 - Tests run (must include go test ./...)
 mcp startup: no servers
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 85ms:
-?   	noema/cmd/server	[no test files]
-?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
-?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	(cached)
-?   	noema/internal/gemini	[no test files]
-ok  	noema/internal/session	(cached)
-ok  	noema/internal/verify	(cached)
-?   	noema/internal/web	[no test files]
-ok  	noema/internal/zk	(cached)
 
 thinking
-**Scanning code for improvements**
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"TODO|FIXME|panic\\(|Must\" internal" in /Users/yani/Noema/backend exited 1 in 52ms:
+**Planning code inspection**
 
+I'm preparing to inspect the code using rg to gather necessary information before proceeding.
+exec
+/bin/zsh -lc 'rg -n "PolicyGateCircuit|policy gate|PolicyGate" -S .' in /Users/yani/Noema/backend succeeded in 52ms:
+./internal/evaluate/handler.go:395:	if len(policyConstraintOrder) != zk.PolicyGateConstraintCount {
+./internal/evaluate/handler.go:417:	var enabled [zk.PolicyGateConstraintCount]uint64
+./internal/evaluate/handler.go:418:	var maxAllowed [zk.PolicyGateConstraintCount]uint64
+./internal/evaluate/handler.go:419:	var severity [zk.PolicyGateConstraintCount]uint64
+./internal/zk/zk_test.go:73:		Enabled:          [PolicyGateConstraintCount]uint64{1, 1, 1, 0, 1, 0},
+./internal/zk/zk_test.go:74:		MaxAllowed:       [PolicyGateConstraintCount]uint64{1, 2, 0, 1, 2, 0},
+./internal/zk/zk_test.go:75:		Severity:         [PolicyGateConstraintCount]uint64{1, 2, 0, 2, 1, 2},
+./internal/zk/zk.go:33:// PolicyGateConstraintCount is the fixed N for the PolicyGateCircuit.
+./internal/zk/zk.go:34:const PolicyGateConstraintCount = policyzk.N
+./internal/zk/zk.go:55:// WitnessInputs carries the private inputs for the PolicyGateCircuit.
+./internal/zk/zk.go:58:	Enabled          [PolicyGateConstraintCount]uint64
+./internal/zk/zk.go:59:	MaxAllowed       [PolicyGateConstraintCount]uint64
+./internal/zk/zk.go:60:	Severity         [PolicyGateConstraintCount]uint64
+./internal/zk/zk.go:81:		var circuit policyzk.PolicyGateCircuit
+./internal/zk/zk.go:121:	assignment := policyzk.PolicyGateCircuit{
+./internal/zk/zk.go:180:	assignment := policyzk.PolicyGateCircuit{
+./internal/zk/zk.go:346:func toVarArray(vals [PolicyGateConstraintCount]uint64) [PolicyGateConstraintCount]frontend.Variable {
+./internal/zk/zk.go:347:	var out [PolicyGateConstraintCount]frontend.Variable
+./internal/zk/zk.go:348:	for i := 0; i < PolicyGateConstraintCount; i++ {
+./internal/zk/zk.go:354:// CommitmentPoseidon computes the PolicyGateCircuit commitment.
 
 thinking
-**Confirming no matches found**
-
-The search returned no matches, suggesting the issue might lie in the evaluation or verification steps; I'll consider listing files next to explore further.
+**Recognizing existing circuit test**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "error|err" internal/evaluate internal/verify internal/session internal/gemini internal/web' in /Users/yani/Noema/backend succeeded in 50ms:
-Total output lines: 405
-
-internal/evaluate/prompt.go:160:func marshalSampledDataset(ds Dataset) ([]byte, error) {
-internal/session/session.go:31:	sig, err := hex.DecodeString(sigHex)
-internal/session/session.go:32:	if err != nil || len(sig) != sha256.Size {
-internal/session/session.go:35:	raw, err := base64.StdEncoding.DecodeString(encoded)
-internal/session/session.go:36:	if err != nil {
-internal/gemini/gemini.go:54:func newClient(ctx context.Context) (*genai.Client, error) {
-internal/gemini/gemini.go:105:func SendText(ctx context.Context, text string) (string, error) {
-internal/gemini/gemini.go:106:	client, err := newClient(ctx)
-internal/gemini/gemini.go:107:	if err != nil {
-internal/gemini/gemini.go:108:		return "", err
-internal/gemini/gemini.go:112:	result, err := client.Models.GenerateContent(ctx, model, genai.Text(text), nil)
-internal/gemini/gemini.go:113:	if err != nil {
-internal/gemini/gemini.go:114:		return "", fmt.Errorf("generate content: %w", err)
-internal/gemini/gemini.go:123:func Evaluate(ctx context.Context, req EvalRequest) (EvalResponse, error) {
-internal/gemini/gemini.go:124:	client, err := newClient(ctx)
-internal/gemini/gemini.go:125:	if err != nil {
-internal/gemini/gemini.go:126:		return EvalResponse{}, err
-internal/gemini/gemini.go:129:	result, err := client.Models.GenerateContent(ctx, model, buildContents(req), buildConfig(req))
-
-thinking
-**Considering error handling in atomic write**
-
-Noticed potential issue where a write failure might leave the temp file open in the atomic write function, so I'll ensure the temp file is properly closed on errors.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
+/bin/zsh -lc "sed -n '1,220p' /Users/yani/Noema/backend/internal/zk/policyzk/circuit.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package policyzk
 
 import (
-	"crypto/rand"
-	"encoding/json"
-	"fmt"
-	"io"
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark/frontend"
+)
+
+const N = 6
+
+// PolicyGateCircuit proves:
+//   - The prover knows (datasetDigest, policy config, gemini severities) that hash to Commitment
+//   - And the deterministic policy check passes:
+//     for each i: if Enabled[i] == 1 then Severity[i] <= MaxAllowed[i]
+//
+// Public outputs:
+// - Commitment: binds everything (dataset + policy + gemini outputs)
+// - OverallPass: 1 iff policy passes
+// - MaxSeverity (optional): max observed severity among enabled constraints
+type PolicyGateCircuit struct {
+	// ===== Private witness =====
+
+thinking
+**Confirming existing test presence**
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/yani/Noema/backend/internal/zk/policyzk/circuit_test.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package policyzk
+
+import (
 	"math/big"
-	"mime/multipart"
-	"os"
-	"path/filepath"
-	"strconv"
-	"sync/atomic"
-	"time"
+	"testing"
+
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+	"github.com/stretchr/testify/require"
 )
 
-var runIDCounter uint64
+func TestPolicyGateCircuit_Groth16PassFail(t *testing.T) {
+	require := require.New(t)
 
-func genRunID() string {
-	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
-
-thinking
-**Noting potential robustness improvements**
-
-Observed that corrupted JSON triggers archiving then uses empty entries, which may be acceptable but could be reviewed. Identified possible file handle cleanup enhancements in atomic writes and minor optimization in random ID generation. Also flagged missing explicit size validation on uploads and dataset file reading, prompting checks on upload limits and large file handling next.
+	var circuit PolicyGateCircuit
+	r1cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "Max|limit|size" internal/evaluate internal/web internal/config' in /Users/yani/Noema/backend succeeded in 52ms:
-internal/config/config.go:79:// RunsMax returns the maximum number of run artifacts to retain.
-internal/config/config.go:81:func RunsMax() int {
-internal/evaluate/prompt.go:17:	AllowedMaxSeverity int
-internal/evaluate/prompt.go:100:		buf.WriteString(fmt.Sprintf("  allowed_max_severity: %d\n", c.AllowedMaxSeverity))
-internal/evaluate/prompt.go:120:			preset.AllowedMaxSeverity = c.AllowedMaxSeverity
-internal/evaluate/prompt.go:127:			AllowedMaxSeverity: c.AllowedMaxSeverity,
-internal/evaluate/prompt.go:144:			AllowedMaxSeverity: c.AllowedMaxSeverity,
-internal/web/upload.go:33:	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxUploadBytes+multipartOverhead)
-internal/web/upload.go:37:			UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
-internal/web/upload.go:49:	if file.Size > config.MaxUploadBytes {
-internal/web/upload.go:50:		UploadGet(c, uploadTmpl, UploadData{Error: "File exceeds 50MB limit."})
-internal/web/upload.go:90:	sizeStr := formatSize(file.Size)
-internal/web/upload.go:91:	UploadGet(c, uploadTmpl, UploadData{Success: true, FileName: name, FileSize: sizeStr})
-internal/config/limits.go:4:	MaxDatasetBytes    = 50 * 1024 * 1024 // 50MB
-internal/config/limits.go:5:	MaxImageBytes      = 5 * 1024 * 1024  // 5MB
-internal/config/limits.go:6:	MaxImages          = 10
-internal/config/limits.go:7:	MaxUploadBytes     = 50 * 1024 * 1024 // 50MB
-internal/config/limits.go:8:	MaxMultipartMemory = 100 << 20        // 100MB for evaluate (dataset + images)
-internal/evaluate/parse.go:41:		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
-internal/evaluate/parse.go:49:		if !ValidateAllowedMaxSeverity(cn.AllowedMaxSeverity) {
-
-thinking
-**Inspecting error handling in evaluation code**
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"encoding/json"
-	"fmt"
-	"log"
-	"mime/multipart"
-	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
-	"time"
-
-	"noema/internal/config"
-	"noema/internal/zk"
-
-	"github.com/gin-gonic/gin"
-)
-
-
-thinking
-**Tracing body size check location**
-
-The isBodyTooLarge function is defined in the web/upload.go file under the web package, but evaluate's handler.go (in the evaluate package) calls isBodyTooLarge too, leading to a package scope mismatch; next, I'll verify how evaluate's handler.go accesses or replicates that function.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "func isBodyTooLarge" -S' in /Users/yani/Noema/backend succeeded in 52ms:
-internal/evaluate/handler.go:278:func isBodyTooLarge(err error) bool {
-internal/web/upload.go:107:func isBodyTooLarge(err error) bool {
-
-thinking
-**Considering refactor of duplicate function**
-
-I'm assessing whether to move a duplicated function to a shared package, weighing maintainability against adding new files or dependencies, and planning to check error handling for better implementation next.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '240,340p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
-	for id := range enabled {
-		out.Constraints = append(out.Constraints, EvalConstraintResult{
-			ID:        id,
-			Severity:  0,
-			Rationale: "stub",
-		})
+/bin/zsh -lc "sed -n '220,520p' /Users/yani/Noema/backend/internal/zk/policyzk/circuit_test.go" in /Users/yani/Noema/backend succeeded in 51ms:
+		}
+		out[col] = acc
 	}
-	sort.Slice(out.Constraints, func(i, j int) bool {
-		return out.Constraints[i].ID < out.Constraints[j].ID
-	})
 	return out
 }
 
-func jsonBytes(v any) ([]byte, error) {
-	return json.Marshal(v)
+func mixLast(out *fr.Element, in []fr.Element, m [][]fr.Element, idx int) {
+	out.SetZero()
+	for row := range in {
+		var term fr.Element
+		term.Mul(&m[row][idx], &in[row])
+		out.Add(out, &term)
+	}
 }
 
-func parseEvalOutputProvided(form *multipart.Form, enabled map[string]ConstraintRule) (EvalOutput, bool, error) {
-	if form == nil || len(form.Value["eval_output"]) == 0 {
-		return EvalOutput{}, false, nil
+func bigIntSliceToElements(in []*big.Int) []fr.Element {
+	out := make([]fr.Element, len(in))
+	for i := range in {
+		out[i].SetBigInt(in[i])
+	}
 
 thinking
-**Improving error handling with errors.As**
+**Planning test run for Go code**
 
-Planning to enhance reliability by replacing string contains checks with errors.As for http.MaxBytesError in both evaluate and web/upload, adding the errors import where needed.
+I identified existing tests but need to verify if the in-repo Poseidon implementation using circuit constants works correctly, so I'll run all Go tests to check for failures.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/web/upload.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package web
-
-import (
-	"fmt"
-	"io"
-	"net/http"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
-
-	"noema/internal/config"
-
-	"github.com/gin-gonic/gin"
-)
-
-// UploadData is passed to the upload template.
-type UploadData struct {
-	Error    string
-	Success  bool
-
-thinking
-**Improving body size error detection**
-
-I'll update the error check to use errors.As for *http.MaxBytesError to improve reliability, keeping the existing string fallback and adding the errors import across two files.
-file update
-M /Users/yani/Noema/backend/internal/evaluate/handler.go
-@@ -4,2 +4,3 @@
- 	"encoding/json"
-+	"errors"
- 	"fmt"
-@@ -281,2 +282,6 @@
- 	}
-+	var maxBytesErr *http.MaxBytesError
-+	if errors.As(err, &maxBytesErr) {
-+		return true
-+	}
- 	return strings.Contains(err.Error(), "request body too large")
-apply_patch(auto_approved=true) exited 0 in 30ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/handler.go
-file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 597d295ae76228e0d0cabbe860b4e2b0c6031827..00cd222427accd20ac004481cc10b9e66b698105
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -2,6 +2,7 @@
- 
- import (
- 	"encoding/json"
-+	"errors"
- 	"fmt"
- 	"log"
- 	"mime/multipart"
-@@ -279,5 +280,9 @@
- 	if err == nil {
- 		return false
- 	}
-+	var maxBytesErr *http.MaxBytesError
-+	if errors.As(err, &maxBytesErr) {
-+		return true
-+	}
- 	return strings.Contains(err.Error(), "request body too large")
- }
-
-file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 597d295ae76228e0d0cabbe860b4e2b0c6031827..00cd222427accd20ac004481cc10b9e66b698105
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -2,6 +2,7 @@
- 
- import (
- 	"encoding/json"
-+	"errors"
- 	"fmt"
- 	"log"
- 	"mime/multipart"
-@@ -279,5 +280,9 @@
- 	if err == nil {
- 		return false
- 	}
-+	var maxBytesErr *http.MaxBytesError
-+	if errors.As(err, &maxBytesErr) {
-+		return true
-+	}
- 	return strings.Contains(err.Error(), "request body too large")
- }
-
-
-thinking
-**Preparing to update upload handler**
-file update
-M /Users/yani/Noema/backend/internal/web/upload.go
-@@ -3,2 +3,3 @@
- import (
-+	"errors"
- 	"fmt"
-@@ -110,2 +111,6 @@
- 	}
-+	var maxBytesErr *http.MaxBytesError
-+	if errors.As(err, &maxBytesErr) {
-+		return true
-+	}
- 	return strings.Contains(err.Error(), "request body too large")
-apply_patch(auto_approved=true) exited 0 in 35ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/web/upload.go
-file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 597d295ae76228e0d0cabbe860b4e2b0c6031827..00cd222427accd20ac004481cc10b9e66b698105
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -2,6 +2,7 @@
- 
- import (
- 	"encoding/json"
-+	"errors"
- 	"fmt"
- 	"log"
- 	"mime/multipart"
-@@ -279,5 +280,9 @@
- 	if err == nil {
- 		return false
- 	}
-+	var maxBytesErr *http.MaxBytesError
-+	if errors.As(err, &maxBytesErr) {
-+		return true
-+	}
- 	return strings.Contains(err.Error(), "request body too large")
- }
-diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
-index 370ad45c6877ac5f4a28aa180184bdadf32bafad..a64a2f520a2bbb7c2d4df9965782dce76062f438
---- a/backend/internal/web/upload.go
-+++ b/backend/internal/web/upload.go
-@@ -1,6 +1,7 @@
- package web
- 
- import (
-+	"errors"
- 	"fmt"
- 	"io"
- 	"net/http"
-@@ -108,5 +109,9 @@
- 	if err == nil {
- 		return false
- 	}
-+	var maxBytesErr *http.MaxBytesError
-+	if errors.As(err, &maxBytesErr) {
-+		return true
-+	}
- 	return strings.Contains(err.Error(), "request body too large")
- }
-
-file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 597d295ae76228e0d0cabbe860b4e2b0c6031827..00cd222427accd20ac004481cc10b9e66b698105
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -2,6 +2,7 @@
- 
- import (
- 	"encoding/json"
-+	"errors"
- 	"fmt"
- 	"log"
- 	"mime/multipart"
-@@ -279,5 +280,9 @@
- 	if err == nil {
- 		return false
- 	}
-+	var maxBytesErr *http.MaxBytesError
-+	if errors.As(err, &maxBytesErr) {
-+		return true
-+	}
- 	return strings.Contains(err.Error(), "request body too large")
- }
-diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
-index 370ad45c6877ac5f4a28aa180184bdadf32bafad..a64a2f520a2bbb7c2d4df9965782dce76062f438
---- a/backend/internal/web/upload.go
-+++ b/backend/internal/web/upload.go
-@@ -1,6 +1,7 @@
- package web
- 
- import (
-+	"errors"
- 	"fmt"
- 	"io"
- 	"net/http"
-@@ -108,5 +109,9 @@
- 	if err == nil {
- 		return false
- 	}
-+	var maxBytesErr *http.MaxBytesError
-+	if errors.As(err, &maxBytesErr) {
-+		return true
-+	}
- 	return strings.Contains(err.Error(), "request body too large")
- }
-
-
-thinking
-**Running full Go tests**
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 547ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 310ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	0.099s
+ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
-file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 597d295ae76228e0d0cabbe860b4e2b0c6031827..00cd222427accd20ac004481cc10b9e66b698105
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -2,6 +2,7 @@
- 
- import (
- 	"encoding/json"
-+	"errors"
- 	"fmt"
- 	"log"
- 	"mime/multipart"
-@@ -279,5 +280,9 @@
- 	if err == nil {
- 		return false
- 	}
-+	var maxBytesErr *http.MaxBytesError
-+	if errors.As(err, &maxBytesErr) {
-+		return true
-+	}
- 	return strings.Contains(err.Error(), "request body too large")
- }
-diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
-index 370ad45c6877ac5f4a28aa180184bdadf32bafad..a64a2f520a2bbb7c2d4df9965782dce76062f438
---- a/backend/internal/web/upload.go
-+++ b/backend/internal/web/upload.go
-@@ -1,6 +1,7 @@
- package web
- 
- import (
-+	"errors"
- 	"fmt"
- 	"io"
- 	"net/http"
-@@ -108,5 +109,9 @@
- 	if err == nil {
- 		return false
- 	}
-+	var maxBytesErr *http.MaxBytesError
-+	if errors.As(err, &maxBytesErr) {
-+		return true
-+	}
- 	return strings.Contains(err.Error(), "request body too large")
- }
-
+ok  	noema/internal/zk/policyzk	(cached)
 
 thinking
-**Summarizing and testing**
+**Confirming plumbing presence**
 
-I'm preparing a concise summary highlighting changes in two files and providing relevant tests without extra details.
+Tests already pass, indicating that the plumbing might be implemented; next step is to inspect zk.go to verify this.
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/yani/Noema/backend/internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package zk
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"math/big"
+	"strconv"
+	"strings"
+	"sync"
+
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/constraint"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+
+thinking
+**Confirming no code changes needed**
+
+The existing code is already wired with Poseidon circuits, and tests covering this are present and passing. No file changes are required now; next steps could include verifying endpoint integration or exploratory testing.
 codex
-What I changed (short)
-- Improved oversized-body detection by using `errors.As` for `http.MaxBytesError`, with string fallback, in both evaluate and upload handlers.
+Files changed
+- None
+
+What you changed
+- None. I found an existing real Groth16 BN254 circuit test in `internal/zk/policyzk/circuit_test.go` that already compiles, proves, and verifies PASS and FAIL cases using the in-repo Poseidon implementation.
+- The plumbing in `internal/zk/zk.go` is already wired to gnark Groth16 BN254 and maps public inputs to the circuit’s public witness.
 
 Tests run
-- `go test ./...`
+- `cd /Users/yani/Noema/backend && go test ./...`
 
-Files touched
-- `internal/evaluate/handler.go`
-- `internal/web/upload.go`
-file update:
-diff --git a/backend/internal/evaluate/handler.go b/backend/internal/evaluate/handler.go
-index 597d295ae76228e0d0cabbe860b4e2b0c6031827..00cd222427accd20ac004481cc10b9e66b698105
---- a/backend/internal/evaluate/handler.go
-+++ b/backend/internal/evaluate/handler.go
-@@ -2,6 +2,7 @@
- 
- import (
- 	"encoding/json"
-+	"errors"
- 	"fmt"
- 	"log"
- 	"mime/multipart"
-@@ -279,5 +280,9 @@
- 	if err == nil {
- 		return false
- 	}
-+	var maxBytesErr *http.MaxBytesError
-+	if errors.As(err, &maxBytesErr) {
-+		return true
-+	}
- 	return strings.Contains(err.Error(), "request body too large")
- }
-diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
-index 370ad45c6877ac5f4a28aa180184bdadf32bafad..a64a2f520a2bbb7c2d4df9965782dce76062f438
---- a/backend/internal/web/upload.go
-+++ b/backend/internal/web/upload.go
-@@ -1,6 +1,7 @@
- package web
- 
- import (
-+	"errors"
- 	"fmt"
- 	"io"
- 	"net/http"
-@@ -108,5 +109,9 @@
- 	if err == nil {
- 		return false
- 	}
-+	var maxBytesErr *http.MaxBytesError
-+	if errors.As(err, &maxBytesErr) {
-+		return true
-+	}
- 	return strings.Contains(err.Error(), "request body too large")
- }
-
+If you want, I can:
+1. Add an additional regression test in `internal/zk/zk_test.go` that exercises `zk.GenerateProof`/`zk.VerifyProof` end-to-end with the same vectors.
+2. Audit `internal/evaluate` and `internal/verify` handlers to confirm they’re feeding public inputs deterministically and catch any edge cases.
 tokens used
-34,123
-What I changed (short)
-- Improved oversized-body detection by using `errors.As` for `http.MaxBytesError`, with string fallback, in both evaluate and upload handlers.
+13,447
+Files changed
+- None
+
+What you changed
+- None. I found an existing real Groth16 BN254 circuit test in `internal/zk/policyzk/circuit_test.go` that already compiles, proves, and verifies PASS and FAIL cases using the in-repo Poseidon implementation.
+- The plumbing in `internal/zk/zk.go` is already wired to gnark Groth16 BN254 and maps public inputs to the circuit’s public witness.
 
 Tests run
-- `go test ./...`
+- `cd /Users/yani/Noema/backend && go test ./...`
 
-Files touched
-- `internal/evaluate/handler.go`
-- `internal/web/upload.go`
+If you want, I can:
+1. Add an additional regression test in `internal/zk/zk_test.go` that exercises `zk.GenerateProof`/`zk.VerifyProof` end-to-end with the same vectors.
+2. Audit `internal/evaluate` and `internal/verify` handlers to confirm they’re feeding public inputs deterministically and catch any edge cases.
