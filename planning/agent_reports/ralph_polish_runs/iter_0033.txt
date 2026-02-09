@@ -7,208 +7,316 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3c9b-ab1c-7893-bc04-320b85c15af0
+session id: 019c4111-d11a-7b40-8662-ae885904dd31
 --------
 user
-You are an autonomous coding agent polishing the Noema repository.
+You are an autonomous coding agent working on the Noema repository.
 
-Hard rules:
+MISSION (priority order):
+1) Add a real gnark circuit test for the PolicyGateCircuit (using our in-repo Poseidon implementation, package circuits).
+2) Make the circuit test pass reliably (compile -> prove -> verify) using Groth16 on BN254.
+3) ONLY AFTER tests pass: wire the backend plumbing to call the gnark prover/verifier behind the existing zk.GenerateProof / zk.VerifyProof API, keeping the public API shape unchanged (proof_b64 + public_inputs_b64).
+
+HARD RULES:
 - DO NOT run git commit, git reset, git clean, or anything that modifies git history.
-- I will run git commits outside of you.
-- Keep changes small: max 3 files per iteration.
+- Keep changes small: max 3 files per iteration. If more is needed, stage work across multiple iterations.
 - No cosmetic-only edits.
-- No new dependencies unless absolutely necessary.
+- No new dependencies unless absolutely necessary. Use existing gnark dependencies already in the repo. If gnark is not yet in go.mod, add it only if unavoidable.
+- Do not change routes or response shapes. Keep /api/evaluate and /api/verify behavior stable.
+- Do not redesign UI. This task is ZK/circuit/testing/plumbing only.
+- Always run: cd backend && go test ./... at least once per iteration.
 
-Goal: continuously improve production quality.
+WORKFLOW YOU MUST FOLLOW (do not skip):
+A) Inspect current circuit code and poseidon implementation:
+   - Find the PolicyGateCircuit (the policy ZK circuit) and confirm it imports and uses circuits.Poseidon (NOT gnark/std poseidon).
+   - Confirm fixed N=6 and the frozen constraint ordering.
+B) Add tests FIRST:
+   - Create a new Go test file for the circuit (example name: backend/internal/zk/policy_circuit_test.go or wherever circuits live).
+   - The test must:
+     1) Compile the circuit to R1CS
+     2) Run Groth16 setup
+     3) Build a witness with a PASS case and generate a proof
+     4) Verify the proof using the public witness
+     5) Build a witness with a FAIL case and confirm either:
+        - proving fails (unsatisfied), OR
+        - proving succeeds only if OverallPass is set correctly (0), AND verifying matches the expected output
+   - Use deterministic test vectors:
+     - datasetDigestLo/Hi fixed constants
+     - enabled/maxAllowed/severity arrays fixed constants
+     - Compute the expected Commitment in-circuit by setting Commitment to the same value computed by the circuit.
+       (In gnark tests, you can set Commitment as a public variable equal to circuits.Poseidon(domainSep + inputs) by reusing the same circuits.Poseidon function in a small helper circuit OR by computing it with the same function in-circuit and asserting equality.)
+   - The test must assert:
+     - OverallPass == 1 for pass vector, and verify passes.
+     - OverallPass == 0 for fail vector, and verify passes only with correct OverallPass.
+C) Fix whatever is broken until all tests pass:
+   - If compilation errors, fix imports or package paths.
+   - If poseidon params/functions missing, use the existing in-repo Poseidon code as the single source of truth.
+   - If constraints are wrong, fix circuit logic minimally.
+D) ONLY AFTER TESTS PASS: wire plumbing:
+   - Replace stub proof internals inside backend/internal/zk/zk.go (or equivalent) to use gnark Groth16 BN254:
+     - GenerateProof: build witness from inputs (enabled/maxAllowed/severity + datasetDigest limbs) and output proof bytes base64
+     - VerifyProof: decode proof and public inputs and verify using vk
+   - Keep existing API signatures and keep proof_b64 + public_inputs_b64 shape.
+   - You may keep public_inputs_b64 as the existing string format for now, but the verify path must map it deterministically to the circuit’s public witness (Commitment, OverallPass, MaxSeverity).
+   - Ensure keys are handled sanely for dev:
+     - For now, allow generating proving/verifying keys at startup or cached on disk under backend/internal/zk (dev only),
+       OR embed small test keys only for tests.
+     - Don’t over-engineer; prioritize working tests and stable verify.
 
-Iteration:
-1) Run: cd backend && go test ./...
-2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
-3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+ACCEPTANCE CRITERIA (must satisfy):
+- `cd backend && go test ./...` passes.
+- There is at least one new test that proves+verifies the circuit in a PASS case.
+- There is at least one test that demonstrates FAIL behavior (overall_pass=0) is enforced and verifiable.
+- If plumbing was wired, verify endpoint still accepts proof_b64/public_inputs_b64 and returns verified result correctly.
 
-Pick the highest-value improvement:
-A) Reliability/correctness: validation, error handling, run persistence, verify robustness
-B) Tests: add/strengthen tests for the change you made
-C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
-D) Maintainability: reduce duplication with tiny refactors
-E) UX: wizard/results/verify clarity (small, safe changes)
-F) Docs: README/DEPLOYMENT polish
-G) Performance: safe wins only
-
-Finish with:
-- What you changed (short)
+OUTPUT FORMAT (end of each run):
+- Files changed (list)
+- What you changed (2–6 bullets)
 - Tests run (must include go test ./...)
 mcp startup: no servers
 
 thinking
-**Running Go tests**
+**Preparing to inspect agents**
+
+I'm planning to search for agent-related code or definitions next to better understand their implementation and usage.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 91ms:
-?   	noema/cmd/server	[no test files]
-?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
-?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	(cached)
-?   	noema/internal/gemini	[no test files]
-ok  	noema/internal/session	(cached)
-ok  	noema/internal/verify	(cached)
-?   	noema/internal/web	[no test files]
-ok  	noema/internal/zk	(cached)
+/bin/zsh -lc ls in /Users/yani/Noema/backend succeeded in 53ms:
+cmd
+data
+go.mod
+go.sum
+internal
+web
 
 thinking
-**Preparing to identify reliability improvements**
-
-I'm planning to quickly inspect the repo for potential reliability improvements by listing files and using search tools to find relevant code areas beyond cosmetics.
+**Locating PolicyGateCircuit**
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && rg --files -g '*.go'" in /Users/yani/Noema/backend succeeded in 52ms:
-internal/session/session_test.go
-internal/session/session.go
-internal/evaluate/prompt.go
-internal/evaluate/parse.go
-internal/evaluate/output.go
-internal/evaluate/handler_test.go
-internal/evaluate/schema.go
-internal/evaluate/dataset.go
-internal/evaluate/storage.go
-internal/evaluate/images.go
-internal/evaluate/handler_integration_test.go
-internal/evaluate/cache.go
-internal/evaluate/commitment.go
-internal/evaluate/policy.go
-internal/evaluate/spec.go
-internal/evaluate/gemini_eval.go
-internal/evaluate/handler.go
-internal/web/auth.go
-internal/web/upload.go
-internal/web/results.go
+/bin/zsh -lc 'rg -n "PolicyGateCircuit|PolicyGate" internal' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/handler.go:395:	if len(policyConstraintOrder) != zk.PolicyGateConstraintCount {
+internal/evaluate/handler.go:417:	var enabled [zk.PolicyGateConstraintCount]uint64
+internal/evaluate/handler.go:418:	var maxAllowed [zk.PolicyGateConstraintCount]uint64
+internal/evaluate/handler.go:419:	var severity [zk.PolicyGateConstraintCount]uint64
+internal/zk/zk.go:33:// PolicyGateConstraintCount is the fixed N for the PolicyGateCircuit.
+internal/zk/zk.go:34:const PolicyGateConstraintCount = policyzk.N
+internal/zk/zk.go:55:// WitnessInputs carries the private inputs for the PolicyGateCircuit.
+internal/zk/zk.go:58:	Enabled          [PolicyGateConstraintCount]uint64
+internal/zk/zk.go:59:	MaxAllowed       [PolicyGateConstraintCount]uint64
+internal/zk/zk.go:60:	Severity         [PolicyGateConstraintCount]uint64
+internal/zk/zk.go:81:		var circuit policyzk.PolicyGateCircuit
+internal/zk/zk.go:121:	assignment := policyzk.PolicyGateCircuit{
+internal/zk/zk.go:180:	assignment := policyzk.PolicyGateCircuit{
+internal/zk/zk.go:346:func toVarArray(vals [PolicyGateConstraintCount]uint64) [PolicyGateConstraintCount]frontend.Variable {
+internal/zk/zk.go:347:	var out [PolicyGateConstraintCount]frontend.Variable
+internal/zk/zk.go:348:	for i := 0; i < PolicyGateConstraintCount; i++ {
+internal/zk/zk.go:354:// CommitmentPoseidon computes the PolicyGateCircuit commitment.
+internal/zk/zk.go:355:func CommitmentPoseidon(datasetDigestHex string, enabled, maxAllowed, severity [PolicyGateConstraintCount]uint64) (string, error) {
+internal/zk/zk.go:361:	inputs := make([]*big.Int, 0, 3+3*PolicyGateConstraintCount)
+internal/zk/zk.go:364:	for i := 0; i < PolicyGateConstraintCount; i++ {
 
 thinking
-**Identifying error handling and upload points**
+**Inspecting existing circuit_test**
 
-I'm starting to explore where error handling occurs and checking if web upload or file opening features are implemented for possible improvement opportunities.
+I'm opening and examining the existing circuit_test to understand its coverage and structure before proceeding.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/web/upload.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package web
+/bin/zsh -lc "sed -n '1,220p' internal/zk/policyzk/circuit.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package policyzk
 
 import (
-	"errors"
-	"fmt"
-	"io"
-	"net/http"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
-
-	"noema/internal/config"
-
-	"github.com/gin-gonic/gin"
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark/frontend"
 )
 
-// UploadData is passed to the upload template.
-type UploadData struct {
-	Error    string
+const N = 6
+
+// PolicyGateCircuit proves:
+//   - The prover knows (datasetDigest, policy config, gemini severities) that hash to Commitment
+//   - And the deterministic policy check passes:
+//     for each i: if Enabled[i] == 1 then Severity[i] <= MaxAllowed[i]
+//
+// Public outputs:
+// - Commitment: binds everything (dataset + policy + gemini outputs)
+// - OverallPass: 1 iff policy passes
+// - MaxSeverity (optional): max observed severity among enabled constraints
+type PolicyGateCircuit struct {
+	// ===== Private witness =====
 
 thinking
-**Adding defer cleanup for multipart form temp files**
-
-I'm planning to defer calling RemoveAll on the parsed multipart form to clean up temp files and prevent disk leaks, applying this after successful parsing without error handling on RemoveAll since it's safe to ignore.
-file update
-M /Users/yani/Noema/backend/internal/web/upload.go
-@@ -43,2 +43,3 @@
- 	}
-+	defer form.RemoveAll()
- 	files := form.File["file"]
-apply_patch(auto_approved=true) exited 0 in 28ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/web/upload.go
-file update:
-diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
-index a64a2f520a2bbb7c2d4df9965782dce76062f438..6fea38639125017c2da272f4f339620eaa9e0e78
---- a/backend/internal/web/upload.go
-+++ b/backend/internal/web/upload.go
-@@ -41,6 +41,7 @@
- 		UploadGet(c, uploadTmpl, UploadData{Error: "Invalid form."})
- 		return
- 	}
-+	defer form.RemoveAll()
- 	files := form.File["file"]
- 	if len(files) == 0 {
- 		UploadGet(c, uploadTmpl, UploadData{Error: "No file selected."})
-
-file update:
-diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
-index a64a2f520a2bbb7c2d4df9965782dce76062f438..6fea38639125017c2da272f4f339620eaa9e0e78
---- a/backend/internal/web/upload.go
-+++ b/backend/internal/web/upload.go
-@@ -41,6 +41,7 @@
- 		UploadGet(c, uploadTmpl, UploadData{Error: "Invalid form."})
- 		return
- 	}
-+	defer form.RemoveAll()
- 	files := form.File["file"]
- 	if len(files) == 0 {
- 		UploadGet(c, uploadTmpl, UploadData{Error: "No file selected."})
-
-
-thinking
-**Running tests**
+**Inspecting existing test setup**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 128ms:
+/bin/zsh -lc "sed -n '1,200p' internal/zk/policyzk/circuit_test.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package policyzk
+
+import (
+	"math/big"
+	"testing"
+
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+	"github.com/stretchr/testify/require"
+)
+
+func TestPolicyGateCircuit_Groth16PassFail(t *testing.T) {
+	require := require.New(t)
+
+	var circuit PolicyGateCircuit
+	r1cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
+exec
+/bin/zsh -lc "sed -n '200,520p' internal/zk/policyzk/circuit_test.go" in /Users/yani/Noema/backend succeeded in 53ms:
+	var x4 fr.Element
+	x4.Square(&x2)
+	x.Mul(&x4, x)
+}
+
+func ark(state *[]fr.Element, c []fr.Element, r int) {
+	s := *state
+	for i := range s {
+		s[i].Add(&s[i], &c[i+r])
+	}
+}
+
+func mix(in []fr.Element, m [][]fr.Element) []fr.Element {
+	out := make([]fr.Element, len(in))
+	for col := range in {
+		var acc fr.Element
+		for row := range in {
+			var term fr.Element
+			term.Mul(&m[row][col], &in[row])
+			acc.Add(&acc, &term)
+
+thinking
+**Reviewing existing circuit tests**
+
+I confirmed the repo's tests already use Poseidon circuits and constants, likely meeting the requirement for real gnark circuit tests. Next, I'll verify if zk.go contains the expected stub and ensure all tests pass.
+exec
+/bin/zsh -lc "sed -n '1,240p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package zk
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"math/big"
+	"strconv"
+	"strings"
+	"sync"
+
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/constraint"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+exec
+/bin/zsh -lc "sed -n '240,520p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+			v, err := strconv.Atoi(kv[1])
+			if err != nil {
+				return PublicInputs{}, fmt.Errorf("invalid policy threshold")
+			}
+			if v < 0 || v > 2 {
+				return PublicInputs{}, fmt.Errorf("policy threshold must be 0..2")
+			}
+			out.PolicyThreshold = v
+			seenPT = true
+		case "ms":
+			if seenMS {
+				return PublicInputs{}, fmt.Errorf("duplicate max severity")
+			}
+			v, err := strconv.Atoi(kv[1])
+			if err != nil {
+				return PublicInputs{}, fmt.Errorf("invalid max severity")
+			}
+			if v < 0 || v > 2 {
+				return PublicInputs{}, fmt.Errorf("max severity must be 0..2")
+			}
+exec
+/bin/zsh -lc "sed -n '520,900p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+		out[i] = make([]fr.Element, len(in[i]))
+		for j := range in[i] {
+			out[i][j].SetBigInt(in[i][j])
+		}
+	}
+	return out
+}
+
+func elementToBigInt(in fr.Element) *big.Int {
+	var out big.Int
+	in.BigInt(&out)
+	return &out
+}
+
+thinking
+**Reviewing existing proof implementation and tests**
+
+I found GenerateProof and VerifyProof implemented with gnark and located related tests in internal/zk/zk_test.go; next, I'll inspect these tests for coverage and correctness.
+exec
+/bin/zsh -lc "sed -n '1,200p' internal/zk/zk_test.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package zk
+
+import (
+	"encoding/base64"
+	"testing"
+)
+
+func TestProofRoundTrip(t *testing.T) {
+	witness := testWitnessInputs()
+	commitment, err := CommitmentPoseidon(witness.DatasetDigestHex, witness.Enabled, witness.MaxAllowed, witness.Severity)
+	if err != nil {
+		t.Fatalf("CommitmentPoseidon error: %v", err)
+	}
+	pi := PublicInputs{
+		PolicyThreshold: 0,
+		MaxSeverity:     2,
+		OverallPass:     true,
+		Commitment:      commitment,
+		Witness:         witness,
+	}
+
+thinking
+**Running and verifying existing tests**
+
+I plan to run `go test ./...` to check if tests pass and verify if a new test is needed or if existing tests already cover the requirements.
+exec
+/bin/zsh -lc 'go test ./...' in /Users/yani/Noema/backend succeeded in 311ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
 ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
+ok  	noema/internal/httputil	(cached)
 ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
-file update:
-diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
-index a64a2f520a2bbb7c2d4df9965782dce76062f438..6fea38639125017c2da272f4f339620eaa9e0e78
---- a/backend/internal/web/upload.go
-+++ b/backend/internal/web/upload.go
-@@ -41,6 +41,7 @@
- 		UploadGet(c, uploadTmpl, UploadData{Error: "Invalid form."})
- 		return
- 	}
-+	defer form.RemoveAll()
- 	files := form.File["file"]
- 	if len(files) == 0 {
- 		UploadGet(c, uploadTmpl, UploadData{Error: "No file selected."})
+ok  	noema/internal/zk/policyzk	(cached)
 
+thinking
+**Confirming no changes needed**
+
+All tests passed, the requested test and wiring are already present, so no changes were made. Running `go test ./...` confirms everything passes with no updates needed.
 codex
-What you changed (short)
-- Added `defer form.RemoveAll()` in `internal/web/upload.go` to ensure multipart temp files are cleaned up after uploads, preventing disk leaks.
+Files changed:
+- None
 
-Tests run (must include go test ./...)
+What you changed:
+- No code changes needed; circuit test and gnark Groth16 plumbing are already present and passing.
+
+Tests run:
 - `go test ./...`
-
-Suggested next steps
-1. If you want another iteration, say “next iteration” and I’ll pick the next highest-value improvement.
-file update:
-diff --git a/backend/internal/web/upload.go b/backend/internal/web/upload.go
-index a64a2f520a2bbb7c2d4df9965782dce76062f438..6fea38639125017c2da272f4f339620eaa9e0e78
---- a/backend/internal/web/upload.go
-+++ b/backend/internal/web/upload.go
-@@ -41,6 +41,7 @@
- 		UploadGet(c, uploadTmpl, UploadData{Error: "Invalid form."})
- 		return
- 	}
-+	defer form.RemoveAll()
- 	files := form.File["file"]
- 	if len(files) == 0 {
- 		UploadGet(c, uploadTmpl, UploadData{Error: "No file selected."})
-
 tokens used
-5,352
-What you changed (short)
-- Added `defer form.RemoveAll()` in `internal/web/upload.go` to ensure multipart temp files are cleaned up after uploads, preventing disk leaks.
+13,820
+Files changed:
+- None
 
-Tests run (must include go test ./...)
+What you changed:
+- No code changes needed; circuit test and gnark Groth16 plumbing are already present and passing.
+
+Tests run:
 - `go test ./...`
-
-Suggested next steps
-1. If you want another iteration, say “next iteration” and I’ll pick the next highest-value improvement.
