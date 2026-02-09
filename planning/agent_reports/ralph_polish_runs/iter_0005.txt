@@ -7,948 +7,187 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3ec4-59e8-7112-82c6-5cfd357b60c4
+session id: 019c40ff-9c44-7741-8383-e14eee21c388
 --------
 user
-You are an autonomous coding agent polishing the Noema repository.
+You are an autonomous coding agent working on the Noema repository.
 
-Hard rules:
+MISSION (priority order):
+1) Add a real gnark circuit test for the PolicyGateCircuit (using our in-repo Poseidon implementation, package circuits).
+2) Make the circuit test pass reliably (compile -> prove -> verify) using Groth16 on BN254.
+3) ONLY AFTER tests pass: wire the backend plumbing to call the gnark prover/verifier behind the existing zk.GenerateProof / zk.VerifyProof API, keeping the public API shape unchanged (proof_b64 + public_inputs_b64).
+
+HARD RULES:
 - DO NOT run git commit, git reset, git clean, or anything that modifies git history.
-- I will run git commits outside of you.
-- Keep changes small: max 3 files per iteration.
+- Keep changes small: max 3 files per iteration. If more is needed, stage work across multiple iterations.
 - No cosmetic-only edits.
-- No new dependencies unless absolutely necessary.
-- keep all the same ui functionality, the end user should be able to do the same stuff but the experiance and design should be better.
+- No new dependencies unless absolutely necessary. Use existing gnark dependencies already in the repo. If gnark is not yet in go.mod, add it only if unavoidable.
+- Do not change routes or response shapes. Keep /api/evaluate and /api/verify behavior stable.
+- Do not redesign UI. This task is ZK/circuit/testing/plumbing only.
+- Always run: cd backend && go test ./... at least once per iteration.
 
-Goal: continuously improve production quality. continuously improve front end quality and polish.
+WORKFLOW YOU MUST FOLLOW (do not skip):
+A) Inspect current circuit code and poseidon implementation:
+   - Find the PolicyGateCircuit (the policy ZK circuit) and confirm it imports and uses circuits.Poseidon (NOT gnark/std poseidon).
+   - Confirm fixed N=6 and the frozen constraint ordering.
+B) Add tests FIRST:
+   - Create a new Go test file for the circuit (example name: backend/internal/zk/policy_circuit_test.go or wherever circuits live).
+   - The test must:
+     1) Compile the circuit to R1CS
+     2) Run Groth16 setup
+     3) Build a witness with a PASS case and generate a proof
+     4) Verify the proof using the public witness
+     5) Build a witness with a FAIL case and confirm either:
+        - proving fails (unsatisfied), OR
+        - proving succeeds only if OverallPass is set correctly (0), AND verifying matches the expected output
+   - Use deterministic test vectors:
+     - datasetDigestLo/Hi fixed constants
+     - enabled/maxAllowed/severity arrays fixed constants
+     - Compute the expected Commitment in-circuit by setting Commitment to the same value computed by the circuit.
+       (In gnark tests, you can set Commitment as a public variable equal to circuits.Poseidon(domainSep + inputs) by reusing the same circuits.Poseidon function in a small helper circuit OR by computing it with the same function in-circuit and asserting equality.)
+   - The test must assert:
+     - OverallPass == 1 for pass vector, and verify passes.
+     - OverallPass == 0 for fail vector, and verify passes only with correct OverallPass.
+C) Fix whatever is broken until all tests pass:
+   - If compilation errors, fix imports or package paths.
+   - If poseidon params/functions missing, use the existing in-repo Poseidon code as the single source of truth.
+   - If constraints are wrong, fix circuit logic minimally.
+D) ONLY AFTER TESTS PASS: wire plumbing:
+   - Replace stub proof internals inside backend/internal/zk/zk.go (or equivalent) to use gnark Groth16 BN254:
+     - GenerateProof: build witness from inputs (enabled/maxAllowed/severity + datasetDigest limbs) and output proof bytes base64
+     - VerifyProof: decode proof and public inputs and verify using vk
+   - Keep existing API signatures and keep proof_b64 + public_inputs_b64 shape.
+   - You may keep public_inputs_b64 as the existing string format for now, but the verify path must map it deterministically to the circuit’s public witness (Commitment, OverallPass, MaxSeverity).
+   - Ensure keys are handled sanely for dev:
+     - For now, allow generating proving/verifying keys at startup or cached on disk under backend/internal/zk (dev only),
+       OR embed small test keys only for tests.
+     - Don’t over-engineer; prioritize working tests and stable verify.
 
-Iteration:
-1) Run: cd backend && go test ./...
-2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
-3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+ACCEPTANCE CRITERIA (must satisfy):
+- `cd backend && go test ./...` passes.
+- There is at least one new test that proves+verifies the circuit in a PASS case.
+- There is at least one test that demonstrates FAIL behavior (overall_pass=0) is enforced and verifiable.
+- If plumbing was wired, verify endpoint still accepts proof_b64/public_inputs_b64 and returns verified result correctly.
 
-Pick the highest-value improvement:
-A) Reliability/correctness: validation, error handling, run persistence, verify robustness
-B) Tests: add/strengthen tests for the change you made
-C) upgrading the user interface so that it looks better.
-D) Maintainability: reduce duplication with tiny refactors
-E) UX: wizard/results/verify clarity (small, safe changes)
-F) Docs: README/DEPLOYMENT polish
-G) Performance: safe wins only
-
-Finish with:
-- What you changed (short)
+OUTPUT FORMAT (end of each run):
+- Files changed (list)
+- What you changed (2–6 bullets)
 - Tests run (must include go test ./...)
 mcp startup: no servers
-
-thinking
-**Running Go tests via exec**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 191ms:
-?   	noema/cmd/server	[no test files]
-?   	noema/internal/auth	[no test files]
-ok  	noema/internal/config	(cached)
-?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	(cached)
-?   	noema/internal/gemini	[no test files]
-ok  	noema/internal/httputil	(cached)
-ok  	noema/internal/session	(cached)
-ok  	noema/internal/verify	(cached)
-?   	noema/internal/web	[no test files]
-ok  	noema/internal/zk	(cached)
-
-thinking
-**Identifying frontend files**
-
-I'm planning to find and list frontend files in the repo using a file search to target meaningful improvements focused on frontend quality or reliability.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg --files' in /Users/yani/Noema/backend succeeded in 52ms:
+/bin/zsh -lc ls in /Users/yani/Noema/backend succeeded in 52ms:
+cmd
+data
+go.mod
 go.sum
-internal/session/session_test.go
-internal/session/session.go
-internal/evaluate/prompt.go
-internal/evaluate/parse.go
-internal/evaluate/output.go
-internal/evaluate/handler_test.go
-internal/evaluate/schema.go
-internal/evaluate/dataset.go
-internal/evaluate/storage.go
-internal/evaluate/storage_test.go
-internal/evaluate/images.go
-internal/evaluate/handler_integration_test.go
-internal/evaluate/cache.go
-internal/evaluate/commitment.go
-internal/evaluate/policy.go
-internal/evaluate/spec.go
-internal/evaluate/gemini_eval.go
-internal/evaluate/handler.go
-internal/web/auth.go
+internal
+web
 
 thinking
-**Assessing frontend templates and styles**
+**Searching for circuit usage**
 
-I'm reviewing templates and CSS with a focus on improving user experience through better usability, such as adding field validation or improving wizard flows, rather than purely cosmetic changes. Next, I'll identify up to three key files to enhance accordingly.
+I'm searching the codebase with ripgrep to locate where the term "circuit" is used.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/templates/app.html" in /Users/yani/Noema/backend succeeded in 52ms:
-{{define "app"}}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Noema — Dashboard</title>
-  <link rel="stylesheet" href="/static/styles.css">
-</head>
-<body>
-  {{template "header_app" .}}
-
-  <main class="main main-dashboard">
-    {{template "orb" .}}
-    <div class="dashboard-content">
-      <section class="card dashboard-hero">
-        <div class="card-kicker">Dashboard</div>
-        <h1 class="card-title">Evaluations</h1>
-        <p class="card-text">Run policy evaluations on your datasets and publish verifiable results.</p>
-        <div class="form-actions">
+/bin/zsh -lc 'rg -n "PolicyGateCircuit|policy gate|PolicyGate" -S internal' in /Users/yani/Noema/backend succeeded in 53ms:
+internal/evaluate/handler.go:395:	if len(policyConstraintOrder) != zk.PolicyGateConstraintCount {
+internal/evaluate/handler.go:417:	var enabled [zk.PolicyGateConstraintCount]uint64
+internal/evaluate/handler.go:418:	var maxAllowed [zk.PolicyGateConstraintCount]uint64
+internal/evaluate/handler.go:419:	var severity [zk.PolicyGateConstraintCount]uint64
+internal/zk/zk_test.go:73:		Enabled:          [PolicyGateConstraintCount]uint64{1, 1, 1, 0, 1, 0},
+internal/zk/zk_test.go:74:		MaxAllowed:       [PolicyGateConstraintCount]uint64{1, 2, 0, 1, 2, 0},
+internal/zk/zk_test.go:75:		Severity:         [PolicyGateConstraintCount]uint64{1, 2, 0, 2, 1, 2},
+internal/zk/zk.go:33:// PolicyGateConstraintCount is the fixed N for the PolicyGateCircuit.
+internal/zk/zk.go:34:const PolicyGateConstraintCount = policyzk.N
+internal/zk/zk.go:55:// WitnessInputs carries the private inputs for the PolicyGateCircuit.
+internal/zk/zk.go:58:	Enabled          [PolicyGateConstraintCount]uint64
+internal/zk/zk.go:59:	MaxAllowed       [PolicyGateConstraintCount]uint64
+internal/zk/zk.go:60:	Severity         [PolicyGateConstraintCount]uint64
+internal/zk/zk.go:81:		var circuit policyzk.PolicyGateCircuit
+internal/zk/zk.go:121:	assignment := policyzk.PolicyGateCircuit{
+internal/zk/zk.go:180:	assignment := policyzk.PolicyGateCircuit{
+internal/zk/zk.go:346:func toVarArray(vals [PolicyGateConstraintCount]uint64) [PolicyGateConstraintCount]frontend.Variable {
+internal/zk/zk.go:347:	var out [PolicyGateConstraintCount]frontend.Variable
+internal/zk/zk.go:348:	for i := 0; i < PolicyGateConstraintCount; i++ {
+internal/zk/zk.go:354:// CommitmentPoseidon computes the PolicyGateCircuit commitment.
 
 thinking
-**Considering accessibility and empty state improvements**
-
-I'm exploring adding a small "Learn how" link to the recent runs list empty state and enhancing accessibility by adding aria-live to the recent runs or demo buttons. Next, I'll inspect relevant CSS styles.
+**Inspecting existing circuit_test**
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap');
+/bin/zsh -lc "sed -n '1,220p' internal/zk/policyzk/circuit.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package policyzk
 
-:root {
-  --bg: #05060a;
-  --bg-card: rgba(9, 12, 18, 0.9);
-  --text: #f4f6fb;
-  --text-muted: #9aa3b2;
-  --accent: #45d4ff;
-  --accent-strong: #2c7bff;
-  --accent-glow: rgba(69, 212, 255, 0.35);
-  --border: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(69, 212, 255, 0.4);
-  --error: #f87171;
-  --success: #22c55e;
-  --warning: #fbbf24;
-  --shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
+import (
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark/frontend"
+)
+
+const N = 6
+
+// PolicyGateCircuit proves:
+//   - The prover knows (datasetDigest, policy config, gemini severities) that hash to Commitment
+//   - And the deterministic policy check passes:
+//     for each i: if Enabled[i] == 1 then Severity[i] <= MaxAllowed[i]
+//
+// Public outputs:
+// - Commitment: binds everything (dataset + policy + gemini outputs)
+// - OverallPass: 1 iff policy passes
+// - MaxSeverity (optional): max observed severity among enabled constraints
+type PolicyGateCircuit struct {
+	// ===== Private witness =====
+
+thinking
+**Confirming Poseidon usage and test presence**
+exec
+/bin/zsh -lc "sed -n '1,200p' internal/zk/policyzk/circuit_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package policyzk
+
+import (
+	"math/big"
+	"testing"
+
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+	"github.com/stretchr/testify/require"
+)
+
+func TestPolicyGateCircuit_Groth16PassFail(t *testing.T) {
+	require := require.New(t)
+
+	var circuit PolicyGateCircuit
+	r1cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
+exec
+/bin/zsh -lc "sed -n '200,400p' internal/zk/policyzk/circuit_test.go" in /Users/yani/Noema/backend succeeded in 53ms:
+	var x4 fr.Element
+	x4.Square(&x2)
+	x.Mul(&x4, x)
 }
 
-*,
-*::before,
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '240,520p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+func ark(state *[]fr.Element, c []fr.Element, r int) {
+	s := *state
+	for i := range s {
+		s[i].Add(&s[i], &c[i+r])
+	}
 }
 
-.error {
-  margin: 1rem 0 0;
-  font-size: 0.9rem;
-  color: var(--error);
-}
+func mix(in []fr.Element, m [][]fr.Element) []fr.Element {
+	out := make([]fr.Element, len(in))
+	for col := range in {
+		var acc fr.Element
+		for row := range in {
+			var term fr.Element
+			term.Mul(&m[row][col], &in[row])
+			acc.Add(&acc, &term)
 
-/* ===== Buttons ===== */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.7rem 1.4rem;
-  font-size: 0.95rem;
-  font-weight: 500;
-  color: var(--text);
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 12px;
+thinking
+**Verifying test alignment with in-repo Poseidon**
+
+I'm checking whether existing tests use the in-repo Poseidon implementation from circuits or a native reimplementation and will run all tests to confirm if they pass under current constraints.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '520,1040p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 51ms:
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.75rem;
-}
-
-.constraints-count {
-  font-size: 0.85rem;
-  color: var(--text-muted);
-}
-
-.constraints-list {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-}
-
-.constraint-group {
-  padding: 1rem;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1040,1560p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
-  text-decoration: none;
-  font-weight: 500;
-}
-.verify-run-id:hover { color: var(--accent); }
-
-.verify-run-name {
-  color: var(--text-muted);
-  font-size: 0.85rem;
-}
-
-.verify-status {
-  font-size: 0.75rem;
-  padding: 0.2rem 0.55rem;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.verify-status-pass {
-  color: #86efac;
-
-thinking
-**Inspecting frontend for loading states**
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' web/static/app.js" in /Users/yani/Noema/backend succeeded in 52ms:
-(function() {
-  var STORAGE_KEY = 'noema_recent_runs';
-  var listEl = document.getElementById('recent-runs-list');
-  var emptyEl = document.getElementById('recent-runs-empty');
-
-  function loadRecentRuns() {
-    try {
-      var raw = localStorage.getItem(STORAGE_KEY);
-      var runs = raw ? JSON.parse(raw) : [];
-      if (runs.length === 0) {
-        listEl.innerHTML = '';
-        listEl.appendChild(emptyEl);
-        emptyEl.style.display = 'block';
-        return;
-      }
-      emptyEl.style.display = 'none';
-      listEl.innerHTML = '';
-      runs.slice(0, 10).forEach(function(r) {
-        var a = document.createElement('a');
-        a.href = '/app/results/' + r.run_id;
-
-
-thinking
-**Planning recent runs UI enhancement**
-
-I'm outlining a UX improvement for the recent runs list to add accessible status badges and relative time info with minimal template, JS, and CSS changes while preserving functionality. I'll create structured markup with anchors containing title and meta divs including status pills.
-thinking
-**Designing CSS for recent runs layout**
-
-I'm planning a flex and grid-based layout with spacing for the recent runs list, adding a status pill class mapped to run statuses like pass, fail, or running. Next, I'll confirm existing status values by checking how recent runs data is stored and used.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "noema_recent_runs|recent_runs" -S' in /Users/yani/Noema/backend succeeded in 52ms:
-web/static/app.js:2:  var STORAGE_KEY = 'noema_recent_runs';
-web/static/wizard.js:438:          var recent = JSON.parse(localStorage.getItem('noema_recent_runs') || '[]');
-web/static/wizard.js:445:          localStorage.setItem('noema_recent_runs', JSON.stringify(recent.slice(0, 50)));
-web/static/verify.js:2:  var STORAGE_KEY = 'noema_recent_runs';
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '400,520p' web/static/wizard.js" in /Users/yani/Noema/backend succeeded in 51ms:
-
-    document.getElementById('submit-error').style.display = 'none';
-    document.getElementById('running-state').style.display = 'block';
-    var runBtn = document.getElementById('run-eval-btn');
-    if (runBtn) runBtn.disabled = true;
-    document.getElementById('wizard-next').disabled = true;
-
-    var spec = buildSpec();
-    var formData = new FormData();
-    formData.append('spec', JSON.stringify(spec));
-    formData.append('dataset', datasetFile);
-
-    var imagesInput = document.getElementById('images-file');
-    if (imagesInput && imagesInput.files && imagesInput.files.length > 0) {
-      for (var i = 0; i < imagesInput.files.length; i++) {
-        formData.append('images', imagesInput.files[i]);
-      }
-    }
-
-    fetch('/api/evaluate', {
-
-thinking
-**Checking status usage**
-
-I'm looking into where possible statuses appear, focusing on the results template and result-related code to see how status is handled or displayed. Next, I'll explore app_results to clarify status usage in evaluation results.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/templates/app_results.html" in /Users/yani/Noema/backend succeeded in 52ms:
-{{define "app_results"}}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Noema — Results</title>
-  <link rel="stylesheet" href="/static/styles.css">
-</head>
-<body data-run-id="{{.RunID}}">
-  {{template "header_app" .}}
-
-  <main class="main main-results">
-    {{template "orb" .}}
-    <div class="card results-card">
-      <div class="results-header">
-        <div>
-          <h1 class="card-title">Evaluation results</h1>
-          <p class="text-muted" id="results-run-id">Run ID: {{.RunID}}</p>
-        </div>
-
-thinking
-**Checking status values**
-
-I'm examining the status values in the server's data.status from evaluate to understand recent run states and inform handling or display logic.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "status" internal -S' in /Users/yani/Noema/backend succeeded in 51ms:
-internal/evaluate/storage.go:143:	Status         string `json:"status"`
-internal/evaluate/handler_integration_test.go:44:	if rec.Code != http.StatusOK {
-internal/evaluate/handler_integration_test.go:45:		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
-internal/evaluate/handler_integration_test.go:52:	if resp.Status != "FAIL" {
-internal/evaluate/handler_integration_test.go:53:		t.Fatalf("expected status FAIL, got %s", resp.Status)
-internal/evaluate/handler_integration_test.go:88:	if rec.Code != http.StatusOK {
-internal/evaluate/handler_integration_test.go:89:		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
-internal/evaluate/handler_integration_test.go:96:	if resp.Status != "PASS" {
-internal/evaluate/handler_integration_test.go:97:		t.Fatalf("expected status PASS, got %s", resp.Status)
-internal/evaluate/handler_integration_test.go:127:	if rec.Code != http.StatusBadRequest {
-internal/evaluate/handler_integration_test.go:128:		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
-internal/evaluate/handler_integration_test.go:159:	if rec.Code != http.StatusBadRequest {
-internal/evaluate/handler_integration_test.go:160:		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
-internal/evaluate/handler_integration_test.go:191:	if rec.Code != http.StatusBadRequest {
-internal/evaluate/handler_integration_test.go:192:		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
-internal/evaluate/handler_integration_test.go:226:	if rec.Code != http.StatusOK {
-internal/evaluate/handler_integration_test.go:227:		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
-internal/evaluate/handler.go:25:	Status       string       `json:"status"` // PASS or FAIL
-internal/evaluate/handler.go:56:				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
-internal/evaluate/handler.go:59:			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid multipart form"})
-
-
-thinking
-**Designing UI improvements for evaluation status**
-
-Planning to map PASS/FAIL statuses to colored pills, show trimmed run IDs, and display timestamps as relative times for clarity. Intend to handle missing statuses gracefully and enhance the empty state with secondary text and a "New Evaluation" button, mostly via app.js and styles.css without expanding to a third file.
-thinking
-**Implementing status pill and timestamp formatting**
-
-Planning a formatTimestamp function that returns relative time and locale string for tooltips, plus a statusClass helper to map statuses to CSS classes. Preparing CSS updates for status pills, run metadata styling, and hover effects while ensuring safe text handling and layout stability.
-file update
-M /Users/yani/Noema/backend/web/static/styles.css
-@@ -322,3 +322,5 @@
- .recent-run-item {
--  display: block;
-+  display: flex;
-+  flex-direction: column;
-+  gap: 0.35rem;
-   color: var(--text-muted);
-@@ -326,9 +328,57 @@
-   font-size: 0.95rem;
--  padding: 0.7rem 0.6rem;
--  border-radius: 10px;
--  transition: color 0.15s ease, background 0.15s ease;
-+  padding: 0.75rem 0.7rem;
-+  border-radius: 12px;
-+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
-+  border: 1px solid transparent;
- }
- .recent-run-item:hover {
--  color: var(--accent);
-+  color: var(--text);
-   background: rgba(255,255,255,0.03);
-+  border-color: rgba(255,255,255,0.08);
-+}
-+
-+.recent-run-header {
-+  display: flex;
-+  align-items: center;
-+  justify-content: space-between;
-+  gap: 0.75rem;
-+}
-+
-+.recent-run-name {
-+  font-weight: 500;
-+  color: var(--text);
-+}
-+
-+.recent-run-meta {
-+  display: flex;
-+  align-items: center;
-+  gap: 0.75rem;
-+  flex-wrap: wrap;
-+  font-size: 0.85rem;
-+  color: var(--text-muted);
-+}
-+
-+.status-pill {
-+  font-size: 0.7rem;
-+  letter-spacing: 0.08em;
-+  text-transform: uppercase;
-+  padding: 0.2rem 0.55rem;
-+  border-radius: 999px;
-+  border: 1px solid var(--border);
-+  color: var(--text-muted);
-+  white-space: nowrap;
-+}
-+.status-pill-pass {
-+  color: #86efac;
-+  border-color: rgba(34, 197, 94, 0.5);
-+  background: rgba(34, 197, 94, 0.12);
-+}
-+.status-pill-fail {
-+  color: #fca5a5;
-+  border-color: rgba(248, 113, 113, 0.5);
-+  background: rgba(248, 113, 113, 0.12);
-+}
-+.status-pill-unknown {
-+  color: var(--text-muted);
-+  border-color: rgba(255, 255, 255, 0.14);
- }
-apply_patch(auto_approved=true) exited 0 in 32ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/web/static/styles.css
-file update:
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 2a81f1ed61a902fae23c0ba052b7863c60caec74..43533f4226e7f58e614b89ca453678979770a780
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -320,17 +320,67 @@
- .recent-runs-list { display: flex; flex-direction: column; gap: 0.6rem; }
- 
- .recent-run-item {
--  display: block;
-+  display: flex;
-+  flex-direction: column;
-+  gap: 0.35rem;
-   color: var(--text-muted);
-   text-decoration: none;
-   font-size: 0.95rem;
--  padding: 0.7rem 0.6rem;
--  border-radius: 10px;
--  transition: color 0.15s ease, background 0.15s ease;
-+  padding: 0.75rem 0.7rem;
-+  border-radius: 12px;
-+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
-+  border: 1px solid transparent;
- }
- .recent-run-item:hover {
--  color: var(--accent);
-+  color: var(--text);
-   background: rgba(255,255,255,0.03);
-+  border-color: rgba(255,255,255,0.08);
-+}
-+
-+.recent-run-header {
-+  display: flex;
-+  align-items: center;
-+  justify-content: space-between;
-+  gap: 0.75rem;
-+}
-+
-+.recent-run-name {
-+  font-weight: 500;
-+  color: var(--text);
-+}
-+
-+.recent-run-meta {
-+  display: flex;
-+  align-items: center;
-+  gap: 0.75rem;
-+  flex-wrap: wrap;
-+  font-size: 0.85rem;
-+  color: var(--text-muted);
-+}
-+
-+.status-pill {
-+  font-size: 0.7rem;
-+  letter-spacing: 0.08em;
-+  text-transform: uppercase;
-+  padding: 0.2rem 0.55rem;
-+  border-radius: 999px;
-+  border: 1px solid var(--border);
-+  color: var(--text-muted);
-+  white-space: nowrap;
-+}
-+.status-pill-pass {
-+  color: #86efac;
-+  border-color: rgba(34, 197, 94, 0.5);
-+  background: rgba(34, 197, 94, 0.12);
-+}
-+.status-pill-fail {
-+  color: #fca5a5;
-+  border-color: rgba(248, 113, 113, 0.5);
-+  background: rgba(248, 113, 113, 0.12);
-+}
-+.status-pill-unknown {
-+  color: var(--text-muted);
-+  border-color: rgba(255, 255, 255, 0.14);
- }
- 
- .demos-list {
-
-file update:
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 2a81f1ed61a902fae23c0ba052b7863c60caec74..43533f4226e7f58e614b89ca453678979770a780
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -320,17 +320,67 @@
- .recent-runs-list { display: flex; flex-direction: column; gap: 0.6rem; }
- 
- .recent-run-item {
--  display: block;
-+  display: flex;
-+  flex-direction: column;
-+  gap: 0.35rem;
-   color: var(--text-muted);
-   text-decoration: none;
-   font-size: 0.95rem;
--  padding: 0.7rem 0.6rem;
--  border-radius: 10px;
--  transition: color 0.15s ease, background 0.15s ease;
-+  padding: 0.75rem 0.7rem;
-+  border-radius: 12px;
-+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
-+  border: 1px solid transparent;
- }
- .recent-run-item:hover {
--  color: var(--accent);
-+  color: var(--text);
-   background: rgba(255,255,255,0.03);
-+  border-color: rgba(255,255,255,0.08);
-+}
-+
-+.recent-run-header {
-+  display: flex;
-+  align-items: center;
-+  justify-content: space-between;
-+  gap: 0.75rem;
-+}
-+
-+.recent-run-name {
-+  font-weight: 500;
-+  color: var(--text);
-+}
-+
-+.recent-run-meta {
-+  display: flex;
-+  align-items: center;
-+  gap: 0.75rem;
-+  flex-wrap: wrap;
-+  font-size: 0.85rem;
-+  color: var(--text-muted);
-+}
-+
-+.status-pill {
-+  font-size: 0.7rem;
-+  letter-spacing: 0.08em;
-+  text-transform: uppercase;
-+  padding: 0.2rem 0.55rem;
-+  border-radius: 999px;
-+  border: 1px solid var(--border);
-+  color: var(--text-muted);
-+  white-space: nowrap;
-+}
-+.status-pill-pass {
-+  color: #86efac;
-+  border-color: rgba(34, 197, 94, 0.5);
-+  background: rgba(34, 197, 94, 0.12);
-+}
-+.status-pill-fail {
-+  color: #fca5a5;
-+  border-color: rgba(248, 113, 113, 0.5);
-+  background: rgba(248, 113, 113, 0.12);
-+}
-+.status-pill-unknown {
-+  color: var(--text-muted);
-+  border-color: rgba(255, 255, 255, 0.14);
- }
- 
- .demos-list {
-
-
-thinking
-**Updating app.js structure**
-file update
-M /Users/yani/Noema/backend/web/static/app.js
-@@ -5,2 +5,27 @@
- 
-+  function statusClass(status) {
-+    if (!status) return 'status-pill-unknown';
-+    var normalized = String(status).toUpperCase();
-+    if (normalized === 'PASS') return 'status-pill-pass';
-+    if (normalized === 'FAIL') return 'status-pill-fail';
-+    return 'status-pill-unknown';
-+  }
-+
-+  function formatTimestamp(ts) {
-+    if (!ts) return null;
-+    var date = new Date(ts);
-+    if (Number.isNaN(date.getTime())) return null;
-+    var diffMs = Math.abs(Date.now() - date.getTime());
-+    var minutes = Math.round(diffMs / 60000);
-+    var label = '';
-+    if (minutes < 1) label = 'just now';
-+    else if (minutes < 60) label = minutes + 'm ago';
-+    else if (minutes < 1440) label = Math.round(minutes / 60) + 'h ago';
-+    else label = Math.round(minutes / 1440) + 'd ago';
-+    return {
-+      label: label,
-+      title: date.toLocaleString()
-+    };
-+  }
-+
-   function loadRecentRuns() {
-@@ -21,3 +46,34 @@
-         a.className = 'recent-run-item';
--        a.textContent = (r.name || r.run_id) + ' — ' + r.status + ' · ' + (r.ts ? new Date(r.ts).toLocaleString() : '');
-+
-+        var header = document.createElement('div');
-+        header.className = 'recent-run-header';
-+
-+        var name = document.createElement('div');
-+        name.className = 'recent-run-name';
-+        name.textContent = r.name || r.run_id;
-+
-+        var status = document.createElement('span');
-+        status.className = 'status-pill ' + statusClass(r.status);
-+        status.textContent = r.status || 'UNKNOWN';
-+
-+        header.appendChild(name);
-+        header.appendChild(status);
-+
-+        var meta = document.createElement('div');
-+        meta.className = 'recent-run-meta';
-+
-+        var runId = document.createElement('span');
-+        runId.textContent = 'Run ID: ' + r.run_id;
-+        meta.appendChild(runId);
-+
-+        var ts = formatTimestamp(r.ts);
-+        if (ts) {
-+          var time = document.createElement('span');
-+          time.textContent = ts.label;
-+          time.title = ts.title;
-+          meta.appendChild(time);
-+        }
-+
-+        a.appendChild(header);
-+        a.appendChild(meta);
-         listEl.appendChild(a);
-apply_patch(auto_approved=true) exited 0 in 37ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/web/static/app.js
-file update:
-diff --git a/backend/web/static/app.js b/backend/web/static/app.js
-index 2c7c47894c206b2f60566adedf5ee6f2c10f59df..72a6ceebf13aabaa3c1aef50c89b07ff75bc5c21
---- a/backend/web/static/app.js
-+++ b/backend/web/static/app.js
-@@ -3,6 +3,31 @@
-   var listEl = document.getElementById('recent-runs-list');
-   var emptyEl = document.getElementById('recent-runs-empty');
- 
-+  function statusClass(status) {
-+    if (!status) return 'status-pill-unknown';
-+    var normalized = String(status).toUpperCase();
-+    if (normalized === 'PASS') return 'status-pill-pass';
-+    if (normalized === 'FAIL') return 'status-pill-fail';
-+    return 'status-pill-unknown';
-+  }
-+
-+  function formatTimestamp(ts) {
-+    if (!ts) return null;
-+    var date = new Date(ts);
-+    if (Number.isNaN(date.getTime())) return null;
-+    var diffMs = Math.abs(Date.now() - date.getTime());
-+    var minutes = Math.round(diffMs / 60000);
-+    var label = '';
-+    if (minutes < 1) label = 'just now';
-+    else if (minutes < 60) label = minutes + 'm ago';
-+    else if (minutes < 1440) label = Math.round(minutes / 60) + 'h ago';
-+    else label = Math.round(minutes / 1440) + 'd ago';
-+    return {
-+      label: label,
-+      title: date.toLocaleString()
-+    };
-+  }
-+
-   function loadRecentRuns() {
-     try {
-       var raw = localStorage.getItem(STORAGE_KEY);
-@@ -19,7 +44,38 @@
-         var a = document.createElement('a');
-         a.href = '/app/results/' + r.run_id;
-         a.className = 'recent-run-item';
--        a.textContent = (r.name || r.run_id) + ' — ' + r.status + ' · ' + (r.ts ? new Date(r.ts).toLocaleString() : '');
-+
-+        var header = document.createElement('div');
-+        header.className = 'recent-run-header';
-+
-+        var name = document.createElement('div');
-+        name.className = 'recent-run-name';
-+        name.textContent = r.name || r.run_id;
-+
-+        var status = document.createElement('span');
-+        status.className = 'status-pill ' + statusClass(r.status);
-+        status.textContent = r.status || 'UNKNOWN';
-+
-+        header.appendChild(name);
-+        header.appendChild(status);
-+
-+        var meta = document.createElement('div');
-+        meta.className = 'recent-run-meta';
-+
-+        var runId = document.createElement('span');
-+        runId.textContent = 'Run ID: ' + r.run_id;
-+        meta.appendChild(runId);
-+
-+        var ts = formatTimestamp(r.ts);
-+        if (ts) {
-+          var time = document.createElement('span');
-+          time.textContent = ts.label;
-+          time.title = ts.title;
-+          meta.appendChild(time);
-+        }
-+
-+        a.appendChild(header);
-+        a.appendChild(meta);
-         listEl.appendChild(a);
-       });
-     } catch (e) {
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 2a81f1ed61a902fae23c0ba052b7863c60caec74..43533f4226e7f58e614b89ca453678979770a780
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -320,17 +320,67 @@
- .recent-runs-list { display: flex; flex-direction: column; gap: 0.6rem; }
- 
- .recent-run-item {
--  display: block;
-+  display: flex;
-+  flex-direction: column;
-+  gap: 0.35rem;
-   color: var(--text-muted);
-   text-decoration: none;
-   font-size: 0.95rem;
--  padding: 0.7rem 0.6rem;
--  border-radius: 10px;
--  transition: color 0.15s ease, background 0.15s ease;
-+  padding: 0.75rem 0.7rem;
-+  border-radius: 12px;
-+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
-+  border: 1px solid transparent;
- }
- .recent-run-item:hover {
--  color: var(--accent);
-+  color: var(--text);
-   background: rgba(255,255,255,0.03);
-+  border-color: rgba(255,255,255,0.08);
-+}
-+
-+.recent-run-header {
-+  display: flex;
-+  align-items: center;
-+  justify-content: space-between;
-+  gap: 0.75rem;
-+}
-+
-+.recent-run-name {
-+  font-weight: 500;
-+  color: var(--text);
-+}
-+
-+.recent-run-meta {
-+  display: flex;
-+  align-items: center;
-+  gap: 0.75rem;
-+  flex-wrap: wrap;
-+  font-size: 0.85rem;
-+  color: var(--text-muted);
-+}
-+
-+.status-pill {
-+  font-size: 0.7rem;
-+  letter-spacing: 0.08em;
-+  text-transform: uppercase;
-+  padding: 0.2rem 0.55rem;
-+  border-radius: 999px;
-+  border: 1px solid var(--border);
-+  color: var(--text-muted);
-+  white-space: nowrap;
-+}
-+.status-pill-pass {
-+  color: #86efac;
-+  border-color: rgba(34, 197, 94, 0.5);
-+  background: rgba(34, 197, 94, 0.12);
-+}
-+.status-pill-fail {
-+  color: #fca5a5;
-+  border-color: rgba(248, 113, 113, 0.5);
-+  background: rgba(248, 113, 113, 0.12);
-+}
-+.status-pill-unknown {
-+  color: var(--text-muted);
-+  border-color: rgba(255, 255, 255, 0.14);
- }
- 
- .demos-list {
-
-file update:
-diff --git a/backend/web/static/app.js b/backend/web/static/app.js
-index 2c7c47894c206b2f60566adedf5ee6f2c10f59df..72a6ceebf13aabaa3c1aef50c89b07ff75bc5c21
---- a/backend/web/static/app.js
-+++ b/backend/web/static/app.js
-@@ -3,6 +3,31 @@
-   var listEl = document.getElementById('recent-runs-list');
-   var emptyEl = document.getElementById('recent-runs-empty');
- 
-+  function statusClass(status) {
-+    if (!status) return 'status-pill-unknown';
-+    var normalized = String(status).toUpperCase();
-+    if (normalized === 'PASS') return 'status-pill-pass';
-+    if (normalized === 'FAIL') return 'status-pill-fail';
-+    return 'status-pill-unknown';
-+  }
-+
-+  function formatTimestamp(ts) {
-+    if (!ts) return null;
-+    var date = new Date(ts);
-+    if (Number.isNaN(date.getTime())) return null;
-+    var diffMs = Math.abs(Date.now() - date.getTime());
-+    var minutes = Math.round(diffMs / 60000);
-+    var label = '';
-+    if (minutes < 1) label = 'just now';
-+    else if (minutes < 60) label = minutes + 'm ago';
-+    else if (minutes < 1440) label = Math.round(minutes / 60) + 'h ago';
-+    else label = Math.round(minutes / 1440) + 'd ago';
-+    return {
-+      label: label,
-+      title: date.toLocaleString()
-+    };
-+  }
-+
-   function loadRecentRuns() {
-     try {
-       var raw = localStorage.getItem(STORAGE_KEY);
-@@ -19,7 +44,38 @@
-         var a = document.createElement('a');
-         a.href = '/app/results/' + r.run_id;
-         a.className = 'recent-run-item';
--        a.textContent = (r.name || r.run_id) + ' — ' + r.status + ' · ' + (r.ts ? new Date(r.ts).toLocaleString() : '');
-+
-+        var header = document.createElement('div');
-+        header.className = 'recent-run-header';
-+
-+        var name = document.createElement('div');
-+        name.className = 'recent-run-name';
-+        name.textContent = r.name || r.run_id;
-+
-+        var status = document.createElement('span');
-+        status.className = 'status-pill ' + statusClass(r.status);
-+        status.textContent = r.status || 'UNKNOWN';
-+
-+        header.appendChild(name);
-+        header.appendChild(status);
-+
-+        var meta = document.createElement('div');
-+        meta.className = 'recent-run-meta';
-+
-+        var runId = document.createElement('span');
-+        runId.textContent = 'Run ID: ' + r.run_id;
-+        meta.appendChild(runId);
-+
-+        var ts = formatTimestamp(r.ts);
-+        if (ts) {
-+          var time = document.createElement('span');
-+          time.textContent = ts.label;
-+          time.title = ts.title;
-+          meta.appendChild(time);
-+        }
-+
-+        a.appendChild(header);
-+        a.appendChild(meta);
-         listEl.appendChild(a);
-       });
-     } catch (e) {
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 2a81f1ed61a902fae23c0ba052b7863c60caec74..43533f4226e7f58e614b89ca453678979770a780
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -320,17 +320,67 @@
- .recent-runs-list { display: flex; flex-direction: column; gap: 0.6rem; }
- 
- .recent-run-item {
--  display: block;
-+  display: flex;
-+  flex-direction: column;
-+  gap: 0.35rem;
-   color: var(--text-muted);
-   text-decoration: none;
-   font-size: 0.95rem;
--  padding: 0.7rem 0.6rem;
--  border-radius: 10px;
--  transition: color 0.15s ease, background 0.15s ease;
-+  padding: 0.75rem 0.7rem;
-+  border-radius: 12px;
-+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
-+  border: 1px solid transparent;
- }
- .recent-run-item:hover {
--  color: var(--accent);
-+  color: var(--text);
-   background: rgba(255,255,255,0.03);
-+  border-color: rgba(255,255,255,0.08);
-+}
-+
-+.recent-run-header {
-+  display: flex;
-+  align-items: center;
-+  justify-content: space-between;
-+  gap: 0.75rem;
-+}
-+
-+.recent-run-name {
-+  font-weight: 500;
-+  color: var(--text);
-+}
-+
-+.recent-run-meta {
-+  display: flex;
-+  align-items: center;
-+  gap: 0.75rem;
-+  flex-wrap: wrap;
-+  font-size: 0.85rem;
-+  color: var(--text-muted);
-+}
-+
-+.status-pill {
-+  font-size: 0.7rem;
-+  letter-spacing: 0.08em;
-+  text-transform: uppercase;
-+  padding: 0.2rem 0.55rem;
-+  border-radius: 999px;
-+  border: 1px solid var(--border);
-+  color: var(--text-muted);
-+  white-space: nowrap;
-+}
-+.status-pill-pass {
-+  color: #86efac;
-+  border-color: rgba(34, 197, 94, 0.5);
-+  background: rgba(34, 197, 94, 0.12);
-+}
-+.status-pill-fail {
-+  color: #fca5a5;
-+  border-color: rgba(248, 113, 113, 0.5);
-+  background: rgba(248, 113, 113, 0.12);
-+}
-+.status-pill-unknown {
-+  color: var(--text-muted);
-+  border-color: rgba(255, 255, 255, 0.14);
- }
- 
- .demos-list {
-
-
-thinking
-**Running full test suite**
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 201ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 309ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
 ok  	noema/internal/config	(cached)
@@ -960,328 +199,92 @@ ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
-file update:
-diff --git a/backend/web/static/app.js b/backend/web/static/app.js
-index 2c7c47894c206b2f60566adedf5ee6f2c10f59df..72a6ceebf13aabaa3c1aef50c89b07ff75bc5c21
---- a/backend/web/static/app.js
-+++ b/backend/web/static/app.js
-@@ -3,6 +3,31 @@
-   var listEl = document.getElementById('recent-runs-list');
-   var emptyEl = document.getElementById('recent-runs-empty');
- 
-+  function statusClass(status) {
-+    if (!status) return 'status-pill-unknown';
-+    var normalized = String(status).toUpperCase();
-+    if (normalized === 'PASS') return 'status-pill-pass';
-+    if (normalized === 'FAIL') return 'status-pill-fail';
-+    return 'status-pill-unknown';
-+  }
-+
-+  function formatTimestamp(ts) {
-+    if (!ts) return null;
-+    var date = new Date(ts);
-+    if (Number.isNaN(date.getTime())) return null;
-+    var diffMs = Math.abs(Date.now() - date.getTime());
-+    var minutes = Math.round(diffMs / 60000);
-+    var label = '';
-+    if (minutes < 1) label = 'just now';
-+    else if (minutes < 60) label = minutes + 'm ago';
-+    else if (minutes < 1440) label = Math.round(minutes / 60) + 'h ago';
-+    else label = Math.round(minutes / 1440) + 'd ago';
-+    return {
-+      label: label,
-+      title: date.toLocaleString()
-+    };
-+  }
-+
-   function loadRecentRuns() {
-     try {
-       var raw = localStorage.getItem(STORAGE_KEY);
-@@ -19,7 +44,38 @@
-         var a = document.createElement('a');
-         a.href = '/app/results/' + r.run_id;
-         a.className = 'recent-run-item';
--        a.textContent = (r.name || r.run_id) + ' — ' + r.status + ' · ' + (r.ts ? new Date(r.ts).toLocaleString() : '');
-+
-+        var header = document.createElement('div');
-+        header.className = 'recent-run-header';
-+
-+        var name = document.createElement('div');
-+        name.className = 'recent-run-name';
-+        name.textContent = r.name || r.run_id;
-+
-+        var status = document.createElement('span');
-+        status.className = 'status-pill ' + statusClass(r.status);
-+        status.textContent = r.status || 'UNKNOWN';
-+
-+        header.appendChild(name);
-+        header.appendChild(status);
-+
-+        var meta = document.createElement('div');
-+        meta.className = 'recent-run-meta';
-+
-+        var runId = document.createElement('span');
-+        runId.textContent = 'Run ID: ' + r.run_id;
-+        meta.appendChild(runId);
-+
-+        var ts = formatTimestamp(r.ts);
-+        if (ts) {
-+          var time = document.createElement('span');
-+          time.textContent = ts.label;
-+          time.title = ts.title;
-+          meta.appendChild(time);
-+        }
-+
-+        a.appendChild(header);
-+        a.appendChild(meta);
-         listEl.appendChild(a);
-       });
-     } catch (e) {
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 2a81f1ed61a902fae23c0ba052b7863c60caec74..43533f4226e7f58e614b89ca453678979770a780
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -320,17 +320,67 @@
- .recent-runs-list { display: flex; flex-direction: column; gap: 0.6rem; }
- 
- .recent-run-item {
--  display: block;
-+  display: flex;
-+  flex-direction: column;
-+  gap: 0.35rem;
-   color: var(--text-muted);
-   text-decoration: none;
-   font-size: 0.95rem;
--  padding: 0.7rem 0.6rem;
--  border-radius: 10px;
--  transition: color 0.15s ease, background 0.15s ease;
-+  padding: 0.75rem 0.7rem;
-+  border-radius: 12px;
-+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
-+  border: 1px solid transparent;
- }
- .recent-run-item:hover {
--  color: var(--accent);
-+  color: var(--text);
-   background: rgba(255,255,255,0.03);
-+  border-color: rgba(255,255,255,0.08);
-+}
-+
-+.recent-run-header {
-+  display: flex;
-+  align-items: center;
-+  justify-content: space-between;
-+  gap: 0.75rem;
-+}
-+
-+.recent-run-name {
-+  font-weight: 500;
-+  color: var(--text);
-+}
-+
-+.recent-run-meta {
-+  display: flex;
-+  align-items: center;
-+  gap: 0.75rem;
-+  flex-wrap: wrap;
-+  font-size: 0.85rem;
-+  color: var(--text-muted);
-+}
-+
-+.status-pill {
-+  font-size: 0.7rem;
-+  letter-spacing: 0.08em;
-+  text-transform: uppercase;
-+  padding: 0.2rem 0.55rem;
-+  border-radius: 999px;
-+  border: 1px solid var(--border);
-+  color: var(--text-muted);
-+  white-space: nowrap;
-+}
-+.status-pill-pass {
-+  color: #86efac;
-+  border-color: rgba(34, 197, 94, 0.5);
-+  background: rgba(34, 197, 94, 0.12);
-+}
-+.status-pill-fail {
-+  color: #fca5a5;
-+  border-color: rgba(248, 113, 113, 0.5);
-+  background: rgba(248, 113, 113, 0.12);
-+}
-+.status-pill-unknown {
-+  color: var(--text-muted);
-+  border-color: rgba(255, 255, 255, 0.14);
- }
- 
- .demos-list {
+ok  	noema/internal/zk/policyzk	(cached)
 
+thinking
+**Reviewing test status and plumbing**
+
+Tests are passing but the plumbing may still be a stub; next is to verify and replace any stub plumbing after confirming that the real gnark circuit test is in place.
+exec
+/bin/zsh -lc "sed -n '1,240p' /Users/yani/Noema/backend/internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package zk
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"math/big"
+	"strconv"
+	"strings"
+	"sync"
+
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/constraint"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+exec
+/bin/zsh -lc "sed -n '240,520p' /Users/yani/Noema/backend/internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+			v, err := strconv.Atoi(kv[1])
+			if err != nil {
+				return PublicInputs{}, fmt.Errorf("invalid policy threshold")
+			}
+			if v < 0 || v > 2 {
+				return PublicInputs{}, fmt.Errorf("policy threshold must be 0..2")
+			}
+			out.PolicyThreshold = v
+			seenPT = true
+		case "ms":
+			if seenMS {
+				return PublicInputs{}, fmt.Errorf("duplicate max severity")
+			}
+			v, err := strconv.Atoi(kv[1])
+			if err != nil {
+				return PublicInputs{}, fmt.Errorf("invalid max severity")
+			}
+			if v < 0 || v > 2 {
+				return PublicInputs{}, fmt.Errorf("max severity must be 0..2")
+			}
+exec
+/bin/zsh -lc "sed -n '520,820p' /Users/yani/Noema/backend/internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 52ms:
+		out[i] = make([]fr.Element, len(in[i]))
+		for j := range in[i] {
+			out[i][j].SetBigInt(in[i][j])
+		}
+	}
+	return out
+}
+
+func elementToBigInt(in fr.Element) *big.Int {
+	var out big.Int
+	in.BigInt(&out)
+	return &out
+}
+
+thinking
+**Confirming no changes needed**
+
+The existing plumbing already uses gnark with tests confirmed in policyzk, so no code modifications are required; all tests pass and no files changed.
 codex
-What you changed (short)
-1. Improved the dashboard recent runs list with clearer status pills and structured metadata (run ID + relative time) for faster scanning.
-2. Added styling to support the richer recent run layout and status indicators.
+Files changed
+- None
+
+What you changed
+- No changes needed; PolicyGateCircuit already has a Groth16 pass/fail test using the in-repo Poseidon constants, and `GenerateProof`/`VerifyProof` already use gnark Groth16 BN254 with the existing public input format.
 
 Tests run
-1. `go test ./...`
-file update:
-diff --git a/backend/web/static/app.js b/backend/web/static/app.js
-index 2c7c47894c206b2f60566adedf5ee6f2c10f59df..72a6ceebf13aabaa3c1aef50c89b07ff75bc5c21
---- a/backend/web/static/app.js
-+++ b/backend/web/static/app.js
-@@ -3,6 +3,31 @@
-   var listEl = document.getElementById('recent-runs-list');
-   var emptyEl = document.getElementById('recent-runs-empty');
- 
-+  function statusClass(status) {
-+    if (!status) return 'status-pill-unknown';
-+    var normalized = String(status).toUpperCase();
-+    if (normalized === 'PASS') return 'status-pill-pass';
-+    if (normalized === 'FAIL') return 'status-pill-fail';
-+    return 'status-pill-unknown';
-+  }
-+
-+  function formatTimestamp(ts) {
-+    if (!ts) return null;
-+    var date = new Date(ts);
-+    if (Number.isNaN(date.getTime())) return null;
-+    var diffMs = Math.abs(Date.now() - date.getTime());
-+    var minutes = Math.round(diffMs / 60000);
-+    var label = '';
-+    if (minutes < 1) label = 'just now';
-+    else if (minutes < 60) label = minutes + 'm ago';
-+    else if (minutes < 1440) label = Math.round(minutes / 60) + 'h ago';
-+    else label = Math.round(minutes / 1440) + 'd ago';
-+    return {
-+      label: label,
-+      title: date.toLocaleString()
-+    };
-+  }
-+
-   function loadRecentRuns() {
-     try {
-       var raw = localStorage.getItem(STORAGE_KEY);
-@@ -19,7 +44,38 @@
-         var a = document.createElement('a');
-         a.href = '/app/results/' + r.run_id;
-         a.className = 'recent-run-item';
--        a.textContent = (r.name || r.run_id) + ' — ' + r.status + ' · ' + (r.ts ? new Date(r.ts).toLocaleString() : '');
-+
-+        var header = document.createElement('div');
-+        header.className = 'recent-run-header';
-+
-+        var name = document.createElement('div');
-+        name.className = 'recent-run-name';
-+        name.textContent = r.name || r.run_id;
-+
-+        var status = document.createElement('span');
-+        status.className = 'status-pill ' + statusClass(r.status);
-+        status.textContent = r.status || 'UNKNOWN';
-+
-+        header.appendChild(name);
-+        header.appendChild(status);
-+
-+        var meta = document.createElement('div');
-+        meta.className = 'recent-run-meta';
-+
-+        var runId = document.createElement('span');
-+        runId.textContent = 'Run ID: ' + r.run_id;
-+        meta.appendChild(runId);
-+
-+        var ts = formatTimestamp(r.ts);
-+        if (ts) {
-+          var time = document.createElement('span');
-+          time.textContent = ts.label;
-+          time.title = ts.title;
-+          meta.appendChild(time);
-+        }
-+
-+        a.appendChild(header);
-+        a.appendChild(meta);
-         listEl.appendChild(a);
-       });
-     } catch (e) {
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 2a81f1ed61a902fae23c0ba052b7863c60caec74..43533f4226e7f58e614b89ca453678979770a780
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -320,17 +320,67 @@
- .recent-runs-list { display: flex; flex-direction: column; gap: 0.6rem; }
- 
- .recent-run-item {
--  display: block;
-+  display: flex;
-+  flex-direction: column;
-+  gap: 0.35rem;
-   color: var(--text-muted);
-   text-decoration: none;
-   font-size: 0.95rem;
--  padding: 0.7rem 0.6rem;
--  border-radius: 10px;
--  transition: color 0.15s ease, background 0.15s ease;
-+  padding: 0.75rem 0.7rem;
-+  border-radius: 12px;
-+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
-+  border: 1px solid transparent;
- }
- .recent-run-item:hover {
--  color: var(--accent);
-+  color: var(--text);
-   background: rgba(255,255,255,0.03);
-+  border-color: rgba(255,255,255,0.08);
-+}
-+
-+.recent-run-header {
-+  display: flex;
-+  align-items: center;
-+  justify-content: space-between;
-+  gap: 0.75rem;
-+}
-+
-+.recent-run-name {
-+  font-weight: 500;
-+  color: var(--text);
-+}
-+
-+.recent-run-meta {
-+  display: flex;
-+  align-items: center;
-+  gap: 0.75rem;
-+  flex-wrap: wrap;
-+  font-size: 0.85rem;
-+  color: var(--text-muted);
-+}
-+
-+.status-pill {
-+  font-size: 0.7rem;
-+  letter-spacing: 0.08em;
-+  text-transform: uppercase;
-+  padding: 0.2rem 0.55rem;
-+  border-radius: 999px;
-+  border: 1px solid var(--border);
-+  color: var(--text-muted);
-+  white-space: nowrap;
-+}
-+.status-pill-pass {
-+  color: #86efac;
-+  border-color: rgba(34, 197, 94, 0.5);
-+  background: rgba(34, 197, 94, 0.12);
-+}
-+.status-pill-fail {
-+  color: #fca5a5;
-+  border-color: rgba(248, 113, 113, 0.5);
-+  background: rgba(248, 113, 113, 0.12);
-+}
-+.status-pill-unknown {
-+  color: var(--text-muted);
-+  border-color: rgba(255, 255, 255, 0.14);
- }
- 
- .demos-list {
-
+- `cd /Users/yani/Noema/backend && go test ./...`
 tokens used
-38,432
-What you changed (short)
-1. Improved the dashboard recent runs list with clearer status pills and structured metadata (run ID + relative time) for faster scanning.
-2. Added styling to support the richer recent run layout and status indicators.
+16,450
+Files changed
+- None
+
+What you changed
+- No changes needed; PolicyGateCircuit already has a Groth16 pass/fail test using the in-repo Poseidon constants, and `GenerateProof`/`VerifyProof` already use gnark Groth16 BN254 with the existing public input format.
 
 Tests run
-1. `go test ./...`
+- `cd /Users/yani/Noema/backend && go test ./...`
