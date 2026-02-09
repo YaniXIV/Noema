@@ -7,46 +7,293 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3ca0-6dfd-79b3-a1eb-80d39f8a60fe
+session id: 019c4116-ddb7-74b3-a8d2-004e96b88e15
 --------
 user
-You are an autonomous coding agent polishing the Noema repository.
+You are an autonomous coding agent working on the Noema repository.
 
-Hard rules:
+MISSION (priority order):
+1) Add a real gnark circuit test for the PolicyGateCircuit (using our in-repo Poseidon implementation, package circuits).
+2) Make the circuit test pass reliably (compile -> prove -> verify) using Groth16 on BN254.
+3) ONLY AFTER tests pass: wire the backend plumbing to call the gnark prover/verifier behind the existing zk.GenerateProof / zk.VerifyProof API, keeping the public API shape unchanged (proof_b64 + public_inputs_b64).
+
+HARD RULES:
 - DO NOT run git commit, git reset, git clean, or anything that modifies git history.
-- I will run git commits outside of you.
-- Keep changes small: max 3 files per iteration.
+- Keep changes small: max 3 files per iteration. If more is needed, stage work across multiple iterations.
 - No cosmetic-only edits.
-- No new dependencies unless absolutely necessary.
+- No new dependencies unless absolutely necessary. Use existing gnark dependencies already in the repo. If gnark is not yet in go.mod, add it only if unavoidable.
+- Do not change routes or response shapes. Keep /api/evaluate and /api/verify behavior stable.
+- Do not redesign UI. This task is ZK/circuit/testing/plumbing only.
+- Always run: cd backend && go test ./... at least once per iteration.
 
-Goal: continuously improve production quality.
+WORKFLOW YOU MUST FOLLOW (do not skip):
+A) Inspect current circuit code and poseidon implementation:
+   - Find the PolicyGateCircuit (the policy ZK circuit) and confirm it imports and uses circuits.Poseidon (NOT gnark/std poseidon).
+   - Confirm fixed N=6 and the frozen constraint ordering.
+B) Add tests FIRST:
+   - Create a new Go test file for the circuit (example name: backend/internal/zk/policy_circuit_test.go or wherever circuits live).
+   - The test must:
+     1) Compile the circuit to R1CS
+     2) Run Groth16 setup
+     3) Build a witness with a PASS case and generate a proof
+     4) Verify the proof using the public witness
+     5) Build a witness with a FAIL case and confirm either:
+        - proving fails (unsatisfied), OR
+        - proving succeeds only if OverallPass is set correctly (0), AND verifying matches the expected output
+   - Use deterministic test vectors:
+     - datasetDigestLo/Hi fixed constants
+     - enabled/maxAllowed/severity arrays fixed constants
+     - Compute the expected Commitment in-circuit by setting Commitment to the same value computed by the circuit.
+       (In gnark tests, you can set Commitment as a public variable equal to circuits.Poseidon(domainSep + inputs) by reusing the same circuits.Poseidon function in a small helper circuit OR by computing it with the same function in-circuit and asserting equality.)
+   - The test must assert:
+     - OverallPass == 1 for pass vector, and verify passes.
+     - OverallPass == 0 for fail vector, and verify passes only with correct OverallPass.
+C) Fix whatever is broken until all tests pass:
+   - If compilation errors, fix imports or package paths.
+   - If poseidon params/functions missing, use the existing in-repo Poseidon code as the single source of truth.
+   - If constraints are wrong, fix circuit logic minimally.
+D) ONLY AFTER TESTS PASS: wire plumbing:
+   - Replace stub proof internals inside backend/internal/zk/zk.go (or equivalent) to use gnark Groth16 BN254:
+     - GenerateProof: build witness from inputs (enabled/maxAllowed/severity + datasetDigest limbs) and output proof bytes base64
+     - VerifyProof: decode proof and public inputs and verify using vk
+   - Keep existing API signatures and keep proof_b64 + public_inputs_b64 shape.
+   - You may keep public_inputs_b64 as the existing string format for now, but the verify path must map it deterministically to the circuit’s public witness (Commitment, OverallPass, MaxSeverity).
+   - Ensure keys are handled sanely for dev:
+     - For now, allow generating proving/verifying keys at startup or cached on disk under backend/internal/zk (dev only),
+       OR embed small test keys only for tests.
+     - Don’t over-engineer; prioritize working tests and stable verify.
 
-Iteration:
-1) Run: cd backend && go test ./...
-2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
-3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+ACCEPTANCE CRITERIA (must satisfy):
+- `cd backend && go test ./...` passes.
+- There is at least one new test that proves+verifies the circuit in a PASS case.
+- There is at least one test that demonstrates FAIL behavior (overall_pass=0) is enforced and verifiable.
+- If plumbing was wired, verify endpoint still accepts proof_b64/public_inputs_b64 and returns verified result correctly.
 
-Pick the highest-value improvement:
-A) Reliability/correctness: validation, error handling, run persistence, verify robustness
-B) Tests: add/strengthen tests for the change you made
-C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
-D) Maintainability: reduce duplication with tiny refactors
-E) UX: wizard/results/verify clarity (small, safe changes)
-F) Docs: README/DEPLOYMENT polish
-G) Performance: safe wins only
-
-Finish with:
-- What you changed (short)
+OUTPUT FORMAT (end of each run):
+- Files changed (list)
+- What you changed (2–6 bullets)
 - Tests run (must include go test ./...)
 mcp startup: no servers
 
 thinking
-**Running tests with exec_command**
+**Preparing to inspect Go test files**
+
+I'll use ripgrep to locate test files and examine them before running Go tests.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 326ms:
+/bin/zsh -lc ls in /Users/yani/Noema/backend succeeded in 53ms:
+cmd
+data
+go.mod
+go.sum
+internal
+web
+exec
+/bin/zsh -lc 'rg -n "PolicyGateCircuit" -S internal' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/zk/policy_circuit_groth16_test.go:14:func TestPolicyGateCircuit_Groth16PassFail(t *testing.T) {
+internal/zk/policy_circuit_groth16_test.go:15:	var circuit policyzk.PolicyGateCircuit
+internal/zk/policy_circuit_groth16_test.go:47:	passAssignment := policyzk.PolicyGateCircuit{
+internal/zk/policy_circuit_groth16_test.go:86:	failAssignment := policyzk.PolicyGateCircuit{
+internal/zk/zk.go:33:// PolicyGateConstraintCount is the fixed N for the PolicyGateCircuit.
+internal/zk/zk.go:55:// WitnessInputs carries the private inputs for the PolicyGateCircuit.
+internal/zk/zk.go:81:		var circuit policyzk.PolicyGateCircuit
+internal/zk/zk.go:121:	assignment := policyzk.PolicyGateCircuit{
+internal/zk/zk.go:180:	assignment := policyzk.PolicyGateCircuit{
+internal/zk/zk.go:354:// CommitmentPoseidon computes the PolicyGateCircuit commitment.
+internal/zk/policyzk/circuit.go:10:// PolicyGateCircuit proves:
+internal/zk/policyzk/circuit.go:19:type PolicyGateCircuit struct {
+internal/zk/policyzk/circuit.go:41:func (c *PolicyGateCircuit) Define(api frontend.API) error {
+internal/zk/policyzk/circuit_test.go:16:func TestPolicyGateCircuit_Groth16PassFail(t *testing.T) {
+internal/zk/policyzk/circuit_test.go:19:	var circuit PolicyGateCircuit
+internal/zk/policyzk/circuit_test.go:34:	passAssignment := PolicyGateCircuit{
+internal/zk/policyzk/circuit_test.go:55:	failAssignment := PolicyGateCircuit{
+
+thinking
+**Checking for existing tests**
+exec
+/bin/zsh -lc "sed -n '1,220p' internal/zk/policyzk/circuit.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package policyzk
+
+import (
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark/frontend"
+)
+
+const N = 6
+
+// PolicyGateCircuit proves:
+//   - The prover knows (datasetDigest, policy config, gemini severities) that hash to Commitment
+//   - And the deterministic policy check passes:
+//     for each i: if Enabled[i] == 1 then Severity[i] <= MaxAllowed[i]
+//
+// Public outputs:
+// - Commitment: binds everything (dataset + policy + gemini outputs)
+// - OverallPass: 1 iff policy passes
+// - MaxSeverity (optional): max observed severity among enabled constraints
+type PolicyGateCircuit struct {
+	// ===== Private witness =====
+
+thinking
+**Checking existing tests**
+exec
+/bin/zsh -lc "sed -n '1,200p' internal/zk/policyzk/circuit_test.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package policyzk
+
+import (
+	"math/big"
+	"testing"
+
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+	"github.com/stretchr/testify/require"
+)
+
+func TestPolicyGateCircuit_Groth16PassFail(t *testing.T) {
+	require := require.New(t)
+
+	var circuit PolicyGateCircuit
+	r1cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
+exec
+/bin/zsh -lc "sed -n '200,400p' internal/zk/policyzk/circuit_test.go" in /Users/yani/Noema/backend succeeded in 53ms:
+	var x4 fr.Element
+	x4.Square(&x2)
+	x.Mul(&x4, x)
+}
+
+func ark(state *[]fr.Element, c []fr.Element, r int) {
+	s := *state
+	for i := range s {
+		s[i].Add(&s[i], &c[i+r])
+	}
+}
+
+func mix(in []fr.Element, m [][]fr.Element) []fr.Element {
+	out := make([]fr.Element, len(in))
+	for col := range in {
+		var acc fr.Element
+		for row := range in {
+			var term fr.Element
+			term.Mul(&m[row][col], &in[row])
+			acc.Add(&acc, &term)
+
+thinking
+**Inspecting existing groth16 tests**
+exec
+/bin/zsh -lc "sed -n '1,200p' internal/zk/policy_circuit_groth16_test.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package zk
+
+import (
+	"testing"
+
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+
+	"noema/internal/zk/policyzk"
+)
+
+func TestPolicyGateCircuit_Groth16PassFail(t *testing.T) {
+	var circuit policyzk.PolicyGateCircuit
+	r1cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
+	if err != nil {
+		t.Fatalf("compile circuit: %v", err)
+	}
+
+
+thinking
+**Checking commitment usage in circuits**
+
+I'm verifying whether the tests fail due to using the correct in-repo Poseidon circuits instead of the standard gnark ones and investigating the commitment helper in internal/zk/zk.go.
+exec
+/bin/zsh -lc "sed -n '1,260p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package zk
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"math/big"
+	"strconv"
+	"strings"
+	"sync"
+
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/constraint"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+exec
+/bin/zsh -lc "sed -n '260,520p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+			out.MaxSeverity = v
+			seenMS = true
+		case "op":
+			if seenOP {
+				return PublicInputs{}, fmt.Errorf("duplicate overall pass")
+			}
+			v, err := strconv.Atoi(kv[1])
+			if err != nil {
+				return PublicInputs{}, fmt.Errorf("invalid overall pass")
+			}
+			if v != 0 && v != 1 {
+				return PublicInputs{}, fmt.Errorf("overall pass must be 0 or 1")
+			}
+			out.OverallPass = v == 1
+			seenOP = true
+		case "c":
+			if seenC {
+				return PublicInputs{}, fmt.Errorf("duplicate commitment")
+			}
+			if kv[1] == "" {
+exec
+/bin/zsh -lc "sed -n '520,760p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+		out[i] = make([]fr.Element, len(in[i]))
+		for j := range in[i] {
+			out[i][j].SetBigInt(in[i][j])
+		}
+	}
+	return out
+}
+
+func elementToBigInt(in fr.Element) *big.Int {
+	var out big.Int
+	in.BigInt(&out)
+	return &out
+}
+
+thinking
+**Checking existing proof tests**
+
+The code already uses groth16 in proof generation and verification with two test files present. Next, I'll run the tests to confirm if they pass or fail and verify the realness of the gnark circuit test and potential dependency issues.
+exec
+/bin/zsh -lc 'rg -n "gnark" go.mod' in /Users/yani/Noema/backend succeeded in 53ms:
+8:	github.com/AlpinYukseloglu/poseidon-gnark v0.0.0-20230513045146-69f5c852ef54
+9:	github.com/consensys/gnark v0.14.0
+25:	github.com/consensys/gnark-crypto v0.19.0 // indirect
+41:	github.com/ingonyama-zk/icicle-gnark/v3 v3.2.2 // indirect
+75:replace github.com/AlpinYukseloglu/poseidon-gnark => ./internal/zk/policyzk/poseidon-gnark
+
+
+thinking
+**Confirming in-circuit Poseidon usage**
+
+The code already computes the Commitment in-circuit using circuits.Poseidon as required, with off-chain commitment assignment also acceptable; existing tests use a native reimplementation but reference poseidon-gnark constants, so that matches. Next, I'll run go tests to check if failures relate to assert or constraint ordering.
+thinking
+**Preparing to run full go tests**
+
+The existing tests use native poseidon consistently and a gnark circuit test is present, so the repo may already satisfy requirements; I'll run all tests now to identify any failures before considering changes.
+exec
+/bin/zsh -lc 'go test ./...' in /Users/yani/Noema/backend succeeded in 309ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
+ok  	noema/internal/config	(cached)
 ?   	noema/internal/crypto	[no test files]
 ok  	noema/internal/evaluate	(cached)
 ?   	noema/internal/gemini	[no test files]
@@ -55,1254 +302,44 @@ ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
-
-thinking
-**Planning targeted improvement**
-
-I'm aiming to enhance one meaningful area with changes in up to three files, so I'll inspect the repo next and search for TODOs to identify a suitable scope.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "TODO|FIXME|XXX"' in /Users/yani/Noema/backend exited 1 in 52ms:
+ok  	noema/internal/zk/policyzk	(cached)
 
 
 thinking
-**Inspecting error handling in handlers**
+**Confirming no changes needed**
 
-I'm focusing on internal/web to check if error handling in HTTP handlers is reliable and correct, aiming to identify improvement opportunities.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
-cmd
-data
-go.mod
-go.sum
-internal
-main
-server
-web
-
+Files changed: none  
+What you changed:  
+- Verified GenerateProof and VerifyProof use gnark as intended  
+- Confirmed existing circuit tests adequately cover functionality  
+- No code changes needed; gnark plumbing already in place  
+Tests run: go test ./... (all tests passing)
 thinking
-**Planning error handling validation**
-
-I'm inspecting internal/session and httputil modules to add error handling validation. I'll search for related error handling patterns next.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"panic|Must|Fatal|log\\.Fatal|TODO|FIXME|unsafe\" internal" in /Users/yani/Noema/backend succeeded in 52ms:
-internal/session/session_test.go:16:		t.Fatalf("expected verify ok")
-internal/session/session_test.go:19:		t.Fatalf("expected payload %q, got %q", payload, got)
-internal/session/session_test.go:29:		t.Fatalf("expected signed value to contain dot")
-internal/session/session_test.go:41:		t.Fatalf("expected tampered signature to fail")
-internal/session/session_test.go:58:			t.Fatalf("expected verify to fail for %q", tc)
-internal/evaluate/handler_test.go:36:			t.Fatalf("create part: %v", err)
-internal/evaluate/handler_test.go:39:			t.Fatalf("write part: %v", err)
-internal/evaluate/handler_test.go:43:		t.Fatalf("close writer: %v", err)
-internal/evaluate/handler_test.go:49:		t.Fatalf("read form: %v", err)
-internal/evaluate/handler_test.go:67:		t.Fatalf("enabledConstraints error: %v", err)
-internal/evaluate/handler_test.go:73:		t.Fatalf("parseEvalOutputOptional error: %v", err)
-internal/evaluate/handler_test.go:76:		t.Fatalf("expected schema_version 1, got %d", out.SchemaVersion)
-internal/evaluate/handler_test.go:79:		t.Fatalf("expected max_severity 0, got %d", out.MaxSeverity)
-internal/evaluate/handler_test.go:82:		t.Fatalf("expected %d constraints, got %d", len(enabled), len(out.Constraints))
-internal/evaluate/handler_test.go:88:			t.Fatalf("expected severity 0 for %s, got %d", c.ID, c.Severity)
-internal/evaluate/handler_test.go:91:			t.Fatalf("expected rationale for %s", c.ID)
-internal/evaluate/handler_test.go:96:		t.Fatalf("expected constraints sorted by id, got %v", ids)
-internal/evaluate/handler_test.go:110:		t.Fatalf("enabledConstraints error: %v", err)
-internal/evaluate/handler_test.go:123:		t.Fatalf("marshal eval_output: %v", err)
-internal/evaluate/handler_test.go:129:		t.Fatalf("parseEvalOutputOptional error: %v", err)
-
-thinking
-**Inspecting handler for robustness**
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/verify/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package verify
-
-import (
-	"encoding/base64"
-	"fmt"
-	"net/http"
-	"strings"
-
-	"noema/internal/config"
-	"noema/internal/httputil"
-	"noema/internal/zk"
-
-	"github.com/gin-gonic/gin"
-)
-
-// VerifyRequest is the JSON body for POST /api/verify.
-type VerifyRequest struct {
-	RunID           string `json:"run_id"`
-	ProofB64        string `json:"proof_b64"`
-	PublicInputsB64 string `json:"public_inputs_b64"`
-
-thinking
-**Considering validation robustness**
-
-I'm questioning whether base64 decoding is strict enough or might accept non-canonical inputs, and plan to check other areas like internal/httputil/body.go for related validation.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/httputil/body.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package httputil
-
-import (
-	"errors"
-	"net/http"
-	"strings"
-)
-
-// IsBodyTooLarge reports whether the error indicates the request body exceeded MaxBytesReader.
-func IsBodyTooLarge(err error) bool {
-	if err == nil {
-		return false
-	}
-	var maxBytesErr *http.MaxBytesError
-	if errors.As(err, &maxBytesErr) {
-		return true
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "request body too large") ||
-		strings.Contains(msg, "multipart: message too large")
-
-thinking
-**Considering stricter run_id validation**
-
-I'm exploring whether to reject or trim whitespace in run_id during legacy verification and will check the verify handler tests to understand how this impacts existing test coverage.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/verify/handler_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package verify
-
-import (
-	"encoding/base64"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"strings"
-	"testing"
-
-	"noema/internal/config"
-
-	"github.com/gin-gonic/gin"
-)
-
-type errorResponse struct {
-	Error string `json:"error"`
-}
-
-func setupRouter() *gin.Engine {
-
-thinking
-**Considering error handling improvements**
-
-I'm reviewing if error handling for missing Content-Type is necessary since ShouldBindJSON might already handle it; next, I'll inspect the internal evaluation handler for run persistence reliability.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"encoding/json"
-	"fmt"
-	"log"
-	"mime/multipart"
-	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
-	"time"
-
-	"noema/internal/config"
-	"noema/internal/httputil"
-	"noema/internal/zk"
-
-	"github.com/gin-gonic/gin"
-)
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '200,400p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 52ms:
-			continue
-		}
-		runs = append(runs, runEntry{
-			path:    filepath.Join(runsDir, entry.Name()),
-			modTime: info.ModTime(),
-		})
-	}
-
-	if len(runs) <= maxRuns {
-		return nil
-	}
-
-	sort.Slice(runs, func(i, j int) bool {
-		return runs[i].modTime.After(runs[j].modTime)
-	})
-
-	for i := maxRuns; i < len(runs); i++ {
-		if err := os.RemoveAll(runs[i].path); err != nil {
-			return err
-		}
-
-thinking
-**Considering robustness improvements**
-
-I'm evaluating enhancements to pruneRuns, error handling in ensureRunDir, and safer run_id handling including whitespace trimming and path separator checks; next, I’ll focus on inspecting parseUploads for dataset filename limits.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/uploads.go" in /Users/yani/Noema/backend exited 1 in 52ms:
-sed: internal/evaluate/uploads.go: No such file or directory
-
-thinking
-**Searching for relevant file**
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "func parseUploads" -S internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
-internal/evaluate/parse.go:56:func parseUploads(form *multipart.Form) (*multipart.FileHeader, []*multipart.FileHeader, error) {
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"encoding/json"
-	"fmt"
-	"io"
-	"mime/multipart"
-	"strings"
-
-	"noema/internal/config"
-)
-
-func parseSpec(form *multipart.Form) (Spec, error) {
-	specStrs := form.Value["spec"]
-	if len(specStrs) == 0 || specStrs[0] == "" {
-		return Spec{}, fmt.Errorf("missing field: spec")
-	}
-	if len(specStrs) > 1 {
-		return Spec{}, fmt.Errorf("only one spec value allowed")
-	}
-
-thinking
-**Checking dataset file size validation**
-
-I'm planning to verify if the code or tests handle empty dataset files, focusing on the readDatasetFile function to see if it ensures non-empty input.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "readDatasetFile" -S internal/evaluate' in /Users/yani/Noema/backend succeeded in 51ms:
-internal/evaluate/parse.go:89:	_, ds, err := readDatasetFile(fh)
-internal/evaluate/dataset.go:23:func readDatasetFile(fh *multipart.FileHeader) ([]byte, Dataset, error) {
-internal/evaluate/gemini_eval.go:29:	rawDataset, ds, err := readDatasetFile(datasetFile)
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io"
-	"mime/multipart"
-	"strings"
-)
-
-type Dataset struct {
-	Items []DatasetItem `json:"items"`
-}
-
-type DatasetItem struct {
-	ID       string         `json:"id"`
-	Text     string         `json:"text"`
-	Metadata map[string]any `json:"metadata,omitempty"`
-	ImageRef string         `json:"image_ref,omitempty"`
-
-thinking
-**Planning dataset item count validation**
-
-Considering adding a validation step to ensure dataset item count doesn't exceed a configurable maximum, since the current decode lacks size checks despite upload limits. I'll check the config for a suitable limit to enforce here.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/config/config.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package config
-
-import (
-	"os"
-	"strconv"
-
-	"github.com/joho/godotenv"
-)
-
-const devCookieSecret = "dev-secret-change-in-production"
-
-// Load reads .env from the current directory and sets env vars.
-// Safe to call multiple times; existing env vars are not overwritten.
-func Load() error {
-	return godotenv.Load()
-}
-
-// JudgeKey returns the judge key used to gate protected routes.
-func JudgeKey() string {
-	return os.Getenv("JUDGE_KEY")
-
-thinking
-**Reviewing base64 handling and form usage**
-
-Noting base64 decoding uses a standard method that tolerates newlines, so no immediate issue there. Considering trimming whitespace in verification as a minor enhancement. Also confirming form removal calls are safe when form is nil. Next, inspecting computePolicyResult for further insights.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/policy.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package evaluate
-
-import "fmt"
-
-type ConstraintRule struct {
-	ID                 string
-	AllowedMaxSeverity int
-}
-
-func enabledConstraints(spec Spec) (map[string]ConstraintRule, error) {
-	out := make(map[string]ConstraintRule)
-	for _, c := range spec.Constraints {
-		if !c.Enabled {
-			continue
-		}
-		if _, exists := out[c.ID]; exists {
-			return nil, fmt.Errorf("duplicate constraint id: %s", c.ID)
-		}
-		out[c.ID] = ConstraintRule{ID: c.ID, AllowedMaxSeverity: c.AllowedMaxSeverity}
-	}
-
-thinking
-**Noting potential improvements for validation and error handling**
-
-Identified possible enhancements in policy result evaluation, legacy proof verification, update runs indexing reliability, HTTP body size error detection, dataset JSON parsing efficiency, error message specificity, and safeguarding against path traversal in saved filenames.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "saveRunFiles" -S internal/evaluate' in /Users/yani/Noema/backend succeeded in 52ms:
-internal/evaluate/storage.go:32:func saveRunFiles(runPath string, dataset *multipart.FileHeader, images []*multipart.FileHeader) error {
-internal/evaluate/handler.go:93:		if err := saveRunFiles(runPath, datasetFile, imageFiles); err != nil {
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"crypto/rand"
-	"encoding/json"
-	"fmt"
-	"io"
-	"math/big"
-	"mime/multipart"
-	"os"
-	"path/filepath"
-	"strconv"
-	"sync/atomic"
-	"time"
-)
-
-var runIDCounter uint64
-
-func genRunID() string {
-	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
-
-thinking
-**Reviewing error handling and validation limits**
-
-Noticing potential robustness improvements around dataset item count limits and error messages in verification, with a plan to check proof verification error handling for empty messages to enhance reliability and avoid silent failures.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package zk
-
-import (
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
-	"fmt"
-	"strconv"
-	"strings"
-)
-
-const (
-	ProofSystem = "groth16"
-	ProofCurve  = "bn254"
-
-	publicInputsPrefix = "noema_public_inputs_v1|"
-	proofPrefix        = "noema_stub_proof_v1|"
-)
-
-// PublicInputs define the public inputs for policy aggregation.
-
-
-thinking
-**Noting potential input validation improvements**
-
-Several handlers could improve input validation and error handling, like trimming whitespace from base64 before decoding and better JSON decoding checks to reject malicious or malformed input. Also, verifying file extension extraction in saving files to avoid unsafe names may be worthwhile.
-thinking
-**Planning trim-and-validate input improvements**
-
-I'm preparing to trim whitespace from run ID, proof, and public inputs in the verify handler to reject empty or whitespace-only fields more reliably, updating calls and tests accordingly while keeping changes small and focused on handler.go and handler_test.go.
-file update
-M /Users/yani/Noema/backend/internal/verify/handler.go
-@@ -43,3 +43,7 @@
- 		}
--		if req.RunID == "" {
-+		runID := strings.TrimSpace(req.RunID)
-+		proofB64 := strings.TrimSpace(req.ProofB64)
-+		publicInputsB64 := strings.TrimSpace(req.PublicInputsB64)
-+
-+		if runID == "" {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing run_id"})
-@@ -47,3 +51,3 @@
- 		}
--		if req.ProofB64 == "" || req.PublicInputsB64 == "" {
-+		if proofB64 == "" || publicInputsB64 == "" {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing proof or public inputs"})
-@@ -52,3 +56,3 @@
- 
--		verified, msg, err := zk.VerifyProof(req.ProofB64, req.PublicInputsB64)
-+		verified, msg, err := zk.VerifyProof(proofB64, publicInputsB64)
- 		if err != nil {
-@@ -59,3 +63,3 @@
- 			c.JSON(http.StatusOK, VerifyResponse{
--				RunID:    req.RunID,
-+				RunID:    runID,
- 				Verified: verified,
-@@ -66,3 +70,3 @@
- 
--		verified, msg, err = verifyLegacyStub(req.RunID, req.ProofB64, req.PublicInputsB64)
-+		verified, msg, err = verifyLegacyStub(runID, proofB64, publicInputsB64)
- 		if err != nil {
-@@ -72,3 +76,3 @@
- 		c.JSON(http.StatusOK, VerifyResponse{
--			RunID:    req.RunID,
-+			RunID:    runID,
- 			Verified: verified,
-apply_patch(auto_approved=true) exited 0 in 30ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/verify/handler.go
-file update:
-diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
-index 39c184b62287ffc29d9b263102c755a981aa6306..e67d0e83d49f2b37d7b9273d8213b4ff1976e156
---- a/backend/internal/verify/handler.go
-+++ b/backend/internal/verify/handler.go
-@@ -41,36 +41,40 @@
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
- 			return
- 		}
--		if req.RunID == "" {
-+		runID := strings.TrimSpace(req.RunID)
-+		proofB64 := strings.TrimSpace(req.ProofB64)
-+		publicInputsB64 := strings.TrimSpace(req.PublicInputsB64)
-+
-+		if runID == "" {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing run_id"})
- 			return
- 		}
--		if req.ProofB64 == "" || req.PublicInputsB64 == "" {
-+		if proofB64 == "" || publicInputsB64 == "" {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing proof or public inputs"})
- 			return
- 		}
- 
--		verified, msg, err := zk.VerifyProof(req.ProofB64, req.PublicInputsB64)
-+		verified, msg, err := zk.VerifyProof(proofB64, publicInputsB64)
- 		if err != nil {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
- 			return
- 		}
- 		if verified || !shouldTryLegacy(msg) {
- 			c.JSON(http.StatusOK, VerifyResponse{
--				RunID:    req.RunID,
-+				RunID:    runID,
- 				Verified: verified,
- 				Message:  msg,
- 			})
- 			return
- 		}
- 
--		verified, msg, err = verifyLegacyStub(req.RunID, req.ProofB64, req.PublicInputsB64)
-+		verified, msg, err = verifyLegacyStub(runID, proofB64, publicInputsB64)
- 		if err != nil {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
- 			return
- 		}
- 		c.JSON(http.StatusOK, VerifyResponse{
--			RunID:    req.RunID,
-+			RunID:    runID,
- 			Verified: verified,
- 			Message:  msg,
- 		})
-
-file update:
-diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
-index 39c184b62287ffc29d9b263102c755a981aa6306..e67d0e83d49f2b37d7b9273d8213b4ff1976e156
---- a/backend/internal/verify/handler.go
-+++ b/backend/internal/verify/handler.go
-@@ -41,36 +41,40 @@
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
- 			return
- 		}
--		if req.RunID == "" {
-+		runID := strings.TrimSpace(req.RunID)
-+		proofB64 := strings.TrimSpace(req.ProofB64)
-+		publicInputsB64 := strings.TrimSpace(req.PublicInputsB64)
-+
-+		if runID == "" {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing run_id"})
- 			return
- 		}
--		if req.ProofB64 == "" || req.PublicInputsB64 == "" {
-+		if proofB64 == "" || publicInputsB64 == "" {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing proof or public inputs"})
- 			return
- 		}
- 
--		verified, msg, err := zk.VerifyProof(req.ProofB64, req.PublicInputsB64)
-+		verified, msg, err := zk.VerifyProof(proofB64, publicInputsB64)
- 		if err != nil {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
- 			return
- 		}
- 		if verified || !shouldTryLegacy(msg) {
- 			c.JSON(http.StatusOK, VerifyResponse{
--				RunID:    req.RunID,
-+				RunID:    runID,
- 				Verified: verified,
- 				Message:  msg,
- 			})
- 			return
- 		}
- 
--		verified, msg, err = verifyLegacyStub(req.RunID, req.ProofB64, req.PublicInputsB64)
-+		verified, msg, err = verifyLegacyStub(runID, proofB64, publicInputsB64)
- 		if err != nil {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
- 			return
- 		}
- 		c.JSON(http.StatusOK, VerifyResponse{
--			RunID:    req.RunID,
-+			RunID:    runID,
- 			Verified: verified,
- 			Message:  msg,
- 		})
-
-
-thinking
-**Adding test with patch application**
-file update
-M /Users/yani/Noema/backend/internal/verify/handler_test.go
-@@ -129,2 +129,27 @@
- 
-+func TestVerifyHandlerWhitespaceRunIDReturns400(t *testing.T) {
-+	r := setupRouter()
-+	body := `{"run_id":"   ","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}` 
-+
-+	w := httptest.NewRecorder()
-+	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
-+	if err != nil {
-+		t.Fatalf("new request: %v", err)
-+	}
-+	req.Header.Set("Content-Type", "application/json")
-+	r.ServeHTTP(w, req)
-+
-+	if w.Code != http.StatusBadRequest {
-+		t.Fatalf("expected status 400, got %d", w.Code)
-+	}
-+
-+	var resp errorResponse
-+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-+		t.Fatalf("decode response: %v", err)
-+	}
-+	if resp.Error != "missing run_id" {
-+		t.Fatalf("expected missing run_id, got %q", resp.Error)
-+	}
-+}
-+
- func TestVerifyHandlerBodyTooLargeReturns413(t *testing.T) {
-@@ -132,3 +157,3 @@
- 	largeRunID := strings.Repeat("a", config.MaxVerifyBytes)
--	body := `{"run_id":"` + largeRunID + `","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}`
-+	body := `{"run_id":"` + largeRunID + `","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}` 
- 
-apply_patch(auto_approved=true) exited 0 in 36ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/verify/handler_test.go
-file update:
-diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
-index 39c184b62287ffc29d9b263102c755a981aa6306..e67d0e83d49f2b37d7b9273d8213b4ff1976e156
---- a/backend/internal/verify/handler.go
-+++ b/backend/internal/verify/handler.go
-@@ -41,36 +41,40 @@
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
- 			return
- 		}
--		if req.RunID == "" {
-+		runID := strings.TrimSpace(req.RunID)
-+		proofB64 := strings.TrimSpace(req.ProofB64)
-+		publicInputsB64 := strings.TrimSpace(req.PublicInputsB64)
-+
-+		if runID == "" {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing run_id"})
- 			return
- 		}
--		if req.ProofB64 == "" || req.PublicInputsB64 == "" {
-+		if proofB64 == "" || publicInputsB64 == "" {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing proof or public inputs"})
- 			return
- 		}
- 
--		verified, msg, err := zk.VerifyProof(req.ProofB64, req.PublicInputsB64)
-+		verified, msg, err := zk.VerifyProof(proofB64, publicInputsB64)
- 		if err != nil {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
- 			return
- 		}
- 		if verified || !shouldTryLegacy(msg) {
- 			c.JSON(http.StatusOK, VerifyResponse{
--				RunID:    req.RunID,
-+				RunID:    runID,
- 				Verified: verified,
- 				Message:  msg,
- 			})
- 			return
- 		}
- 
--		verified, msg, err = verifyLegacyStub(req.RunID, req.ProofB64, req.PublicInputsB64)
-+		verified, msg, err = verifyLegacyStub(runID, proofB64, publicInputsB64)
- 		if err != nil {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
- 			return
- 		}
- 		c.JSON(http.StatusOK, VerifyResponse{
--			RunID:    req.RunID,
-+			RunID:    runID,
- 			Verified: verified,
- 			Message:  msg,
- 		})
-diff --git a/backend/internal/verify/handler_test.go b/backend/internal/verify/handler_test.go
-index 900f6759e30fc3df51d9676c6f834bf38c187ddd..1be7e0e051cedf41d99eed337e4a5713d4a425f9
---- a/backend/internal/verify/handler_test.go
-+++ b/backend/internal/verify/handler_test.go
-@@ -127,10 +127,35 @@
- 	}
- }
- 
-+func TestVerifyHandlerWhitespaceRunIDReturns400(t *testing.T) {
-+	r := setupRouter()
-+	body := `{"run_id":"   ","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}` 
-+
-+	w := httptest.NewRecorder()
-+	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
-+	if err != nil {
-+		t.Fatalf("new request: %v", err)
-+	}
-+	req.Header.Set("Content-Type", "application/json")
-+	r.ServeHTTP(w, req)
-+
-+	if w.Code != http.StatusBadRequest {
-+		t.Fatalf("expected status 400, got %d", w.Code)
-+	}
-+
-+	var resp errorResponse
-+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-+		t.Fatalf("decode response: %v", err)
-+	}
-+	if resp.Error != "missing run_id" {
-+		t.Fatalf("expected missing run_id, got %q", resp.Error)
-+	}
-+}
-+
- func TestVerifyHandlerBodyTooLargeReturns413(t *testing.T) {
- 	r := setupRouter()
- 	largeRunID := strings.Repeat("a", config.MaxVerifyBytes)
--	body := `{"run_id":"` + largeRunID + `","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}`
-+	body := `{"run_id":"` + largeRunID + `","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}` 
- 
- 	w := httptest.NewRecorder()
- 	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
-
-file update:
-diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
-index 39c184b62287ffc29d9b263102c755a981aa6306..e67d0e83d49f2b37d7b9273d8213b4ff1976e156
---- a/backend/internal/verify/handler.go
-+++ b/backend/internal/verify/handler.go
-@@ -41,36 +41,40 @@
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
- 			return
- 		}
--		if req.RunID == "" {
-+		runID := strings.TrimSpace(req.RunID)
-+		proofB64 := strings.TrimSpace(req.ProofB64)
-+		publicInputsB64 := strings.TrimSpace(req.PublicInputsB64)
-+
-+		if runID == "" {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing run_id"})
- 			return
- 		}
--		if req.ProofB64 == "" || req.PublicInputsB64 == "" {
-+		if proofB64 == "" || publicInputsB64 == "" {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing proof or public inputs"})
- 			return
- 		}
- 
--		verified, msg, err := zk.VerifyProof(req.ProofB64, req.PublicInputsB64)
-+		verified, msg, err := zk.VerifyProof(proofB64, publicInputsB64)
- 		if err != nil {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
- 			return
- 		}
- 		if verified || !shouldTryLegacy(msg) {
- 			c.JSON(http.StatusOK, VerifyResponse{
--				RunID:    req.RunID,
-+				RunID:    runID,
- 				Verified: verified,
- 				Message:  msg,
- 			})
- 			return
- 		}
- 
--		verified, msg, err = verifyLegacyStub(req.RunID, req.ProofB64, req.PublicInputsB64)
-+		verified, msg, err = verifyLegacyStub(runID, proofB64, publicInputsB64)
- 		if err != nil {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
- 			return
- 		}
- 		c.JSON(http.StatusOK, VerifyResponse{
--			RunID:    req.RunID,
-+			RunID:    runID,
- 			Verified: verified,
- 			Message:  msg,
- 		})
-diff --git a/backend/internal/verify/handler_test.go b/backend/internal/verify/handler_test.go
-index 900f6759e30fc3df51d9676c6f834bf38c187ddd..1be7e0e051cedf41d99eed337e4a5713d4a425f9
---- a/backend/internal/verify/handler_test.go
-+++ b/backend/internal/verify/handler_test.go
-@@ -127,10 +127,35 @@
- 	}
- }
- 
-+func TestVerifyHandlerWhitespaceRunIDReturns400(t *testing.T) {
-+	r := setupRouter()
-+	body := `{"run_id":"   ","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}` 
-+
-+	w := httptest.NewRecorder()
-+	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
-+	if err != nil {
-+		t.Fatalf("new request: %v", err)
-+	}
-+	req.Header.Set("Content-Type", "application/json")
-+	r.ServeHTTP(w, req)
-+
-+	if w.Code != http.StatusBadRequest {
-+		t.Fatalf("expected status 400, got %d", w.Code)
-+	}
-+
-+	var resp errorResponse
-+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-+		t.Fatalf("decode response: %v", err)
-+	}
-+	if resp.Error != "missing run_id" {
-+		t.Fatalf("expected missing run_id, got %q", resp.Error)
-+	}
-+}
-+
- func TestVerifyHandlerBodyTooLargeReturns413(t *testing.T) {
- 	r := setupRouter()
- 	largeRunID := strings.Repeat("a", config.MaxVerifyBytes)
--	body := `{"run_id":"` + largeRunID + `","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}`
-+	body := `{"run_id":"` + largeRunID + `","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}` 
- 
- 	w := httptest.NewRecorder()
- 	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
-
-
-thinking
-**Removing trailing spaces**
-
-Trailing spaces were found before closing quotes in JSON body strings, including new and existing lines. I'll adjust the patch to remove these spaces to avoid formatting issues and keep the code clean.
-file update
-M /Users/yani/Noema/backend/internal/verify/handler_test.go
-@@ -131,3 +131,3 @@
- 	r := setupRouter()
--	body := `{"run_id":"   ","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}` 
-+	body := `{"run_id":"   ","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}`
- 
-@@ -157,3 +157,3 @@
- 	largeRunID := strings.Repeat("a", config.MaxVerifyBytes)
--	body := `{"run_id":"` + largeRunID + `","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}` 
-+	body := `{"run_id":"` + largeRunID + `","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}`
- 
-apply_patch(auto_approved=true) exited 0 in 43ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/verify/handler_test.go
-file update:
-diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
-index 39c184b62287ffc29d9b263102c755a981aa6306..e67d0e83d49f2b37d7b9273d8213b4ff1976e156
---- a/backend/internal/verify/handler.go
-+++ b/backend/internal/verify/handler.go
-@@ -41,36 +41,40 @@
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
- 			return
- 		}
--		if req.RunID == "" {
-+		runID := strings.TrimSpace(req.RunID)
-+		proofB64 := strings.TrimSpace(req.ProofB64)
-+		publicInputsB64 := strings.TrimSpace(req.PublicInputsB64)
-+
-+		if runID == "" {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing run_id"})
- 			return
- 		}
--		if req.ProofB64 == "" || req.PublicInputsB64 == "" {
-+		if proofB64 == "" || publicInputsB64 == "" {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing proof or public inputs"})
- 			return
- 		}
- 
--		verified, msg, err := zk.VerifyProof(req.ProofB64, req.PublicInputsB64)
-+		verified, msg, err := zk.VerifyProof(proofB64, publicInputsB64)
- 		if err != nil {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
- 			return
- 		}
- 		if verified || !shouldTryLegacy(msg) {
- 			c.JSON(http.StatusOK, VerifyResponse{
--				RunID:    req.RunID,
-+				RunID:    runID,
- 				Verified: verified,
- 				Message:  msg,
- 			})
- 			return
- 		}
- 
--		verified, msg, err = verifyLegacyStub(req.RunID, req.ProofB64, req.PublicInputsB64)
-+		verified, msg, err = verifyLegacyStub(runID, proofB64, publicInputsB64)
- 		if err != nil {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
- 			return
- 		}
- 		c.JSON(http.StatusOK, VerifyResponse{
--			RunID:    req.RunID,
-+			RunID:    runID,
- 			Verified: verified,
- 			Message:  msg,
- 		})
-diff --git a/backend/internal/verify/handler_test.go b/backend/internal/verify/handler_test.go
-index 900f6759e30fc3df51d9676c6f834bf38c187ddd..7f90c44e99030347d9b6f494d9fed8d50e6af36e
---- a/backend/internal/verify/handler_test.go
-+++ b/backend/internal/verify/handler_test.go
-@@ -127,6 +127,31 @@
- 	}
- }
- 
-+func TestVerifyHandlerWhitespaceRunIDReturns400(t *testing.T) {
-+	r := setupRouter()
-+	body := `{"run_id":"   ","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}`
-+
-+	w := httptest.NewRecorder()
-+	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
-+	if err != nil {
-+		t.Fatalf("new request: %v", err)
-+	}
-+	req.Header.Set("Content-Type", "application/json")
-+	r.ServeHTTP(w, req)
-+
-+	if w.Code != http.StatusBadRequest {
-+		t.Fatalf("expected status 400, got %d", w.Code)
-+	}
-+
-+	var resp errorResponse
-+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-+		t.Fatalf("decode response: %v", err)
-+	}
-+	if resp.Error != "missing run_id" {
-+		t.Fatalf("expected missing run_id, got %q", resp.Error)
-+	}
-+}
-+
- func TestVerifyHandlerBodyTooLargeReturns413(t *testing.T) {
- 	r := setupRouter()
- 	largeRunID := strings.Repeat("a", config.MaxVerifyBytes)
-
-file update:
-diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
-index 39c184b62287ffc29d9b263102c755a981aa6306..e67d0e83d49f2b37d7b9273d8213b4ff1976e156
---- a/backend/internal/verify/handler.go
-+++ b/backend/internal/verify/handler.go
-@@ -41,36 +41,40 @@
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
- 			return
- 		}
--		if req.RunID == "" {
-+		runID := strings.TrimSpace(req.RunID)
-+		proofB64 := strings.TrimSpace(req.ProofB64)
-+		publicInputsB64 := strings.TrimSpace(req.PublicInputsB64)
-+
-+		if runID == "" {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing run_id"})
- 			return
- 		}
--		if req.ProofB64 == "" || req.PublicInputsB64 == "" {
-+		if proofB64 == "" || publicInputsB64 == "" {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing proof or public inputs"})
- 			return
- 		}
- 
--		verified, msg, err := zk.VerifyProof(req.ProofB64, req.PublicInputsB64)
-+		verified, msg, err := zk.VerifyProof(proofB64, publicInputsB64)
- 		if err != nil {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
- 			return
- 		}
- 		if verified || !shouldTryLegacy(msg) {
- 			c.JSON(http.StatusOK, VerifyResponse{
--				RunID:    req.RunID,
-+				RunID:    runID,
- 				Verified: verified,
- 				Message:  msg,
- 			})
- 			return
- 		}
- 
--		verified, msg, err = verifyLegacyStub(req.RunID, req.ProofB64, req.PublicInputsB64)
-+		verified, msg, err = verifyLegacyStub(runID, proofB64, publicInputsB64)
- 		if err != nil {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
- 			return
- 		}
- 		c.JSON(http.StatusOK, VerifyResponse{
--			RunID:    req.RunID,
-+			RunID:    runID,
- 			Verified: verified,
- 			Message:  msg,
- 		})
-diff --git a/backend/internal/verify/handler_test.go b/backend/internal/verify/handler_test.go
-index 900f6759e30fc3df51d9676c6f834bf38c187ddd..7f90c44e99030347d9b6f494d9fed8d50e6af36e
---- a/backend/internal/verify/handler_test.go
-+++ b/backend/internal/verify/handler_test.go
-@@ -127,6 +127,31 @@
- 	}
- }
- 
-+func TestVerifyHandlerWhitespaceRunIDReturns400(t *testing.T) {
-+	r := setupRouter()
-+	body := `{"run_id":"   ","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}`
-+
-+	w := httptest.NewRecorder()
-+	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
-+	if err != nil {
-+		t.Fatalf("new request: %v", err)
-+	}
-+	req.Header.Set("Content-Type", "application/json")
-+	r.ServeHTTP(w, req)
-+
-+	if w.Code != http.StatusBadRequest {
-+		t.Fatalf("expected status 400, got %d", w.Code)
-+	}
-+
-+	var resp errorResponse
-+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-+		t.Fatalf("decode response: %v", err)
-+	}
-+	if resp.Error != "missing run_id" {
-+		t.Fatalf("expected missing run_id, got %q", resp.Error)
-+	}
-+}
-+
- func TestVerifyHandlerBodyTooLargeReturns413(t *testing.T) {
- 	r := setupRouter()
- 	largeRunID := strings.Repeat("a", config.MaxVerifyBytes)
-
-
-thinking
-**Planning gofmt on changed Go files**
-
-I'm considering running `gofmt -w` only on modified `.go` files to apply formatting changes efficiently without touching unchanged files.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && gofmt -w internal/verify/handler.go internal/verify/handler_test.go' in /Users/yani/Noema/backend succeeded in 51ms:
-
-file update:
-diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
-index 39c184b62287ffc29d9b263102c755a981aa6306..e67d0e83d49f2b37d7b9273d8213b4ff1976e156
---- a/backend/internal/verify/handler.go
-+++ b/backend/internal/verify/handler.go
-@@ -41,36 +41,40 @@
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
- 			return
- 		}
--		if req.RunID == "" {
-+		runID := strings.TrimSpace(req.RunID)
-+		proofB64 := strings.TrimSpace(req.ProofB64)
-+		publicInputsB64 := strings.TrimSpace(req.PublicInputsB64)
-+
-+		if runID == "" {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing run_id"})
- 			return
- 		}
--		if req.ProofB64 == "" || req.PublicInputsB64 == "" {
-+		if proofB64 == "" || publicInputsB64 == "" {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing proof or public inputs"})
- 			return
- 		}
- 
--		verified, msg, err := zk.VerifyProof(req.ProofB64, req.PublicInputsB64)
-+		verified, msg, err := zk.VerifyProof(proofB64, publicInputsB64)
- 		if err != nil {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
- 			return
- 		}
- 		if verified || !shouldTryLegacy(msg) {
- 			c.JSON(http.StatusOK, VerifyResponse{
--				RunID:    req.RunID,
-+				RunID:    runID,
- 				Verified: verified,
- 				Message:  msg,
- 			})
- 			return
- 		}
- 
--		verified, msg, err = verifyLegacyStub(req.RunID, req.ProofB64, req.PublicInputsB64)
-+		verified, msg, err = verifyLegacyStub(runID, proofB64, publicInputsB64)
- 		if err != nil {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
- 			return
- 		}
- 		c.JSON(http.StatusOK, VerifyResponse{
--			RunID:    req.RunID,
-+			RunID:    runID,
- 			Verified: verified,
- 			Message:  msg,
- 		})
-diff --git a/backend/internal/verify/handler_test.go b/backend/internal/verify/handler_test.go
-index 900f6759e30fc3df51d9676c6f834bf38c187ddd..7f90c44e99030347d9b6f494d9fed8d50e6af36e
---- a/backend/internal/verify/handler_test.go
-+++ b/backend/internal/verify/handler_test.go
-@@ -127,6 +127,31 @@
- 	}
- }
- 
-+func TestVerifyHandlerWhitespaceRunIDReturns400(t *testing.T) {
-+	r := setupRouter()
-+	body := `{"run_id":"   ","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}`
-+
-+	w := httptest.NewRecorder()
-+	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
-+	if err != nil {
-+		t.Fatalf("new request: %v", err)
-+	}
-+	req.Header.Set("Content-Type", "application/json")
-+	r.ServeHTTP(w, req)
-+
-+	if w.Code != http.StatusBadRequest {
-+		t.Fatalf("expected status 400, got %d", w.Code)
-+	}
-+
-+	var resp errorResponse
-+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-+		t.Fatalf("decode response: %v", err)
-+	}
-+	if resp.Error != "missing run_id" {
-+		t.Fatalf("expected missing run_id, got %q", resp.Error)
-+	}
-+}
-+
- func TestVerifyHandlerBodyTooLargeReturns413(t *testing.T) {
- 	r := setupRouter()
- 	largeRunID := strings.Repeat("a", config.MaxVerifyBytes)
-
-
-thinking
-**Running all tests**
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 386ms:
-?   	noema/cmd/server	[no test files]
-?   	noema/internal/auth	[no test files]
-?   	noema/internal/config	[no test files]
-?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	(cached)
-?   	noema/internal/gemini	[no test files]
-ok  	noema/internal/httputil	(cached)
-ok  	noema/internal/session	(cached)
-ok  	noema/internal/verify	0.019s
-?   	noema/internal/web	[no test files]
-ok  	noema/internal/zk	(cached)
-file update:
-diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
-index 39c184b62287ffc29d9b263102c755a981aa6306..e67d0e83d49f2b37d7b9273d8213b4ff1976e156
---- a/backend/internal/verify/handler.go
-+++ b/backend/internal/verify/handler.go
-@@ -41,36 +41,40 @@
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
- 			return
- 		}
--		if req.RunID == "" {
-+		runID := strings.TrimSpace(req.RunID)
-+		proofB64 := strings.TrimSpace(req.ProofB64)
-+		publicInputsB64 := strings.TrimSpace(req.PublicInputsB64)
-+
-+		if runID == "" {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing run_id"})
- 			return
- 		}
--		if req.ProofB64 == "" || req.PublicInputsB64 == "" {
-+		if proofB64 == "" || publicInputsB64 == "" {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing proof or public inputs"})
- 			return
- 		}
- 
--		verified, msg, err := zk.VerifyProof(req.ProofB64, req.PublicInputsB64)
-+		verified, msg, err := zk.VerifyProof(proofB64, publicInputsB64)
- 		if err != nil {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
- 			return
- 		}
- 		if verified || !shouldTryLegacy(msg) {
- 			c.JSON(http.StatusOK, VerifyResponse{
--				RunID:    req.RunID,
-+				RunID:    runID,
- 				Verified: verified,
- 				Message:  msg,
- 			})
- 			return
- 		}
- 
--		verified, msg, err = verifyLegacyStub(req.RunID, req.ProofB64, req.PublicInputsB64)
-+		verified, msg, err = verifyLegacyStub(runID, proofB64, publicInputsB64)
- 		if err != nil {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
- 			return
- 		}
- 		c.JSON(http.StatusOK, VerifyResponse{
--			RunID:    req.RunID,
-+			RunID:    runID,
- 			Verified: verified,
- 			Message:  msg,
- 		})
-diff --git a/backend/internal/verify/handler_test.go b/backend/internal/verify/handler_test.go
-index 900f6759e30fc3df51d9676c6f834bf38c187ddd..7f90c44e99030347d9b6f494d9fed8d50e6af36e
---- a/backend/internal/verify/handler_test.go
-+++ b/backend/internal/verify/handler_test.go
-@@ -127,6 +127,31 @@
- 	}
- }
- 
-+func TestVerifyHandlerWhitespaceRunIDReturns400(t *testing.T) {
-+	r := setupRouter()
-+	body := `{"run_id":"   ","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}`
-+
-+	w := httptest.NewRecorder()
-+	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
-+	if err != nil {
-+		t.Fatalf("new request: %v", err)
-+	}
-+	req.Header.Set("Content-Type", "application/json")
-+	r.ServeHTTP(w, req)
-+
-+	if w.Code != http.StatusBadRequest {
-+		t.Fatalf("expected status 400, got %d", w.Code)
-+	}
-+
-+	var resp errorResponse
-+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-+		t.Fatalf("decode response: %v", err)
-+	}
-+	if resp.Error != "missing run_id" {
-+		t.Fatalf("expected missing run_id, got %q", resp.Error)
-+	}
-+}
-+
- func TestVerifyHandlerBodyTooLargeReturns413(t *testing.T) {
- 	r := setupRouter()
- 	largeRunID := strings.Repeat("a", config.MaxVerifyBytes)
-
-
-thinking
-**Summarizing changes and tests**
-
-I'll provide a minimal summary highlighting what was changed and what tests were run, noting any trimmed run_id or proof inputs. I'll avoid nested bullets and keep the summary concise without suggesting further steps unless essential.
+**Confirming mission already satisfied**
+
+Files changed: none  
+What you changed:  
+- No code changes needed; existing PolicyGateCircuit groth16 tests already present in `internal/zk` and `internal/zk/policyzk`  
+- Verified `GenerateProof` and `VerifyProof` already use gnark Groth16 BN254 with Poseidon commitment as expected  
+Tests run: go test ./... (all tests passing)
 codex
-**What You Changed**
-- Added trimming/validation for `run_id`, `proof_b64`, and `public_inputs_b64` in `internal/verify/handler.go` so whitespace-only values are rejected consistently.
-- Added a test to ensure whitespace `run_id` returns `400` in `internal/verify/handler_test.go`.
+Files changed
+- None
 
-**Tests Run**
+What you changed
+- No code changes needed; existing PolicyGateCircuit Groth16 tests already cover pass and fail cases in `internal/zk` and `internal/zk/policyzk`.
+- Verified `GenerateProof`/`VerifyProof` already use gnark Groth16 on BN254 with Poseidon-based commitment and public inputs.
+
+Tests run
 - `go test ./...`
-file update:
-diff --git a/backend/internal/verify/handler.go b/backend/internal/verify/handler.go
-index 39c184b62287ffc29d9b263102c755a981aa6306..e67d0e83d49f2b37d7b9273d8213b4ff1976e156
---- a/backend/internal/verify/handler.go
-+++ b/backend/internal/verify/handler.go
-@@ -41,36 +41,40 @@
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
- 			return
- 		}
--		if req.RunID == "" {
-+		runID := strings.TrimSpace(req.RunID)
-+		proofB64 := strings.TrimSpace(req.ProofB64)
-+		publicInputsB64 := strings.TrimSpace(req.PublicInputsB64)
-+
-+		if runID == "" {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing run_id"})
- 			return
- 		}
--		if req.ProofB64 == "" || req.PublicInputsB64 == "" {
-+		if proofB64 == "" || publicInputsB64 == "" {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing proof or public inputs"})
- 			return
- 		}
- 
--		verified, msg, err := zk.VerifyProof(req.ProofB64, req.PublicInputsB64)
-+		verified, msg, err := zk.VerifyProof(proofB64, publicInputsB64)
- 		if err != nil {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
- 			return
- 		}
- 		if verified || !shouldTryLegacy(msg) {
- 			c.JSON(http.StatusOK, VerifyResponse{
--				RunID:    req.RunID,
-+				RunID:    runID,
- 				Verified: verified,
- 				Message:  msg,
- 			})
- 			return
- 		}
- 
--		verified, msg, err = verifyLegacyStub(req.RunID, req.ProofB64, req.PublicInputsB64)
-+		verified, msg, err = verifyLegacyStub(runID, proofB64, publicInputsB64)
- 		if err != nil {
- 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
- 			return
- 		}
- 		c.JSON(http.StatusOK, VerifyResponse{
--			RunID:    req.RunID,
-+			RunID:    runID,
- 			Verified: verified,
- 			Message:  msg,
- 		})
-diff --git a/backend/internal/verify/handler_test.go b/backend/internal/verify/handler_test.go
-index 900f6759e30fc3df51d9676c6f834bf38c187ddd..7f90c44e99030347d9b6f494d9fed8d50e6af36e
---- a/backend/internal/verify/handler_test.go
-+++ b/backend/internal/verify/handler_test.go
-@@ -127,6 +127,31 @@
- 	}
- }
- 
-+func TestVerifyHandlerWhitespaceRunIDReturns400(t *testing.T) {
-+	r := setupRouter()
-+	body := `{"run_id":"   ","proof_b64":"` + base64.StdEncoding.EncodeToString([]byte("proof")) + `","public_inputs_b64":"` + base64.StdEncoding.EncodeToString([]byte("inputs")) + `"}`
-+
-+	w := httptest.NewRecorder()
-+	req, err := http.NewRequest(http.MethodPost, "/api/verify", strings.NewReader(body))
-+	if err != nil {
-+		t.Fatalf("new request: %v", err)
-+	}
-+	req.Header.Set("Content-Type", "application/json")
-+	r.ServeHTTP(w, req)
-+
-+	if w.Code != http.StatusBadRequest {
-+		t.Fatalf("expected status 400, got %d", w.Code)
-+	}
-+
-+	var resp errorResponse
-+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-+		t.Fatalf("decode response: %v", err)
-+	}
-+	if resp.Error != "missing run_id" {
-+		t.Fatalf("expected missing run_id, got %q", resp.Error)
-+	}
-+}
-+
- func TestVerifyHandlerBodyTooLargeReturns413(t *testing.T) {
- 	r := setupRouter()
- 	largeRunID := strings.Repeat("a", config.MaxVerifyBytes)
-
 tokens used
-38,620
-**What You Changed**
-- Added trimming/validation for `run_id`, `proof_b64`, and `public_inputs_b64` in `internal/verify/handler.go` so whitespace-only values are rejected consistently.
-- Added a test to ensure whitespace `run_id` returns `400` in `internal/verify/handler_test.go`.
+14,310
+Files changed
+- None
 
-**Tests Run**
+What you changed
+- No code changes needed; existing PolicyGateCircuit Groth16 tests already cover pass and fail cases in `internal/zk` and `internal/zk/policyzk`.
+- Verified `GenerateProof`/`VerifyProof` already use gnark Groth16 on BN254 with Poseidon-based commitment and public inputs.
+
+Tests run
 - `go test ./...`
