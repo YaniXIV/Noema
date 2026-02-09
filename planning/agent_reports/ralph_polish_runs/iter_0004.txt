@@ -7,786 +7,205 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3ec3-21fa-7bf0-aea0-79bc234e541c
+session id: 019c40ff-03db-74f2-9fa2-dc62fcf79647
 --------
 user
-You are an autonomous coding agent polishing the Noema repository.
+You are an autonomous coding agent working on the Noema repository.
 
-Hard rules:
+MISSION (priority order):
+1) Add a real gnark circuit test for the PolicyGateCircuit (using our in-repo Poseidon implementation, package circuits).
+2) Make the circuit test pass reliably (compile -> prove -> verify) using Groth16 on BN254.
+3) ONLY AFTER tests pass: wire the backend plumbing to call the gnark prover/verifier behind the existing zk.GenerateProof / zk.VerifyProof API, keeping the public API shape unchanged (proof_b64 + public_inputs_b64).
+
+HARD RULES:
 - DO NOT run git commit, git reset, git clean, or anything that modifies git history.
-- I will run git commits outside of you.
-- Keep changes small: max 3 files per iteration.
+- Keep changes small: max 3 files per iteration. If more is needed, stage work across multiple iterations.
 - No cosmetic-only edits.
-- No new dependencies unless absolutely necessary.
-- keep all the same ui functionality, the end user should be able to do the same stuff but the experiance and design should be better.
+- No new dependencies unless absolutely necessary. Use existing gnark dependencies already in the repo. If gnark is not yet in go.mod, add it only if unavoidable.
+- Do not change routes or response shapes. Keep /api/evaluate and /api/verify behavior stable.
+- Do not redesign UI. This task is ZK/circuit/testing/plumbing only.
+- Always run: cd backend && go test ./... at least once per iteration.
 
-Goal: continuously improve production quality. continuously improve front end quality and polish.
+WORKFLOW YOU MUST FOLLOW (do not skip):
+A) Inspect current circuit code and poseidon implementation:
+   - Find the PolicyGateCircuit (the policy ZK circuit) and confirm it imports and uses circuits.Poseidon (NOT gnark/std poseidon).
+   - Confirm fixed N=6 and the frozen constraint ordering.
+B) Add tests FIRST:
+   - Create a new Go test file for the circuit (example name: backend/internal/zk/policy_circuit_test.go or wherever circuits live).
+   - The test must:
+     1) Compile the circuit to R1CS
+     2) Run Groth16 setup
+     3) Build a witness with a PASS case and generate a proof
+     4) Verify the proof using the public witness
+     5) Build a witness with a FAIL case and confirm either:
+        - proving fails (unsatisfied), OR
+        - proving succeeds only if OverallPass is set correctly (0), AND verifying matches the expected output
+   - Use deterministic test vectors:
+     - datasetDigestLo/Hi fixed constants
+     - enabled/maxAllowed/severity arrays fixed constants
+     - Compute the expected Commitment in-circuit by setting Commitment to the same value computed by the circuit.
+       (In gnark tests, you can set Commitment as a public variable equal to circuits.Poseidon(domainSep + inputs) by reusing the same circuits.Poseidon function in a small helper circuit OR by computing it with the same function in-circuit and asserting equality.)
+   - The test must assert:
+     - OverallPass == 1 for pass vector, and verify passes.
+     - OverallPass == 0 for fail vector, and verify passes only with correct OverallPass.
+C) Fix whatever is broken until all tests pass:
+   - If compilation errors, fix imports or package paths.
+   - If poseidon params/functions missing, use the existing in-repo Poseidon code as the single source of truth.
+   - If constraints are wrong, fix circuit logic minimally.
+D) ONLY AFTER TESTS PASS: wire plumbing:
+   - Replace stub proof internals inside backend/internal/zk/zk.go (or equivalent) to use gnark Groth16 BN254:
+     - GenerateProof: build witness from inputs (enabled/maxAllowed/severity + datasetDigest limbs) and output proof bytes base64
+     - VerifyProof: decode proof and public inputs and verify using vk
+   - Keep existing API signatures and keep proof_b64 + public_inputs_b64 shape.
+   - You may keep public_inputs_b64 as the existing string format for now, but the verify path must map it deterministically to the circuit’s public witness (Commitment, OverallPass, MaxSeverity).
+   - Ensure keys are handled sanely for dev:
+     - For now, allow generating proving/verifying keys at startup or cached on disk under backend/internal/zk (dev only),
+       OR embed small test keys only for tests.
+     - Don’t over-engineer; prioritize working tests and stable verify.
 
-Iteration:
-1) Run: cd backend && go test ./...
-2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
-3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+ACCEPTANCE CRITERIA (must satisfy):
+- `cd backend && go test ./...` passes.
+- There is at least one new test that proves+verifies the circuit in a PASS case.
+- There is at least one test that demonstrates FAIL behavior (overall_pass=0) is enforced and verifiable.
+- If plumbing was wired, verify endpoint still accepts proof_b64/public_inputs_b64 and returns verified result correctly.
 
-Pick the highest-value improvement:
-A) Reliability/correctness: validation, error handling, run persistence, verify robustness
-B) Tests: add/strengthen tests for the change you made
-C) upgrading the user interface so that it looks better.
-D) Maintainability: reduce duplication with tiny refactors
-E) UX: wizard/results/verify clarity (small, safe changes)
-F) Docs: README/DEPLOYMENT polish
-G) Performance: safe wins only
-
-Finish with:
-- What you changed (short)
+OUTPUT FORMAT (end of each run):
+- Files changed (list)
+- What you changed (2–6 bullets)
 - Tests run (must include go test ./...)
 mcp startup: no servers
-
-thinking
-**Preparing to run tests**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 195ms:
-?   	noema/cmd/server	[no test files]
-?   	noema/internal/auth	[no test files]
-ok  	noema/internal/config	(cached)
-?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	(cached)
-?   	noema/internal/gemini	[no test files]
-ok  	noema/internal/httputil	(cached)
-ok  	noema/internal/session	(cached)
-ok  	noema/internal/verify	(cached)
-?   	noema/internal/web	[no test files]
-ok  	noema/internal/zk	(cached)
-
-thinking
-**Listing frontend files**
-
-I'm listing frontend files to identify where to apply the preferred improvement after tests passed.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
+/bin/zsh -lc ls in /Users/yani/Noema/backend succeeded in 52ms:
 cmd
 data
 go.mod
 go.sum
 internal
-main
 web
+exec
+/bin/zsh -lc 'rg -n "PolicyGateCircuit|PolicyGate" -S .' in /Users/yani/Noema/backend succeeded in 53ms:
+./internal/evaluate/handler.go:395:	if len(policyConstraintOrder) != zk.PolicyGateConstraintCount {
+./internal/evaluate/handler.go:417:	var enabled [zk.PolicyGateConstraintCount]uint64
+./internal/evaluate/handler.go:418:	var maxAllowed [zk.PolicyGateConstraintCount]uint64
+./internal/evaluate/handler.go:419:	var severity [zk.PolicyGateConstraintCount]uint64
+./internal/zk/zk_test.go:73:		Enabled:          [PolicyGateConstraintCount]uint64{1, 1, 1, 0, 1, 0},
+./internal/zk/zk_test.go:74:		MaxAllowed:       [PolicyGateConstraintCount]uint64{1, 2, 0, 1, 2, 0},
+./internal/zk/zk_test.go:75:		Severity:         [PolicyGateConstraintCount]uint64{1, 2, 0, 2, 1, 2},
+./internal/zk/zk.go:33:// PolicyGateConstraintCount is the fixed N for the PolicyGateCircuit.
+./internal/zk/zk.go:34:const PolicyGateConstraintCount = policyzk.N
+./internal/zk/zk.go:55:// WitnessInputs carries the private inputs for the PolicyGateCircuit.
+./internal/zk/zk.go:58:	Enabled          [PolicyGateConstraintCount]uint64
+./internal/zk/zk.go:59:	MaxAllowed       [PolicyGateConstraintCount]uint64
+./internal/zk/zk.go:60:	Severity         [PolicyGateConstraintCount]uint64
+./internal/zk/zk.go:81:		var circuit policyzk.PolicyGateCircuit
+./internal/zk/zk.go:121:	assignment := policyzk.PolicyGateCircuit{
+./internal/zk/zk.go:180:	assignment := policyzk.PolicyGateCircuit{
+./internal/zk/zk.go:346:func toVarArray(vals [PolicyGateConstraintCount]uint64) [PolicyGateConstraintCount]frontend.Variable {
+./internal/zk/zk.go:347:	var out [PolicyGateConstraintCount]frontend.Variable
+./internal/zk/zk.go:348:	for i := 0; i < PolicyGateConstraintCount; i++ {
+./internal/zk/zk.go:354:// CommitmentPoseidon computes the PolicyGateCircuit commitment.
 
 thinking
-**Exploring frontend setup**
-
-I'm checking the codebase to confirm that the frontend is implemented in a web framework and to understand its structure.
+**Inspecting existing circuit_test**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web' in /Users/yani/Noema/backend succeeded in 52ms:
-static
-templates
+/bin/zsh -lc "sed -n '1,220p' internal/zk/policyzk/circuit.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package policyzk
+
+import (
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark/frontend"
+)
+
+const N = 6
+
+// PolicyGateCircuit proves:
+//   - The prover knows (datasetDigest, policy config, gemini severities) that hash to Commitment
+//   - And the deterministic policy check passes:
+//     for each i: if Enabled[i] == 1 then Severity[i] <= MaxAllowed[i]
+//
+// Public outputs:
+// - Commitment: binds everything (dataset + policy + gemini outputs)
+// - OverallPass: 1 iff policy passes
+// - MaxSeverity (optional): max observed severity among enabled constraints
+type PolicyGateCircuit struct {
+	// ===== Private witness =====
 
 thinking
-**Reviewing templates for design improvement**
+**Checking for existing circuit tests**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/templates' in /Users/yani/Noema/backend succeeded in 52ms:
-app.html
-app_new.html
-app_results.html
-index.html
-partial_header_app.html
-partial_header_public.html
-partial_header_upload.html
-partial_orb.html
-upload.html
-verify.html
-verify_results.html
+/bin/zsh -lc "sed -n '1,200p' internal/zk/policyzk/circuit_test.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package policyzk
 
-thinking
-**Reviewing static CSS for improvement**
+import (
+	"math/big"
+	"testing"
 
-I'm checking the static CSS files to identify one meaningful improvement, focusing on app.html as a candidate for enhancement.
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+	"github.com/stretchr/testify/require"
+)
+
+func TestPolicyGateCircuit_Groth16PassFail(t *testing.T) {
+	require := require.New(t)
+
+	var circuit PolicyGateCircuit
+	r1cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/static' in /Users/yani/Noema/backend succeeded in 52ms:
-app.js
-constraints.js
-results.js
-styles.css
-upload.js
-verify.js
-wizard.js
-
-thinking
-**Reviewing CSS for UI improvements**
-
-I'm inspecting styles.css to identify UI enhancements that won't compromise functionality, aiming to keep changes within three files.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 51ms:
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap');
-
-:root {
-  --bg: #05060a;
-  --bg-card: rgba(9, 12, 18, 0.9);
-  --text: #f4f6fb;
-  --text-muted: #9aa3b2;
-  --accent: #45d4ff;
-  --accent-strong: #2c7bff;
-  --accent-glow: rgba(69, 212, 255, 0.35);
-  --border: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(69, 212, 255, 0.4);
-  --error: #f87171;
-  --success: #22c55e;
-  --warning: #fbbf24;
-  --shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
+/bin/zsh -lc "sed -n '200,400p' internal/zk/policyzk/circuit_test.go" in /Users/yani/Noema/backend succeeded in 53ms:
+	var x4 fr.Element
+	x4.Square(&x2)
+	x.Mul(&x4, x)
 }
 
-*,
-*::before,
+func ark(state *[]fr.Element, c []fr.Element, r int) {
+	s := *state
+	for i := range s {
+		s[i].Add(&s[i], &c[i+r])
+	}
+}
+
+func mix(in []fr.Element, m [][]fr.Element) []fr.Element {
+	out := make([]fr.Element, len(in))
+	for col := range in {
+		var acc fr.Element
+		for row := range in {
+			var term fr.Element
+			term.Mul(&m[row][col], &in[row])
+			acc.Add(&acc, &term)
+
+thinking
+**Assessing existing Poseidon test and implementation**
+
+The current test uses an external Poseidon circuits package instead of the required in-repo implementation under `internal/zk/circuits`. Next, I'll locate the in-repo circuits package to verify or add the properly scoped Poseidon test.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '200,400p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 51ms:
-  color: var(--text-muted);
-}
+/bin/zsh -lc 'rg -n "package circuits" -S internal' in /Users/yani/Noema/backend succeeded in 53ms:
+internal/zk/policyzk/poseidon-gnark/circuits/poseidon.go:1:package circuits
+internal/zk/policyzk/poseidon-gnark/circuits/poseidon_test.go:1:package circuits
+internal/zk/policyzk/poseidon-gnark/circuits/poseidon_constants.go:1:package circuits
 
-.input {
-  width: 100%;
-  padding: 0.75rem 1rem;
-  font-size: 1rem;
-  color: var(--text);
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  outline: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
-}
-.input::placeholder { color: var(--text-muted); }
-.input:hover { border-color: rgba(255,255,255,0.18); }
-.input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-glow);
-}
+thinking
+**Confirming local poseidon usage**
+
+There’s a vendored poseidon module inside the repo, but the circuit code imports an external GitHub path. I’m checking go.mod to see if the local module is intended to replace the external dependency.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '400,800p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
-.upload-file {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  min-width: 0;
-}
-
-.upload-file-name {
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.upload-file-size {
-  font-size: 0.82rem;
-  color: var(--text-muted);
-}
-
-.upload-hint {
+/bin/zsh -lc 'rg -n "poseidon-gnark" -S go.mod internal/zk/policyzk' in /Users/yani/Noema/backend succeeded in 53ms:
+go.mod:8:	github.com/AlpinYukseloglu/poseidon-gnark v0.0.0-20230513045146-69f5c852ef54
+go.mod:75:replace github.com/AlpinYukseloglu/poseidon-gnark => ./internal/zk/policyzk/poseidon-gnark
+internal/zk/policyzk/poseidon-gnark/README.md:14:git clone https://github.com/AlpinYukseloglu/poseidon-gnark
+internal/zk/policyzk/poseidon-gnark/README.md:15:cd poseidon-gnark
+internal/zk/policyzk/poseidon-gnark/README.md:24:import "github.com/AlpinYukseloglu/poseidon-gnark"
+internal/zk/policyzk/poseidon-gnark/go.mod:1:module github.com/AlpinYukseloglu/poseidon-gnark
+internal/zk/policyzk/circuit_test.go:7:	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+internal/zk/policyzk/circuit.go:4:	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
 
 thinking
-**Considering UI improvements**
-
-I'm thinking about enhancing the results display for better readability by adding meaningful structure or a sticky summary while preserving existing functionality. Next, I'll review the results section to identify where to add visual hierarchy.
+**Running tests on local implementation**
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '800,1200p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
-}
-
-.results-constraint-meta {
-  font-size: 0.82rem;
-  color: var(--text-muted);
-}
-
-.results-proof-meta {
-  margin-top: 0.75rem;
-  font-size: 0.85rem;
-  color: var(--text-muted);
-}
-
-.results-pre {
-  margin-top: 0.9rem;
-  padding: 1rem;
-  background: rgba(0, 0, 0, 0.45);
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  max-height: 320px;
-
-thinking
-**Planning results page UI tweaks**
-
-Considering adding summary chips, sticky actions, or gradient headers to improve large output scannability without changing functionality. Next, I'll inspect the results template and related CSS to check data availability and feasible style enhancements.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/templates/app_results.html" in /Users/yani/Noema/backend succeeded in 52ms:
-{{define "app_results"}}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Noema — Results</title>
-  <link rel="stylesheet" href="/static/styles.css">
-</head>
-<body data-run-id="{{.RunID}}">
-  {{template "header_app" .}}
-
-  <main class="main main-results">
-    {{template "orb" .}}
-    <div class="card results-card">
-      <div class="results-header">
-        <div>
-          <h1 class="card-title">Evaluation results</h1>
-          <p class="text-muted" id="results-run-id">Run ID: {{.RunID}}</p>
-        </div>
-
-thinking
-**Considering UI improvements within file limits**
-
-I'm focusing on meaningful UI enhancements like adding visual cards or copy feedback that can fit within three files and minimal JS changes, starting by inspecting the results.js for feasible UX tweaks.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/static/results.js" in /Users/yani/Noema/backend succeeded in 52ms:
-(function() {
-  var runId = document.body.getAttribute('data-run-id') || document.getElementById('results-run-id').textContent.replace('Run ID: ', '').trim();
-  var key = 'noema_run_' + runId;
-  var data;
-  try {
-    var raw = localStorage.getItem(key);
-    data = raw ? JSON.parse(raw) : null;
-  } catch (e) {
-    data = null;
-  }
-
-  function copyText(text, button) {
-    if (!text) return;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(function() {
-        if (button) showCopied(button);
-      });
-    } else {
-      var temp = document.createElement('textarea');
-      temp.value = text;
-
-
-thinking
-**Planning constraint verdict UI**
-
-I'm planning to enhance the results constraints card with pass/fail visual feedback by adding conditional classes and a verdict pill via a span element, updating both the rendering logic and CSS for clear, accessible styling.
-thinking
-**Designing header layout with verdict styling**
-
-I'm refining the constraint card by adding a flex header row showing the title and verdict side-by-side, using data attributes for verdict states with CSS for subtle colored borders and backgrounds to enhance UI clarity without major structural changes.
-file update
-M /Users/yani/Noema/backend/web/static/results.js
-@@ -62,4 +62,9 @@
-       var verdict = item.pass === true ? 'PASS' : (item.pass === false ? 'FAIL' : '—');
-+      var verdictClass = item.pass === true ? 'pass' : (item.pass === false ? 'fail' : 'unknown');
-+      card.setAttribute('data-verdict', verdictClass);
-       card.innerHTML =
--        '<div class="results-constraint-title">' + title + '</div>' +
-+        '<div class="results-constraint-header">' +
-+          '<div class="results-constraint-title">' + title + '</div>' +
-+          '<span class="results-constraint-verdict results-constraint-verdict-' + verdictClass + '">' + verdict + '</span>' +
-+        '</div>' +
-         '<div class="results-constraint-meta">Severity: ' + severity + ' · Allowed: ' + allowed + ' · ' + verdict + '</div>';
-apply_patch(auto_approved=true) exited 0 in 31ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/web/static/results.js
-file update:
-diff --git a/backend/web/static/results.js b/backend/web/static/results.js
-index c379a87989a6edfd9e83f0260f64f3ba3d15f612..cf359b476fb3ce1ba662d103051a416376f3ab9c
---- a/backend/web/static/results.js
-+++ b/backend/web/static/results.js
-@@ -60,8 +60,13 @@
-       var severity = item.severity !== undefined ? labelSeverity(item.severity) : '—';
-       var allowed = item.allowed_max_severity !== undefined ? labelSeverity(item.allowed_max_severity) : '—';
-       var verdict = item.pass === true ? 'PASS' : (item.pass === false ? 'FAIL' : '—');
-+      var verdictClass = item.pass === true ? 'pass' : (item.pass === false ? 'fail' : 'unknown');
-+      card.setAttribute('data-verdict', verdictClass);
-       card.innerHTML =
--        '<div class="results-constraint-title">' + title + '</div>' +
-+        '<div class="results-constraint-header">' +
-+          '<div class="results-constraint-title">' + title + '</div>' +
-+          '<span class="results-constraint-verdict results-constraint-verdict-' + verdictClass + '">' + verdict + '</span>' +
-+        '</div>' +
-         '<div class="results-constraint-meta">Severity: ' + severity + ' · Allowed: ' + allowed + ' · ' + verdict + '</div>';
-       container.appendChild(card);
-     });
-
-file update:
-diff --git a/backend/web/static/results.js b/backend/web/static/results.js
-index c379a87989a6edfd9e83f0260f64f3ba3d15f612..cf359b476fb3ce1ba662d103051a416376f3ab9c
---- a/backend/web/static/results.js
-+++ b/backend/web/static/results.js
-@@ -60,8 +60,13 @@
-       var severity = item.severity !== undefined ? labelSeverity(item.severity) : '—';
-       var allowed = item.allowed_max_severity !== undefined ? labelSeverity(item.allowed_max_severity) : '—';
-       var verdict = item.pass === true ? 'PASS' : (item.pass === false ? 'FAIL' : '—');
-+      var verdictClass = item.pass === true ? 'pass' : (item.pass === false ? 'fail' : 'unknown');
-+      card.setAttribute('data-verdict', verdictClass);
-       card.innerHTML =
--        '<div class="results-constraint-title">' + title + '</div>' +
-+        '<div class="results-constraint-header">' +
-+          '<div class="results-constraint-title">' + title + '</div>' +
-+          '<span class="results-constraint-verdict results-constraint-verdict-' + verdictClass + '">' + verdict + '</span>' +
-+        '</div>' +
-         '<div class="results-constraint-meta">Severity: ' + severity + ' · Allowed: ' + allowed + ' · ' + verdict + '</div>';
-       container.appendChild(card);
-     });
-
-
-thinking
-**Updating CSS near results-constraint**
-
-I'm adding new classes around the results-constraint card in styles.css to support the planned UI changes before patching.
-file update
-M /Users/yani/Noema/backend/web/static/styles.css
-@@ -795,2 +795,26 @@
- 
-+.results-constraint-card[data-verdict="pass"] {
-+  border-color: rgba(34, 197, 94, 0.4);
-+  background: rgba(34, 197, 94, 0.05);
-+  box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.6);
-+}
-+
-+.results-constraint-card[data-verdict="fail"] {
-+  border-color: rgba(248, 113, 113, 0.45);
-+  background: rgba(248, 113, 113, 0.06);
-+  box-shadow: inset 3px 0 0 rgba(248, 113, 113, 0.7);
-+}
-+
-+.results-constraint-card[data-verdict="unknown"] {
-+  border-color: rgba(255, 255, 255, 0.12);
-+  background: rgba(255, 255, 255, 0.02);
-+}
-+
-+.results-constraint-header {
-+  display: flex;
-+  align-items: center;
-+  justify-content: space-between;
-+  gap: 0.75rem;
-+}
-+
- .results-constraint-title {
-@@ -801,2 +825,30 @@
- 
-+.results-constraint-verdict {
-+  font-size: 0.68rem;
-+  letter-spacing: 0.08em;
-+  text-transform: uppercase;
-+  padding: 0.2rem 0.55rem;
-+  border-radius: 999px;
-+  border: 1px solid var(--border);
-+  color: var(--text-muted);
-+  white-space: nowrap;
-+}
-+
-+.results-constraint-verdict-pass {
-+  color: #86efac;
-+  border-color: rgba(34, 197, 94, 0.5);
-+  background: rgba(34, 197, 94, 0.12);
-+}
-+
-+.results-constraint-verdict-fail {
-+  color: #fca5a5;
-+  border-color: rgba(248, 113, 113, 0.5);
-+  background: rgba(248, 113, 113, 0.12);
-+}
-+
-+.results-constraint-verdict-unknown {
-+  color: var(--text-muted);
-+  border-color: rgba(255, 255, 255, 0.14);
-+}
-+
- .results-constraint-meta {
-apply_patch(auto_approved=true) exited 0 in 37ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/web/static/styles.css
-file update:
-diff --git a/backend/web/static/results.js b/backend/web/static/results.js
-index c379a87989a6edfd9e83f0260f64f3ba3d15f612..cf359b476fb3ce1ba662d103051a416376f3ab9c
---- a/backend/web/static/results.js
-+++ b/backend/web/static/results.js
-@@ -60,8 +60,13 @@
-       var severity = item.severity !== undefined ? labelSeverity(item.severity) : '—';
-       var allowed = item.allowed_max_severity !== undefined ? labelSeverity(item.allowed_max_severity) : '—';
-       var verdict = item.pass === true ? 'PASS' : (item.pass === false ? 'FAIL' : '—');
-+      var verdictClass = item.pass === true ? 'pass' : (item.pass === false ? 'fail' : 'unknown');
-+      card.setAttribute('data-verdict', verdictClass);
-       card.innerHTML =
--        '<div class="results-constraint-title">' + title + '</div>' +
-+        '<div class="results-constraint-header">' +
-+          '<div class="results-constraint-title">' + title + '</div>' +
-+          '<span class="results-constraint-verdict results-constraint-verdict-' + verdictClass + '">' + verdict + '</span>' +
-+        '</div>' +
-         '<div class="results-constraint-meta">Severity: ' + severity + ' · Allowed: ' + allowed + ' · ' + verdict + '</div>';
-       container.appendChild(card);
-     });
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 2c23fa29963b2f86ad17b867399f0a0110e8afb5..f658b5d103085a578f9cfc76f9bd2f7e9765504b
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -793,12 +793,64 @@
-   background: rgba(0, 0, 0, 0.3);
- }
- 
-+.results-constraint-card[data-verdict="pass"] {
-+  border-color: rgba(34, 197, 94, 0.4);
-+  background: rgba(34, 197, 94, 0.05);
-+  box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.6);
-+}
-+
-+.results-constraint-card[data-verdict="fail"] {
-+  border-color: rgba(248, 113, 113, 0.45);
-+  background: rgba(248, 113, 113, 0.06);
-+  box-shadow: inset 3px 0 0 rgba(248, 113, 113, 0.7);
-+}
-+
-+.results-constraint-card[data-verdict="unknown"] {
-+  border-color: rgba(255, 255, 255, 0.12);
-+  background: rgba(255, 255, 255, 0.02);
-+}
-+
-+.results-constraint-header {
-+  display: flex;
-+  align-items: center;
-+  justify-content: space-between;
-+  gap: 0.75rem;
-+}
-+
- .results-constraint-title {
-   font-size: 0.9rem;
-   font-weight: 500;
-   margin-bottom: 0.35rem;
- }
- 
-+.results-constraint-verdict {
-+  font-size: 0.68rem;
-+  letter-spacing: 0.08em;
-+  text-transform: uppercase;
-+  padding: 0.2rem 0.55rem;
-+  border-radius: 999px;
-+  border: 1px solid var(--border);
-+  color: var(--text-muted);
-+  white-space: nowrap;
-+}
-+
-+.results-constraint-verdict-pass {
-+  color: #86efac;
-+  border-color: rgba(34, 197, 94, 0.5);
-+  background: rgba(34, 197, 94, 0.12);
-+}
-+
-+.results-constraint-verdict-fail {
-+  color: #fca5a5;
-+  border-color: rgba(248, 113, 113, 0.5);
-+  background: rgba(248, 113, 113, 0.12);
-+}
-+
-+.results-constraint-verdict-unknown {
-+  color: var(--text-muted);
-+  border-color: rgba(255, 255, 255, 0.14);
-+}
-+
- .results-constraint-meta {
-   font-size: 0.82rem;
-   color: var(--text-muted);
-
-file update:
-diff --git a/backend/web/static/results.js b/backend/web/static/results.js
-index c379a87989a6edfd9e83f0260f64f3ba3d15f612..cf359b476fb3ce1ba662d103051a416376f3ab9c
---- a/backend/web/static/results.js
-+++ b/backend/web/static/results.js
-@@ -60,8 +60,13 @@
-       var severity = item.severity !== undefined ? labelSeverity(item.severity) : '—';
-       var allowed = item.allowed_max_severity !== undefined ? labelSeverity(item.allowed_max_severity) : '—';
-       var verdict = item.pass === true ? 'PASS' : (item.pass === false ? 'FAIL' : '—');
-+      var verdictClass = item.pass === true ? 'pass' : (item.pass === false ? 'fail' : 'unknown');
-+      card.setAttribute('data-verdict', verdictClass);
-       card.innerHTML =
--        '<div class="results-constraint-title">' + title + '</div>' +
-+        '<div class="results-constraint-header">' +
-+          '<div class="results-constraint-title">' + title + '</div>' +
-+          '<span class="results-constraint-verdict results-constraint-verdict-' + verdictClass + '">' + verdict + '</span>' +
-+        '</div>' +
-         '<div class="results-constraint-meta">Severity: ' + severity + ' · Allowed: ' + allowed + ' · ' + verdict + '</div>';
-       container.appendChild(card);
-     });
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 2c23fa29963b2f86ad17b867399f0a0110e8afb5..f658b5d103085a578f9cfc76f9bd2f7e9765504b
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -793,12 +793,64 @@
-   background: rgba(0, 0, 0, 0.3);
- }
- 
-+.results-constraint-card[data-verdict="pass"] {
-+  border-color: rgba(34, 197, 94, 0.4);
-+  background: rgba(34, 197, 94, 0.05);
-+  box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.6);
-+}
-+
-+.results-constraint-card[data-verdict="fail"] {
-+  border-color: rgba(248, 113, 113, 0.45);
-+  background: rgba(248, 113, 113, 0.06);
-+  box-shadow: inset 3px 0 0 rgba(248, 113, 113, 0.7);
-+}
-+
-+.results-constraint-card[data-verdict="unknown"] {
-+  border-color: rgba(255, 255, 255, 0.12);
-+  background: rgba(255, 255, 255, 0.02);
-+}
-+
-+.results-constraint-header {
-+  display: flex;
-+  align-items: center;
-+  justify-content: space-between;
-+  gap: 0.75rem;
-+}
-+
- .results-constraint-title {
-   font-size: 0.9rem;
-   font-weight: 500;
-   margin-bottom: 0.35rem;
- }
- 
-+.results-constraint-verdict {
-+  font-size: 0.68rem;
-+  letter-spacing: 0.08em;
-+  text-transform: uppercase;
-+  padding: 0.2rem 0.55rem;
-+  border-radius: 999px;
-+  border: 1px solid var(--border);
-+  color: var(--text-muted);
-+  white-space: nowrap;
-+}
-+
-+.results-constraint-verdict-pass {
-+  color: #86efac;
-+  border-color: rgba(34, 197, 94, 0.5);
-+  background: rgba(34, 197, 94, 0.12);
-+}
-+
-+.results-constraint-verdict-fail {
-+  color: #fca5a5;
-+  border-color: rgba(248, 113, 113, 0.5);
-+  background: rgba(248, 113, 113, 0.12);
-+}
-+
-+.results-constraint-verdict-unknown {
-+  color: var(--text-muted);
-+  border-color: rgba(255, 255, 255, 0.14);
-+}
-+
- .results-constraint-meta {
-   font-size: 0.82rem;
-   color: var(--text-muted);
-
-
-thinking
-**Adjusting title and meta margins**
-
-Planning to remove the title's bottom margin and instead add a top margin to the meta line for balanced spacing within the header. This should align title and verdict cleanly without extra space pushing the header down.
-file update
-M /Users/yani/Noema/backend/web/static/styles.css
-@@ -822,3 +822,3 @@
-   font-weight: 500;
--  margin-bottom: 0.35rem;
-+  margin-bottom: 0;
- }
-@@ -854,2 +854,3 @@
- .results-constraint-meta {
-+  margin-top: 0.35rem;
-   font-size: 0.82rem;
-apply_patch(auto_approved=true) exited 0 in 48ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/web/static/styles.css
-file update:
-diff --git a/backend/web/static/results.js b/backend/web/static/results.js
-index c379a87989a6edfd9e83f0260f64f3ba3d15f612..cf359b476fb3ce1ba662d103051a416376f3ab9c
---- a/backend/web/static/results.js
-+++ b/backend/web/static/results.js
-@@ -60,8 +60,13 @@
-       var severity = item.severity !== undefined ? labelSeverity(item.severity) : '—';
-       var allowed = item.allowed_max_severity !== undefined ? labelSeverity(item.allowed_max_severity) : '—';
-       var verdict = item.pass === true ? 'PASS' : (item.pass === false ? 'FAIL' : '—');
-+      var verdictClass = item.pass === true ? 'pass' : (item.pass === false ? 'fail' : 'unknown');
-+      card.setAttribute('data-verdict', verdictClass);
-       card.innerHTML =
--        '<div class="results-constraint-title">' + title + '</div>' +
-+        '<div class="results-constraint-header">' +
-+          '<div class="results-constraint-title">' + title + '</div>' +
-+          '<span class="results-constraint-verdict results-constraint-verdict-' + verdictClass + '">' + verdict + '</span>' +
-+        '</div>' +
-         '<div class="results-constraint-meta">Severity: ' + severity + ' · Allowed: ' + allowed + ' · ' + verdict + '</div>';
-       container.appendChild(card);
-     });
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 2c23fa29963b2f86ad17b867399f0a0110e8afb5..2a81f1ed61a902fae23c0ba052b7863c60caec74
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -793,13 +793,66 @@
-   background: rgba(0, 0, 0, 0.3);
- }
- 
-+.results-constraint-card[data-verdict="pass"] {
-+  border-color: rgba(34, 197, 94, 0.4);
-+  background: rgba(34, 197, 94, 0.05);
-+  box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.6);
-+}
-+
-+.results-constraint-card[data-verdict="fail"] {
-+  border-color: rgba(248, 113, 113, 0.45);
-+  background: rgba(248, 113, 113, 0.06);
-+  box-shadow: inset 3px 0 0 rgba(248, 113, 113, 0.7);
-+}
-+
-+.results-constraint-card[data-verdict="unknown"] {
-+  border-color: rgba(255, 255, 255, 0.12);
-+  background: rgba(255, 255, 255, 0.02);
-+}
-+
-+.results-constraint-header {
-+  display: flex;
-+  align-items: center;
-+  justify-content: space-between;
-+  gap: 0.75rem;
-+}
-+
- .results-constraint-title {
-   font-size: 0.9rem;
-   font-weight: 500;
--  margin-bottom: 0.35rem;
-+  margin-bottom: 0;
- }
- 
-+.results-constraint-verdict {
-+  font-size: 0.68rem;
-+  letter-spacing: 0.08em;
-+  text-transform: uppercase;
-+  padding: 0.2rem 0.55rem;
-+  border-radius: 999px;
-+  border: 1px solid var(--border);
-+  color: var(--text-muted);
-+  white-space: nowrap;
-+}
-+
-+.results-constraint-verdict-pass {
-+  color: #86efac;
-+  border-color: rgba(34, 197, 94, 0.5);
-+  background: rgba(34, 197, 94, 0.12);
-+}
-+
-+.results-constraint-verdict-fail {
-+  color: #fca5a5;
-+  border-color: rgba(248, 113, 113, 0.5);
-+  background: rgba(248, 113, 113, 0.12);
-+}
-+
-+.results-constraint-verdict-unknown {
-+  color: var(--text-muted);
-+  border-color: rgba(255, 255, 255, 0.14);
-+}
-+
- .results-constraint-meta {
-+  margin-top: 0.35rem;
-   font-size: 0.82rem;
-   color: var(--text-muted);
- }
-
-file update:
-diff --git a/backend/web/static/results.js b/backend/web/static/results.js
-index c379a87989a6edfd9e83f0260f64f3ba3d15f612..cf359b476fb3ce1ba662d103051a416376f3ab9c
---- a/backend/web/static/results.js
-+++ b/backend/web/static/results.js
-@@ -60,8 +60,13 @@
-       var severity = item.severity !== undefined ? labelSeverity(item.severity) : '—';
-       var allowed = item.allowed_max_severity !== undefined ? labelSeverity(item.allowed_max_severity) : '—';
-       var verdict = item.pass === true ? 'PASS' : (item.pass === false ? 'FAIL' : '—');
-+      var verdictClass = item.pass === true ? 'pass' : (item.pass === false ? 'fail' : 'unknown');
-+      card.setAttribute('data-verdict', verdictClass);
-       card.innerHTML =
--        '<div class="results-constraint-title">' + title + '</div>' +
-+        '<div class="results-constraint-header">' +
-+          '<div class="results-constraint-title">' + title + '</div>' +
-+          '<span class="results-constraint-verdict results-constraint-verdict-' + verdictClass + '">' + verdict + '</span>' +
-+        '</div>' +
-         '<div class="results-constraint-meta">Severity: ' + severity + ' · Allowed: ' + allowed + ' · ' + verdict + '</div>';
-       container.appendChild(card);
-     });
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 2c23fa29963b2f86ad17b867399f0a0110e8afb5..2a81f1ed61a902fae23c0ba052b7863c60caec74
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -793,13 +793,66 @@
-   background: rgba(0, 0, 0, 0.3);
- }
- 
-+.results-constraint-card[data-verdict="pass"] {
-+  border-color: rgba(34, 197, 94, 0.4);
-+  background: rgba(34, 197, 94, 0.05);
-+  box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.6);
-+}
-+
-+.results-constraint-card[data-verdict="fail"] {
-+  border-color: rgba(248, 113, 113, 0.45);
-+  background: rgba(248, 113, 113, 0.06);
-+  box-shadow: inset 3px 0 0 rgba(248, 113, 113, 0.7);
-+}
-+
-+.results-constraint-card[data-verdict="unknown"] {
-+  border-color: rgba(255, 255, 255, 0.12);
-+  background: rgba(255, 255, 255, 0.02);
-+}
-+
-+.results-constraint-header {
-+  display: flex;
-+  align-items: center;
-+  justify-content: space-between;
-+  gap: 0.75rem;
-+}
-+
- .results-constraint-title {
-   font-size: 0.9rem;
-   font-weight: 500;
--  margin-bottom: 0.35rem;
-+  margin-bottom: 0;
- }
- 
-+.results-constraint-verdict {
-+  font-size: 0.68rem;
-+  letter-spacing: 0.08em;
-+  text-transform: uppercase;
-+  padding: 0.2rem 0.55rem;
-+  border-radius: 999px;
-+  border: 1px solid var(--border);
-+  color: var(--text-muted);
-+  white-space: nowrap;
-+}
-+
-+.results-constraint-verdict-pass {
-+  color: #86efac;
-+  border-color: rgba(34, 197, 94, 0.5);
-+  background: rgba(34, 197, 94, 0.12);
-+}
-+
-+.results-constraint-verdict-fail {
-+  color: #fca5a5;
-+  border-color: rgba(248, 113, 113, 0.5);
-+  background: rgba(248, 113, 113, 0.12);
-+}
-+
-+.results-constraint-verdict-unknown {
-+  color: var(--text-muted);
-+  border-color: rgba(255, 255, 255, 0.14);
-+}
-+
- .results-constraint-meta {
-+  margin-top: 0.35rem;
-   font-size: 0.82rem;
-   color: var(--text-muted);
- }
-
-
-thinking
-**Running Go tests**
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 206ms:
+/bin/zsh -lc 'go test ./...' in /Users/yani/Noema/backend succeeded in 299ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
 ok  	noema/internal/config	(cached)
@@ -798,204 +217,119 @@ ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
-file update:
-diff --git a/backend/web/static/results.js b/backend/web/static/results.js
-index c379a87989a6edfd9e83f0260f64f3ba3d15f612..cf359b476fb3ce1ba662d103051a416376f3ab9c
---- a/backend/web/static/results.js
-+++ b/backend/web/static/results.js
-@@ -60,8 +60,13 @@
-       var severity = item.severity !== undefined ? labelSeverity(item.severity) : '—';
-       var allowed = item.allowed_max_severity !== undefined ? labelSeverity(item.allowed_max_severity) : '—';
-       var verdict = item.pass === true ? 'PASS' : (item.pass === false ? 'FAIL' : '—');
-+      var verdictClass = item.pass === true ? 'pass' : (item.pass === false ? 'fail' : 'unknown');
-+      card.setAttribute('data-verdict', verdictClass);
-       card.innerHTML =
--        '<div class="results-constraint-title">' + title + '</div>' +
-+        '<div class="results-constraint-header">' +
-+          '<div class="results-constraint-title">' + title + '</div>' +
-+          '<span class="results-constraint-verdict results-constraint-verdict-' + verdictClass + '">' + verdict + '</span>' +
-+        '</div>' +
-         '<div class="results-constraint-meta">Severity: ' + severity + ' · Allowed: ' + allowed + ' · ' + verdict + '</div>';
-       container.appendChild(card);
-     });
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 2c23fa29963b2f86ad17b867399f0a0110e8afb5..2a81f1ed61a902fae23c0ba052b7863c60caec74
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -793,13 +793,66 @@
-   background: rgba(0, 0, 0, 0.3);
- }
- 
-+.results-constraint-card[data-verdict="pass"] {
-+  border-color: rgba(34, 197, 94, 0.4);
-+  background: rgba(34, 197, 94, 0.05);
-+  box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.6);
-+}
-+
-+.results-constraint-card[data-verdict="fail"] {
-+  border-color: rgba(248, 113, 113, 0.45);
-+  background: rgba(248, 113, 113, 0.06);
-+  box-shadow: inset 3px 0 0 rgba(248, 113, 113, 0.7);
-+}
-+
-+.results-constraint-card[data-verdict="unknown"] {
-+  border-color: rgba(255, 255, 255, 0.12);
-+  background: rgba(255, 255, 255, 0.02);
-+}
-+
-+.results-constraint-header {
-+  display: flex;
-+  align-items: center;
-+  justify-content: space-between;
-+  gap: 0.75rem;
-+}
-+
- .results-constraint-title {
-   font-size: 0.9rem;
-   font-weight: 500;
--  margin-bottom: 0.35rem;
-+  margin-bottom: 0;
- }
- 
-+.results-constraint-verdict {
-+  font-size: 0.68rem;
-+  letter-spacing: 0.08em;
-+  text-transform: uppercase;
-+  padding: 0.2rem 0.55rem;
-+  border-radius: 999px;
-+  border: 1px solid var(--border);
-+  color: var(--text-muted);
-+  white-space: nowrap;
-+}
-+
-+.results-constraint-verdict-pass {
-+  color: #86efac;
-+  border-color: rgba(34, 197, 94, 0.5);
-+  background: rgba(34, 197, 94, 0.12);
-+}
-+
-+.results-constraint-verdict-fail {
-+  color: #fca5a5;
-+  border-color: rgba(248, 113, 113, 0.5);
-+  background: rgba(248, 113, 113, 0.12);
-+}
-+
-+.results-constraint-verdict-unknown {
-+  color: var(--text-muted);
-+  border-color: rgba(255, 255, 255, 0.14);
-+}
-+
- .results-constraint-meta {
-+  margin-top: 0.35rem;
-   font-size: 0.82rem;
-   color: var(--text-muted);
- }
+ok  	noema/internal/zk/policyzk	(cached)
 
+thinking
+**Verifying existing zk tests and preparing to wire backend**
+
+Tests already pass and a real gnark circuit test exists. Next, I'll inspect the internal zk backend code to wire the actual prover and verifier behind the existing proof API.
+exec
+/bin/zsh -lc "sed -n '1,220p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package zk
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"math/big"
+	"strconv"
+	"strings"
+	"sync"
+
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/constraint"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+exec
+/bin/zsh -lc "sed -n '220,520p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+	s := string(pub)
+	if !strings.HasPrefix(s, publicInputsPrefix) {
+		return PublicInputs{}, fmt.Errorf("invalid public inputs prefix")
+	}
+	fields := strings.Split(strings.TrimPrefix(s, publicInputsPrefix), "|")
+	out := PublicInputs{}
+	seenPT := false
+	seenMS := false
+	seenOP := false
+	seenC := false
+	for _, f := range fields {
+		kv := strings.SplitN(f, "=", 2)
+		if len(kv) != 2 {
+			return PublicInputs{}, fmt.Errorf("invalid public inputs field")
+		}
+		switch kv[0] {
+		case "pt":
+			if seenPT {
+				return PublicInputs{}, fmt.Errorf("duplicate policy threshold")
+			}
+exec
+/bin/zsh -lc "sed -n '520,900p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+		out[i] = make([]fr.Element, len(in[i]))
+		for j := range in[i] {
+			out[i][j].SetBigInt(in[i][j])
+		}
+	}
+	return out
+}
+
+func elementToBigInt(in fr.Element) *big.Int {
+	var out big.Int
+	in.BigInt(&out)
+	return &out
+}
+
+thinking
+**Verifying existing zk proof implementation and tests**
+
+I see the repo already uses gnark for groth16 and has related tests, so I'll verify if the public input format matches the expected base64 string and review internal zk tests for completeness.
+exec
+/bin/zsh -lc "sed -n '1,200p' internal/zk/zk_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package zk
+
+import (
+	"encoding/base64"
+	"testing"
+)
+
+func TestProofRoundTrip(t *testing.T) {
+	witness := testWitnessInputs()
+	commitment, err := CommitmentPoseidon(witness.DatasetDigestHex, witness.Enabled, witness.MaxAllowed, witness.Severity)
+	if err != nil {
+		t.Fatalf("CommitmentPoseidon error: %v", err)
+	}
+	pi := PublicInputs{
+		PolicyThreshold: 0,
+		MaxSeverity:     2,
+		OverallPass:     true,
+		Commitment:      commitment,
+		Witness:         witness,
+	}
+
+thinking
+**Reporting no changes**
+
+No files were changed, so there are no modifications to list. I ran the tests with `go test ./...` to confirm everything passes successfully.
 codex
-What you changed (short)
-- Added pass/fail/unknown verdict chips and card styling to the results constraint summary for clearer scannability, without changing functionality.
-- Updated `web/static/results.js` to emit verdict metadata for styling.
+Files changed
+None
+
+What you changed
+No code changes needed; the repository already includes a Groth16 BN254 PolicyGateCircuit test using the in-repo Poseidon implementation and the `zk.GenerateProof`/`zk.VerifyProof` plumbing is already wired.
 
 Tests run
-- `go test ./...`
-file update:
-diff --git a/backend/web/static/results.js b/backend/web/static/results.js
-index c379a87989a6edfd9e83f0260f64f3ba3d15f612..cf359b476fb3ce1ba662d103051a416376f3ab9c
---- a/backend/web/static/results.js
-+++ b/backend/web/static/results.js
-@@ -60,8 +60,13 @@
-       var severity = item.severity !== undefined ? labelSeverity(item.severity) : '—';
-       var allowed = item.allowed_max_severity !== undefined ? labelSeverity(item.allowed_max_severity) : '—';
-       var verdict = item.pass === true ? 'PASS' : (item.pass === false ? 'FAIL' : '—');
-+      var verdictClass = item.pass === true ? 'pass' : (item.pass === false ? 'fail' : 'unknown');
-+      card.setAttribute('data-verdict', verdictClass);
-       card.innerHTML =
--        '<div class="results-constraint-title">' + title + '</div>' +
-+        '<div class="results-constraint-header">' +
-+          '<div class="results-constraint-title">' + title + '</div>' +
-+          '<span class="results-constraint-verdict results-constraint-verdict-' + verdictClass + '">' + verdict + '</span>' +
-+        '</div>' +
-         '<div class="results-constraint-meta">Severity: ' + severity + ' · Allowed: ' + allowed + ' · ' + verdict + '</div>';
-       container.appendChild(card);
-     });
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 2c23fa29963b2f86ad17b867399f0a0110e8afb5..2a81f1ed61a902fae23c0ba052b7863c60caec74
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -793,13 +793,66 @@
-   background: rgba(0, 0, 0, 0.3);
- }
- 
-+.results-constraint-card[data-verdict="pass"] {
-+  border-color: rgba(34, 197, 94, 0.4);
-+  background: rgba(34, 197, 94, 0.05);
-+  box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.6);
-+}
-+
-+.results-constraint-card[data-verdict="fail"] {
-+  border-color: rgba(248, 113, 113, 0.45);
-+  background: rgba(248, 113, 113, 0.06);
-+  box-shadow: inset 3px 0 0 rgba(248, 113, 113, 0.7);
-+}
-+
-+.results-constraint-card[data-verdict="unknown"] {
-+  border-color: rgba(255, 255, 255, 0.12);
-+  background: rgba(255, 255, 255, 0.02);
-+}
-+
-+.results-constraint-header {
-+  display: flex;
-+  align-items: center;
-+  justify-content: space-between;
-+  gap: 0.75rem;
-+}
-+
- .results-constraint-title {
-   font-size: 0.9rem;
-   font-weight: 500;
--  margin-bottom: 0.35rem;
-+  margin-bottom: 0;
- }
- 
-+.results-constraint-verdict {
-+  font-size: 0.68rem;
-+  letter-spacing: 0.08em;
-+  text-transform: uppercase;
-+  padding: 0.2rem 0.55rem;
-+  border-radius: 999px;
-+  border: 1px solid var(--border);
-+  color: var(--text-muted);
-+  white-space: nowrap;
-+}
-+
-+.results-constraint-verdict-pass {
-+  color: #86efac;
-+  border-color: rgba(34, 197, 94, 0.5);
-+  background: rgba(34, 197, 94, 0.12);
-+}
-+
-+.results-constraint-verdict-fail {
-+  color: #fca5a5;
-+  border-color: rgba(248, 113, 113, 0.5);
-+  background: rgba(248, 113, 113, 0.12);
-+}
-+
-+.results-constraint-verdict-unknown {
-+  color: var(--text-muted);
-+  border-color: rgba(255, 255, 255, 0.14);
-+}
-+
- .results-constraint-meta {
-+  margin-top: 0.35rem;
-   font-size: 0.82rem;
-   color: var(--text-muted);
- }
-
+`go test ./...`
 tokens used
-26,693
-What you changed (short)
-- Added pass/fail/unknown verdict chips and card styling to the results constraint summary for clearer scannability, without changing functionality.
-- Updated `web/static/results.js` to emit verdict metadata for styling.
+16,336
+Files changed
+None
+
+What you changed
+No code changes needed; the repository already includes a Groth16 BN254 PolicyGateCircuit test using the in-repo Poseidon implementation and the `zk.GenerateProof`/`zk.VerifyProof` plumbing is already wired.
 
 Tests run
-- `go test ./...`
+`go test ./...`
