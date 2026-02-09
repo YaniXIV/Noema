@@ -7,7 +7,7 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3ebf-d931-7461-8b23-a7f16cf5723b
+session id: 019c40ee-4afa-7203-8ea1-d02a1db6e00c
 --------
 user
 You are an autonomous coding agent polishing the Noema repository.
@@ -42,11 +42,9 @@ Finish with:
 mcp startup: no servers
 
 thinking
-**Running tests**
-
-I'm preparing to run `go test` to verify the current codebase.
+**Running tests using exec_command**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 197ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 281ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
 ok  	noema/internal/config	(cached)
@@ -58,64 +56,41 @@ ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
+?   	noema/internal/zk/policyzk	[no test files]
 
 thinking
-**Listing frontend files**
+**Confirming tests pass, planning UI search**
 
-I'm listing the frontend-related files to identify a concise, meaningful UI improvement limited to three files.
+Tests have passed successfully. Next, I'll locate the relevant frontend UI components to identify where I can make a meaningful improvement.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
-cmd
-data
-go.mod
-go.sum
-internal
-main
-web
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "frontend|ui|css|tailwind|react|svelte|vue|template" .' in /Users/yani/Noema/backend succeeded in 52ms:
+./go.sum:82:github.com/google/uuid v1.1.2/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
+./go.sum:95:github.com/klauspost/cpuid/v2 v2.3.0 h1:S4CRMLnYUhGeDFDqkGriYKdfoFlDnMtqTiI/sFzhA9Y=
+./go.sum:96:github.com/klauspost/cpuid/v2 v2.3.0/go.mod h1:hqwkgyIinND0mEev00jJYCxPNVRVXFQeu1XKlok6oO0=
+./go.sum:122:github.com/quic-go/qpack v0.5.1 h1:giqksBPnT/HDtZ6VhtFKgoLOWmlyo9Ei6u9PqzIMbhI=
+./go.sum:123:github.com/quic-go/qpack v0.5.1/go.mod h1:+PC4XFrEskIVkcLzpEkbLqq1uCoxPhQuvK5rH1ZgaEg=
+./go.sum:124:github.com/quic-go/quic-go v0.54.0 h1:6s1YB9QotYI6Ospeiguknbp2Znb/jZYjZLRXn9kMQBg=
+./go.sum:125:github.com/quic-go/quic-go v0.54.0/go.mod h1:e68ZEaCdyviluZmy44P6Iey98v/Wfz6HCjQEm+l8zTY=
+./go.sum:142:github.com/twitchyliquid64/golang-asm v0.15.1 h1:SU5vSMR7hnwNxj24w34ZyCi/FmDZTkS4MhqMhdFk5YI=
+./go.sum:143:github.com/twitchyliquid64/golang-asm v0.15.1/go.mod h1:a1lVb/DtPvCB8fslRZhAngC2+aY1QWCk3Cedj/Gdt08=
+./internal/gemini/gemini.go:62:func buildConfig(req EvalRequest) *genai.GenerateContentConfig {
+./internal/gemini/gemini.go:77:func buildContents(req EvalRequest) []*genai.Content {
+./internal/gemini/gemini.go:129:	result, err := client.Models.GenerateContent(ctx, model, buildContents(req), buildConfig(req))
+./internal/gemini/gemini.go:147:	var sb strings.Builder
+./internal/gemini/gemini.go:149:	for result, err := range client.Models.GenerateContentStream(ctx, model, buildContents(req), buildConfig(req)) {
+./internal/auth/middleware.go:48:			abortCookieAuth(c, "Session required")
+./internal/web/auth.go:13:// IndexData is passed to the landing template.
+./internal/evaluate/prompt.go:51:		Description: "Assess whether the dataset contains safety-critical guidance such as medical, legal, engineering, or operational instructions that could cause harm if followed incorrectly.",
+./internal/evaluate/prompt.go:78:func buildSystemPrompt() string {
+./internal/evaluate/prompt.go:88:func buildUserPrompt(cfg PolicyConfig, datasetJSON []byte, images []ImageInfo) string {
+./internal/evaluate/handler_integration_test.go:35:	body, contentType := buildMultipartEvalRequest(t, cfg, evalOut, true)
 
 thinking
-**Identifying frontend technology**
+**Planning meaningful CSS improvements**
 
-The frontend is likely implemented as a web application, so next I'll list web-related files to confirm the stack.
+I'm targeting the main stylesheet to enhance form focus styles, button states, and spacing for better UX and accessibility without changing functionality. Next, I'll inspect the CSS for suitable adjustments.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web' in /Users/yani/Noema/backend succeeded in 52ms:
-static
-templates
-
-thinking
-**Inspecting template files**
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/templates' in /Users/yani/Noema/backend succeeded in 52ms:
-app.html
-app_new.html
-app_results.html
-index.html
-partial_header_app.html
-partial_header_public.html
-partial_header_upload.html
-partial_orb.html
-upload.html
-verify.html
-verify_results.html
-
-thinking
-**Identifying UI improvement need**
-
-Noticing the UI requires enhancement, likely involving updates to static CSS for the static list component.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/static' in /Users/yani/Noema/backend succeeded in 51ms:
-app.js
-constraints.js
-results.js
-styles.css
-upload.js
-verify.js
-wizard.js
-
-thinking
-**Goal-setting for UI improvements**
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap');
 
 :root {
@@ -136,752 +111,166 @@ exec
 
 *,
 *::before,
+
+thinking
+**Inspecting input styles**
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '240,520p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
-}
-
-.error {
-  margin: 1rem 0 0;
-  font-size: 0.9rem;
-  color: var(--error);
-}
-
-/* ===== Buttons ===== */
-.btn {
-  display: inline-flex;
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "input|textarea|select|button|focus" web/static/styles.css' in /Users/yani/Noema/backend succeeded in 52ms:
+253:.input {
+264:.input::placeholder { color: var(--text-muted); }
+265:.input:hover { border-color: rgba(255,255,255,0.18); }
+266:.input:focus {
+271:.input.is-invalid {
+276:.textarea { min-height: 160px; resize: vertical; }
+342:.btn:focus-visible,
+343:.nav-link:focus-visible,
+344:.input:focus-visible,
+345:.segmented-btn:focus-visible,
+346:.stepper-step:focus-visible,
+347:.severity-select:focus-visible,
+348:.upload-zone:focus-visible,
+349:.recent-run-item:focus-visible,
+350:.recent-run-link:focus-visible,
+351:.verify-run-id:focus-visible,
+352:.logo:focus-visible,
+353:.constraint-details summary:focus-visible {
+358:.switch input:focus-visible + .switch-track {
+482:.upload-zone:focus-within {
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '230,380p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 51ms:
+  gap: 0.75rem;
   align-items: center;
-  justify-content: center;
-  padding: 0.7rem 1.4rem;
-  font-size: 0.95rem;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-bottom: 1.2rem;
+}
+
+.label {
+  font-size: 0.9rem;
   font-weight: 500;
   color: var(--text);
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '520,1040p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
 }
 
-.constraint-item:first-of-type { border-top: none; }
-
-.constraint-row {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 0.85rem;
-  align-items: center;
-}
-
-.constraint-title {
-  font-weight: 500;
-  font-size: 0.95rem;
-}
-
-.constraint-subtitle {
+.form-hint {
+  margin: 0;
   font-size: 0.85rem;
+
+thinking
+**Adding reduced motion support**
+
+I'm planning to add prefers-reduced-motion styles to disable animations and transitions for better accessibility, focusing on one CSS file and also improving focus outlines on buttons and possibly enhancing upload zone drag state feedback.
+exec
+/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '430,560p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
+.status-pill {
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
   color: var(--text-muted);
+  white-space: nowrap;
+}
+.status-pill-pass {
+  color: #86efac;
+  border-color: rgba(34, 197, 94, 0.5);
+  background: rgba(34, 197, 94, 0.12);
+}
+.status-pill-fail {
+  color: #fca5a5;
+  border-color: rgba(248, 113, 113, 0.5);
+  background: rgba(248, 113, 113, 0.12);
 }
 
-
 thinking
-**Considering meaningful UI improvements**
+**Adding reduced motion CSS**
 
-I'm weighing options between adding loading indicators, sticky headers, better focus states, or more functional enhancements like "copy" actions or scrollable results to improve UX beyond cosmetics. Next, I'll verify potential impact and feasibility by inspecting existing templates and JS, prioritizing meaningful functional gains over purely visual tweaks.
-thinking
-**Focusing on functional UX improvements**
-
-I'm considering making action bars sticky on scroll to enhance usability without changing core functionality, plus subtle improvements like stronger dragover effects. Next, I'll inspect templates for meaningful ways to improve structural or behavioral UX beyond visuals.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' web/templates/app.html" in /Users/yani/Noema/backend succeeded in 51ms:
-{{define "app"}}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Noema — Dashboard</title>
-  <link rel="stylesheet" href="/static/styles.css">
-</head>
-<body>
-  {{template "header_app" .}}
-
-  <main class="main main-dashboard">
-    {{template "orb" .}}
-    <div class="dashboard-content">
-      <section class="card dashboard-hero">
-        <div class="card-kicker">Dashboard</div>
-        <h1 class="card-title">Evaluations</h1>
-        <p class="card-text">Run policy evaluations on your datasets and publish verifiable results.</p>
-        <div class="form-actions">
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' web/templates/app_results.html" in /Users/yani/Noema/backend succeeded in 52ms:
-{{define "app_results"}}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Noema — Results</title>
-  <link rel="stylesheet" href="/static/styles.css">
-</head>
-<body data-run-id="{{.RunID}}">
-  {{template "header_app" .}}
-
-  <main class="main main-results">
-    {{template "orb" .}}
-    <div class="card results-card">
-      <div class="results-header">
-        <div>
-          <h1 class="card-title">Evaluation results</h1>
-          <p class="text-muted" id="results-run-id">Run ID: {{.RunID}}</p>
-        </div>
-
-thinking
-**Considering adding copy button feedback**
-
-I'm planning to check results.js to see how the "Copy" button is implemented and whether I can add JavaScript feedback for better user experience.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' web/static/results.js" in /Users/yani/Noema/backend succeeded in 51ms:
-(function() {
-  var runId = document.body.getAttribute('data-run-id') || document.getElementById('results-run-id').textContent.replace('Run ID: ', '').trim();
-  var key = 'noema_run_' + runId;
-  var data;
-  try {
-    var raw = localStorage.getItem(key);
-    data = raw ? JSON.parse(raw) : null;
-  } catch (e) {
-    data = null;
-  }
-
-  function copyText(text, button) {
-    if (!text) return;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(function() {
-        if (button) showCopied(button);
-      });
-    } else {
-      var temp = document.createElement('textarea');
-      temp.value = text;
-
-thinking
-**Considering UX improvements**
-
-I'm weighing adding copy-to-clipboard feedback, better handling for empty results, and more helpful messaging when runs aren't found. Next, I'll review upload.js to explore previewing file name and size during upload.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,240p' web/static/upload.js" in /Users/yani/Noema/backend succeeded in 52ms:
-(function() {
-  var input = document.getElementById('file-input');
-  var zone = document.getElementById('drop-zone');
-  var zoneText = document.getElementById('zone-text');
-  var submitBtn = document.getElementById('submit-btn');
-
-  function updateZone() {
-    if (input.files && input.files.length) {
-      zoneText.textContent = input.files[0].name;
-      submitBtn.disabled = false;
-    } else {
-      zoneText.textContent = 'Drag and drop a file here, or click to choose';
-      submitBtn.disabled = true;
-    }
-  }
-
-  input.addEventListener('change', updateZone);
-
-  zone.addEventListener('dragover', function(e) {
-    e.preventDefault();
-
-thinking
-**Considering UI improvements**
-
-I'm thinking about adding file size display and a clear remove option for better UX, which would need HTML changes; also planning to check if the verify page has filters in its template for potential enhancements.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' web/templates/verify.html" in /Users/yani/Noema/backend succeeded in 52ms:
-{{define "verify"}}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Noema — Verify</title>
-  <link rel="stylesheet" href="/static/styles.css">
-</head>
-<body>
-  {{template "header_public" .}}
-
-  <main class="main main-verify">
-    {{template "orb" .}}
-    <div class="card verify-card">
-      <div class="verify-header">
-        <div>
-          <div class="card-kicker">Public</div>
-          <h1 class="card-title">Public verification</h1>
-          <p class="card-text">Verify recent proofs without revealing datasets. Recent runs are loaded from this browser.</p>
-
-thinking
-**Considering UX improvements for upload**
-
-I'm weighing adding a CTA for "New evaluation" when empty and a "clear filter" button but leaning toward enhancing upload UX by showing file size and type with a remove option, so I'll examine the upload template next.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' web/templates/upload.html" in /Users/yani/Noema/backend succeeded in 52ms:
-{{define "upload"}}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Noema — Upload</title>
-  <link rel="stylesheet" href="/static/styles.css">
-</head>
-<body>
-  {{template "header_upload" .}}
-
-  <main class="main">
-    {{template "orb" .}}
-    <div class="card">
-      <h1 class="card-title">Upload</h1>
-      <form id="upload-form" action="/upload" method="post" enctype="multipart/form-data">
-        <label class="upload-zone" for="file-input" id="drop-zone">
-          <input type="file" name="file" id="file-input" accept="*">
-          <span id="zone-text">Drag and drop a file here, or click to choose</span>
-
-
-thinking
-**Planning file upload preview**
-
-Planning to enhance upload UX by adding a pre-submit preview showing file name and size with a clear button to reset input and disable submit, modifying upload.html, CSS, and upload.js without changing server logic. I'll add a dedicated area for file details, use existing button styling for the clear action, and consider accessibility with `aria-live` or `role="status"`.
-thinking
-**Designing upload details UI and behavior**
-
-Drafted a new upload details area below the label with file name, size, and a clear button styled via CSS for a clean, accessible look using flex layout and subtle coloring. Planning JS logic to show these details on file selection, enable submit, update drop zone text, and clear input on clear button click with a helper to format file size, plus updates to three files.
+I'm preparing a small CSS addition at the file's end to disable animations, transitions, and transforms under prefers-reduced-motion, improving accessibility without altering existing UI functionality.
 file update
-M /Users/yani/Noema/backend/web/templates/upload.html
-@@ -21,2 +21,10 @@
-         </label>
-+        <div class="upload-details" id="upload-details" aria-live="polite" style="display:none;">
-+          <div class="upload-file">
-+            <span class="upload-file-name" id="upload-file-name"></span>
-+            <span class="upload-file-size" id="upload-file-size"></span>
-+          </div>
-+          <button type="button" class="btn btn-ghost btn-sm" id="clear-file">Clear</button>
-+        </div>
-+        <p class="form-hint upload-hint" id="upload-hint">CSV, JSON, or text files recommended.</p>
-         <button type="submit" class="btn" id="submit-btn" style="margin-top: 1rem;" disabled>Upload</button>
+M /Users/yani/Noema/backend/web/static/styles.css
+@@ -361,2 +361,16 @@
+ 
++@media (prefers-reduced-motion: reduce) {
++  *,
++  *::before,
++  *::after {
++    animation-duration: 0.01ms !important;
++    animation-iteration-count: 1 !important;
++    transition-duration: 0.01ms !important;
++    scroll-behavior: auto !important;
++  }
++
++  .loading-state::before { animation: none !important; }
++  .btn:active { transform: none; }
++}
++
+ /* ===== Dashboard ===== */
 apply_patch(auto_approved=true) exited 0 in 35ms:
 Success. Updated the following files:
-M /Users/yani/Noema/backend/web/templates/upload.html
-file update:
-diff --git a/backend/web/templates/upload.html b/backend/web/templates/upload.html
-index e2494e6f168e66b789b59544bf181bdebf306e8a..955ed9b55e98c62f4f91f02661981e5dee8aaff9
---- a/backend/web/templates/upload.html
-+++ b/backend/web/templates/upload.html
-@@ -19,6 +19,14 @@
-           <input type="file" name="file" id="file-input" accept="*">
-           <span id="zone-text">Drag and drop a file here, or click to choose</span>
-         </label>
-+        <div class="upload-details" id="upload-details" aria-live="polite" style="display:none;">
-+          <div class="upload-file">
-+            <span class="upload-file-name" id="upload-file-name"></span>
-+            <span class="upload-file-size" id="upload-file-size"></span>
-+          </div>
-+          <button type="button" class="btn btn-ghost btn-sm" id="clear-file">Clear</button>
-+        </div>
-+        <p class="form-hint upload-hint" id="upload-hint">CSV, JSON, or text files recommended.</p>
-         <button type="submit" class="btn" id="submit-btn" style="margin-top: 1rem;" disabled>Upload</button>
-       </form>
-       {{if .Error}}
-
-file update:
-diff --git a/backend/web/templates/upload.html b/backend/web/templates/upload.html
-index e2494e6f168e66b789b59544bf181bdebf306e8a..955ed9b55e98c62f4f91f02661981e5dee8aaff9
---- a/backend/web/templates/upload.html
-+++ b/backend/web/templates/upload.html
-@@ -19,6 +19,14 @@
-           <input type="file" name="file" id="file-input" accept="*">
-           <span id="zone-text">Drag and drop a file here, or click to choose</span>
-         </label>
-+        <div class="upload-details" id="upload-details" aria-live="polite" style="display:none;">
-+          <div class="upload-file">
-+            <span class="upload-file-name" id="upload-file-name"></span>
-+            <span class="upload-file-size" id="upload-file-size"></span>
-+          </div>
-+          <button type="button" class="btn btn-ghost btn-sm" id="clear-file">Clear</button>
-+        </div>
-+        <p class="form-hint upload-hint" id="upload-hint">CSV, JSON, or text files recommended.</p>
-         <button type="submit" class="btn" id="submit-btn" style="margin-top: 1rem;" disabled>Upload</button>
-       </form>
-       {{if .Error}}
-
-
-thinking
-**Updating styles.css**
-file update
-M /Users/yani/Noema/backend/web/static/styles.css
-@@ -387,2 +387,37 @@
- 
-+.upload-details {
-+  display: flex;
-+  align-items: center;
-+  justify-content: space-between;
-+  gap: 1rem;
-+  margin-top: 0.85rem;
-+  padding: 0.85rem 1rem;
-+  border-radius: 12px;
-+  border: 1px solid var(--border);
-+  background: rgba(0, 0, 0, 0.3);
-+}
-+
-+.upload-file {
-+  display: flex;
-+  flex-direction: column;
-+  gap: 0.25rem;
-+  min-width: 0;
-+}
-+
-+.upload-file-name {
-+  font-weight: 500;
-+  overflow: hidden;
-+  text-overflow: ellipsis;
-+  white-space: nowrap;
-+}
-+
-+.upload-file-size {
-+  font-size: 0.82rem;
-+  color: var(--text-muted);
-+}
-+
-+.upload-hint {
-+  margin-top: 0.65rem;
-+}
-+
- /* ===== Wizard ===== */
-apply_patch(auto_approved=true) exited 0 in 39ms:
-Success. Updated the following files:
 M /Users/yani/Noema/backend/web/static/styles.css
 file update:
 diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 86da225cdb8d0188fb67b7ddfbe865e3d0688221..5ab3d22eb59ab1453340db58cb9fc91039485faa
+index 8bbb7187a7a6d33dac814417a6f72d82667c0f77..b373263d0f8abf71250cb7dc67106d3d92003433
 --- a/backend/web/static/styles.css
 +++ b/backend/web/static/styles.css
-@@ -385,6 +385,41 @@
-   color: var(--error);
+@@ -359,6 +359,20 @@
+   box-shadow: 0 0 0 3px var(--accent-glow);
  }
  
-+.upload-details {
-+  display: flex;
-+  align-items: center;
-+  justify-content: space-between;
-+  gap: 1rem;
-+  margin-top: 0.85rem;
-+  padding: 0.85rem 1rem;
-+  border-radius: 12px;
-+  border: 1px solid var(--border);
-+  background: rgba(0, 0, 0, 0.3);
++@media (prefers-reduced-motion: reduce) {
++  *,
++  *::before,
++  *::after {
++    animation-duration: 0.01ms !important;
++    animation-iteration-count: 1 !important;
++    transition-duration: 0.01ms !important;
++    scroll-behavior: auto !important;
++  }
++
++  .loading-state::before { animation: none !important; }
++  .btn:active { transform: none; }
 +}
 +
-+.upload-file {
-+  display: flex;
-+  flex-direction: column;
-+  gap: 0.25rem;
-+  min-width: 0;
-+}
-+
-+.upload-file-name {
-+  font-weight: 500;
-+  overflow: hidden;
-+  text-overflow: ellipsis;
-+  white-space: nowrap;
-+}
-+
-+.upload-file-size {
-+  font-size: 0.82rem;
-+  color: var(--text-muted);
-+}
-+
-+.upload-hint {
-+  margin-top: 0.65rem;
-+}
-+
- /* ===== Wizard ===== */
- .main-wizard {
+ /* ===== Dashboard ===== */
+ .main-dashboard {
    align-items: flex-start;
-diff --git a/backend/web/templates/upload.html b/backend/web/templates/upload.html
-index e2494e6f168e66b789b59544bf181bdebf306e8a..955ed9b55e98c62f4f91f02661981e5dee8aaff9
---- a/backend/web/templates/upload.html
-+++ b/backend/web/templates/upload.html
-@@ -19,6 +19,14 @@
-           <input type="file" name="file" id="file-input" accept="*">
-           <span id="zone-text">Drag and drop a file here, or click to choose</span>
-         </label>
-+        <div class="upload-details" id="upload-details" aria-live="polite" style="display:none;">
-+          <div class="upload-file">
-+            <span class="upload-file-name" id="upload-file-name"></span>
-+            <span class="upload-file-size" id="upload-file-size"></span>
-+          </div>
-+          <button type="button" class="btn btn-ghost btn-sm" id="clear-file">Clear</button>
-+        </div>
-+        <p class="form-hint upload-hint" id="upload-hint">CSV, JSON, or text files recommended.</p>
-         <button type="submit" class="btn" id="submit-btn" style="margin-top: 1rem;" disabled>Upload</button>
-       </form>
-       {{if .Error}}
 
 file update:
 diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 86da225cdb8d0188fb67b7ddfbe865e3d0688221..5ab3d22eb59ab1453340db58cb9fc91039485faa
+index 8bbb7187a7a6d33dac814417a6f72d82667c0f77..b373263d0f8abf71250cb7dc67106d3d92003433
 --- a/backend/web/static/styles.css
 +++ b/backend/web/static/styles.css
-@@ -385,6 +385,41 @@
-   color: var(--error);
+@@ -359,6 +359,20 @@
+   box-shadow: 0 0 0 3px var(--accent-glow);
  }
  
-+.upload-details {
-+  display: flex;
-+  align-items: center;
-+  justify-content: space-between;
-+  gap: 1rem;
-+  margin-top: 0.85rem;
-+  padding: 0.85rem 1rem;
-+  border-radius: 12px;
-+  border: 1px solid var(--border);
-+  background: rgba(0, 0, 0, 0.3);
++@media (prefers-reduced-motion: reduce) {
++  *,
++  *::before,
++  *::after {
++    animation-duration: 0.01ms !important;
++    animation-iteration-count: 1 !important;
++    transition-duration: 0.01ms !important;
++    scroll-behavior: auto !important;
++  }
++
++  .loading-state::before { animation: none !important; }
++  .btn:active { transform: none; }
 +}
 +
-+.upload-file {
-+  display: flex;
-+  flex-direction: column;
-+  gap: 0.25rem;
-+  min-width: 0;
-+}
-+
-+.upload-file-name {
-+  font-weight: 500;
-+  overflow: hidden;
-+  text-overflow: ellipsis;
-+  white-space: nowrap;
-+}
-+
-+.upload-file-size {
-+  font-size: 0.82rem;
-+  color: var(--text-muted);
-+}
-+
-+.upload-hint {
-+  margin-top: 0.65rem;
-+}
-+
- /* ===== Wizard ===== */
- .main-wizard {
+ /* ===== Dashboard ===== */
+ .main-dashboard {
    align-items: flex-start;
-diff --git a/backend/web/templates/upload.html b/backend/web/templates/upload.html
-index e2494e6f168e66b789b59544bf181bdebf306e8a..955ed9b55e98c62f4f91f02661981e5dee8aaff9
---- a/backend/web/templates/upload.html
-+++ b/backend/web/templates/upload.html
-@@ -19,6 +19,14 @@
-           <input type="file" name="file" id="file-input" accept="*">
-           <span id="zone-text">Drag and drop a file here, or click to choose</span>
-         </label>
-+        <div class="upload-details" id="upload-details" aria-live="polite" style="display:none;">
-+          <div class="upload-file">
-+            <span class="upload-file-name" id="upload-file-name"></span>
-+            <span class="upload-file-size" id="upload-file-size"></span>
-+          </div>
-+          <button type="button" class="btn btn-ghost btn-sm" id="clear-file">Clear</button>
-+        </div>
-+        <p class="form-hint upload-hint" id="upload-hint">CSV, JSON, or text files recommended.</p>
-         <button type="submit" class="btn" id="submit-btn" style="margin-top: 1rem;" disabled>Upload</button>
-       </form>
-       {{if .Error}}
 
 
 thinking
-**Updating upload script**
-file update
-M /Users/yani/Noema/backend/web/static/upload.js
-@@ -5,2 +5,17 @@
-   var submitBtn = document.getElementById('submit-btn');
-+  var details = document.getElementById('upload-details');
-+  var fileName = document.getElementById('upload-file-name');
-+  var fileSize = document.getElementById('upload-file-size');
-+  var clearBtn = document.getElementById('clear-file');
-+
-+  function formatBytes(bytes) {
-+    if (!bytes && bytes !== 0) return '';
-+    if (bytes < 1024) return bytes + ' B';
-+    var kb = bytes / 1024;
-+    if (kb < 1024) return kb.toFixed(1) + ' KB';
-+    var mb = kb / 1024;
-+    if (mb < 1024) return mb.toFixed(1) + ' MB';
-+    var gb = mb / 1024;
-+    return gb.toFixed(1) + ' GB';
-+  }
- 
-@@ -8,3 +23,7 @@
-     if (input.files && input.files.length) {
--      zoneText.textContent = input.files[0].name;
-+      var file = input.files[0];
-+      zoneText.textContent = 'Drop another file to replace';
-+      if (fileName) fileName.textContent = file.name;
-+      if (fileSize) fileSize.textContent = formatBytes(file.size);
-+      if (details) details.style.display = 'flex';
-       submitBtn.disabled = false;
-@@ -12,2 +31,3 @@
-       zoneText.textContent = 'Drag and drop a file here, or click to choose';
-+      if (details) details.style.display = 'none';
-       submitBtn.disabled = true;
-@@ -17,2 +37,9 @@
-   input.addEventListener('change', updateZone);
-+  if (clearBtn) {
-+    clearBtn.addEventListener('click', function() {
-+      input.value = '';
-+      zone.classList.remove('dragover');
-+      updateZone();
-+    });
-+  }
- 
-apply_patch(auto_approved=true) exited 0 in 49ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/web/static/upload.js
-file update:
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 86da225cdb8d0188fb67b7ddfbe865e3d0688221..5ab3d22eb59ab1453340db58cb9fc91039485faa
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -385,6 +385,41 @@
-   color: var(--error);
- }
- 
-+.upload-details {
-+  display: flex;
-+  align-items: center;
-+  justify-content: space-between;
-+  gap: 1rem;
-+  margin-top: 0.85rem;
-+  padding: 0.85rem 1rem;
-+  border-radius: 12px;
-+  border: 1px solid var(--border);
-+  background: rgba(0, 0, 0, 0.3);
-+}
-+
-+.upload-file {
-+  display: flex;
-+  flex-direction: column;
-+  gap: 0.25rem;
-+  min-width: 0;
-+}
-+
-+.upload-file-name {
-+  font-weight: 500;
-+  overflow: hidden;
-+  text-overflow: ellipsis;
-+  white-space: nowrap;
-+}
-+
-+.upload-file-size {
-+  font-size: 0.82rem;
-+  color: var(--text-muted);
-+}
-+
-+.upload-hint {
-+  margin-top: 0.65rem;
-+}
-+
- /* ===== Wizard ===== */
- .main-wizard {
-   align-items: flex-start;
-diff --git a/backend/web/static/upload.js b/backend/web/static/upload.js
-index 1c9cac84b3150b21b99e54134ae72bddd8707606..0a3e470d2a62e2f3718bea1bda6b6d3476da9800
---- a/backend/web/static/upload.js
-+++ b/backend/web/static/upload.js
-@@ -3,18 +3,45 @@
-   var zone = document.getElementById('drop-zone');
-   var zoneText = document.getElementById('zone-text');
-   var submitBtn = document.getElementById('submit-btn');
-+  var details = document.getElementById('upload-details');
-+  var fileName = document.getElementById('upload-file-name');
-+  var fileSize = document.getElementById('upload-file-size');
-+  var clearBtn = document.getElementById('clear-file');
-+
-+  function formatBytes(bytes) {
-+    if (!bytes && bytes !== 0) return '';
-+    if (bytes < 1024) return bytes + ' B';
-+    var kb = bytes / 1024;
-+    if (kb < 1024) return kb.toFixed(1) + ' KB';
-+    var mb = kb / 1024;
-+    if (mb < 1024) return mb.toFixed(1) + ' MB';
-+    var gb = mb / 1024;
-+    return gb.toFixed(1) + ' GB';
-+  }
- 
-   function updateZone() {
-     if (input.files && input.files.length) {
--      zoneText.textContent = input.files[0].name;
-+      var file = input.files[0];
-+      zoneText.textContent = 'Drop another file to replace';
-+      if (fileName) fileName.textContent = file.name;
-+      if (fileSize) fileSize.textContent = formatBytes(file.size);
-+      if (details) details.style.display = 'flex';
-       submitBtn.disabled = false;
-     } else {
-       zoneText.textContent = 'Drag and drop a file here, or click to choose';
-+      if (details) details.style.display = 'none';
-       submitBtn.disabled = true;
-     }
-   }
- 
-   input.addEventListener('change', updateZone);
-+  if (clearBtn) {
-+    clearBtn.addEventListener('click', function() {
-+      input.value = '';
-+      zone.classList.remove('dragover');
-+      updateZone();
-+    });
-+  }
- 
-   zone.addEventListener('dragover', function(e) {
-     e.preventDefault();
-diff --git a/backend/web/templates/upload.html b/backend/web/templates/upload.html
-index e2494e6f168e66b789b59544bf181bdebf306e8a..955ed9b55e98c62f4f91f02661981e5dee8aaff9
---- a/backend/web/templates/upload.html
-+++ b/backend/web/templates/upload.html
-@@ -19,6 +19,14 @@
-           <input type="file" name="file" id="file-input" accept="*">
-           <span id="zone-text">Drag and drop a file here, or click to choose</span>
-         </label>
-+        <div class="upload-details" id="upload-details" aria-live="polite" style="display:none;">
-+          <div class="upload-file">
-+            <span class="upload-file-name" id="upload-file-name"></span>
-+            <span class="upload-file-size" id="upload-file-size"></span>
-+          </div>
-+          <button type="button" class="btn btn-ghost btn-sm" id="clear-file">Clear</button>
-+        </div>
-+        <p class="form-hint upload-hint" id="upload-hint">CSV, JSON, or text files recommended.</p>
-         <button type="submit" class="btn" id="submit-btn" style="margin-top: 1rem;" disabled>Upload</button>
-       </form>
-       {{if .Error}}
-
-file update:
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 86da225cdb8d0188fb67b7ddfbe865e3d0688221..5ab3d22eb59ab1453340db58cb9fc91039485faa
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -385,6 +385,41 @@
-   color: var(--error);
- }
- 
-+.upload-details {
-+  display: flex;
-+  align-items: center;
-+  justify-content: space-between;
-+  gap: 1rem;
-+  margin-top: 0.85rem;
-+  padding: 0.85rem 1rem;
-+  border-radius: 12px;
-+  border: 1px solid var(--border);
-+  background: rgba(0, 0, 0, 0.3);
-+}
-+
-+.upload-file {
-+  display: flex;
-+  flex-direction: column;
-+  gap: 0.25rem;
-+  min-width: 0;
-+}
-+
-+.upload-file-name {
-+  font-weight: 500;
-+  overflow: hidden;
-+  text-overflow: ellipsis;
-+  white-space: nowrap;
-+}
-+
-+.upload-file-size {
-+  font-size: 0.82rem;
-+  color: var(--text-muted);
-+}
-+
-+.upload-hint {
-+  margin-top: 0.65rem;
-+}
-+
- /* ===== Wizard ===== */
- .main-wizard {
-   align-items: flex-start;
-diff --git a/backend/web/static/upload.js b/backend/web/static/upload.js
-index 1c9cac84b3150b21b99e54134ae72bddd8707606..0a3e470d2a62e2f3718bea1bda6b6d3476da9800
---- a/backend/web/static/upload.js
-+++ b/backend/web/static/upload.js
-@@ -3,18 +3,45 @@
-   var zone = document.getElementById('drop-zone');
-   var zoneText = document.getElementById('zone-text');
-   var submitBtn = document.getElementById('submit-btn');
-+  var details = document.getElementById('upload-details');
-+  var fileName = document.getElementById('upload-file-name');
-+  var fileSize = document.getElementById('upload-file-size');
-+  var clearBtn = document.getElementById('clear-file');
-+
-+  function formatBytes(bytes) {
-+    if (!bytes && bytes !== 0) return '';
-+    if (bytes < 1024) return bytes + ' B';
-+    var kb = bytes / 1024;
-+    if (kb < 1024) return kb.toFixed(1) + ' KB';
-+    var mb = kb / 1024;
-+    if (mb < 1024) return mb.toFixed(1) + ' MB';
-+    var gb = mb / 1024;
-+    return gb.toFixed(1) + ' GB';
-+  }
- 
-   function updateZone() {
-     if (input.files && input.files.length) {
--      zoneText.textContent = input.files[0].name;
-+      var file = input.files[0];
-+      zoneText.textContent = 'Drop another file to replace';
-+      if (fileName) fileName.textContent = file.name;
-+      if (fileSize) fileSize.textContent = formatBytes(file.size);
-+      if (details) details.style.display = 'flex';
-       submitBtn.disabled = false;
-     } else {
-       zoneText.textContent = 'Drag and drop a file here, or click to choose';
-+      if (details) details.style.display = 'none';
-       submitBtn.disabled = true;
-     }
-   }
- 
-   input.addEventListener('change', updateZone);
-+  if (clearBtn) {
-+    clearBtn.addEventListener('click', function() {
-+      input.value = '';
-+      zone.classList.remove('dragover');
-+      updateZone();
-+    });
-+  }
- 
-   zone.addEventListener('dragover', function(e) {
-     e.preventDefault();
-diff --git a/backend/web/templates/upload.html b/backend/web/templates/upload.html
-index e2494e6f168e66b789b59544bf181bdebf306e8a..955ed9b55e98c62f4f91f02661981e5dee8aaff9
---- a/backend/web/templates/upload.html
-+++ b/backend/web/templates/upload.html
-@@ -19,6 +19,14 @@
-           <input type="file" name="file" id="file-input" accept="*">
-           <span id="zone-text">Drag and drop a file here, or click to choose</span>
-         </label>
-+        <div class="upload-details" id="upload-details" aria-live="polite" style="display:none;">
-+          <div class="upload-file">
-+            <span class="upload-file-name" id="upload-file-name"></span>
-+            <span class="upload-file-size" id="upload-file-size"></span>
-+          </div>
-+          <button type="button" class="btn btn-ghost btn-sm" id="clear-file">Clear</button>
-+        </div>
-+        <p class="form-hint upload-hint" id="upload-hint">CSV, JSON, or text files recommended.</p>
-         <button type="submit" class="btn" id="submit-btn" style="margin-top: 1rem;" disabled>Upload</button>
-       </form>
-       {{if .Error}}
-
-
-thinking
-**Verifying details hidden by default**
-
-Confirming that details elements are initially hidden with inline styles since updateZone isn't called on load; running tests next.
+**Running full Go test suite**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 214ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 316ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
 ok  	noema/internal/config	(cached)
@@ -893,256 +282,75 @@ ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
+?   	noema/internal/zk/policyzk	[no test files]
 file update:
 diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 86da225cdb8d0188fb67b7ddfbe865e3d0688221..5ab3d22eb59ab1453340db58cb9fc91039485faa
+index 8bbb7187a7a6d33dac814417a6f72d82667c0f77..b373263d0f8abf71250cb7dc67106d3d92003433
 --- a/backend/web/static/styles.css
 +++ b/backend/web/static/styles.css
-@@ -385,6 +385,41 @@
-   color: var(--error);
+@@ -359,6 +359,20 @@
+   box-shadow: 0 0 0 3px var(--accent-glow);
  }
  
-+.upload-details {
-+  display: flex;
-+  align-items: center;
-+  justify-content: space-between;
-+  gap: 1rem;
-+  margin-top: 0.85rem;
-+  padding: 0.85rem 1rem;
-+  border-radius: 12px;
-+  border: 1px solid var(--border);
-+  background: rgba(0, 0, 0, 0.3);
++@media (prefers-reduced-motion: reduce) {
++  *,
++  *::before,
++  *::after {
++    animation-duration: 0.01ms !important;
++    animation-iteration-count: 1 !important;
++    transition-duration: 0.01ms !important;
++    scroll-behavior: auto !important;
++  }
++
++  .loading-state::before { animation: none !important; }
++  .btn:active { transform: none; }
 +}
 +
-+.upload-file {
-+  display: flex;
-+  flex-direction: column;
-+  gap: 0.25rem;
-+  min-width: 0;
-+}
-+
-+.upload-file-name {
-+  font-weight: 500;
-+  overflow: hidden;
-+  text-overflow: ellipsis;
-+  white-space: nowrap;
-+}
-+
-+.upload-file-size {
-+  font-size: 0.82rem;
-+  color: var(--text-muted);
-+}
-+
-+.upload-hint {
-+  margin-top: 0.65rem;
-+}
-+
- /* ===== Wizard ===== */
- .main-wizard {
+ /* ===== Dashboard ===== */
+ .main-dashboard {
    align-items: flex-start;
-diff --git a/backend/web/static/upload.js b/backend/web/static/upload.js
-index 1c9cac84b3150b21b99e54134ae72bddd8707606..0a3e470d2a62e2f3718bea1bda6b6d3476da9800
---- a/backend/web/static/upload.js
-+++ b/backend/web/static/upload.js
-@@ -3,18 +3,45 @@
-   var zone = document.getElementById('drop-zone');
-   var zoneText = document.getElementById('zone-text');
-   var submitBtn = document.getElementById('submit-btn');
-+  var details = document.getElementById('upload-details');
-+  var fileName = document.getElementById('upload-file-name');
-+  var fileSize = document.getElementById('upload-file-size');
-+  var clearBtn = document.getElementById('clear-file');
-+
-+  function formatBytes(bytes) {
-+    if (!bytes && bytes !== 0) return '';
-+    if (bytes < 1024) return bytes + ' B';
-+    var kb = bytes / 1024;
-+    if (kb < 1024) return kb.toFixed(1) + ' KB';
-+    var mb = kb / 1024;
-+    if (mb < 1024) return mb.toFixed(1) + ' MB';
-+    var gb = mb / 1024;
-+    return gb.toFixed(1) + ' GB';
-+  }
- 
-   function updateZone() {
-     if (input.files && input.files.length) {
--      zoneText.textContent = input.files[0].name;
-+      var file = input.files[0];
-+      zoneText.textContent = 'Drop another file to replace';
-+      if (fileName) fileName.textContent = file.name;
-+      if (fileSize) fileSize.textContent = formatBytes(file.size);
-+      if (details) details.style.display = 'flex';
-       submitBtn.disabled = false;
-     } else {
-       zoneText.textContent = 'Drag and drop a file here, or click to choose';
-+      if (details) details.style.display = 'none';
-       submitBtn.disabled = true;
-     }
-   }
- 
-   input.addEventListener('change', updateZone);
-+  if (clearBtn) {
-+    clearBtn.addEventListener('click', function() {
-+      input.value = '';
-+      zone.classList.remove('dragover');
-+      updateZone();
-+    });
-+  }
- 
-   zone.addEventListener('dragover', function(e) {
-     e.preventDefault();
-diff --git a/backend/web/templates/upload.html b/backend/web/templates/upload.html
-index e2494e6f168e66b789b59544bf181bdebf306e8a..955ed9b55e98c62f4f91f02661981e5dee8aaff9
---- a/backend/web/templates/upload.html
-+++ b/backend/web/templates/upload.html
-@@ -19,6 +19,14 @@
-           <input type="file" name="file" id="file-input" accept="*">
-           <span id="zone-text">Drag and drop a file here, or click to choose</span>
-         </label>
-+        <div class="upload-details" id="upload-details" aria-live="polite" style="display:none;">
-+          <div class="upload-file">
-+            <span class="upload-file-name" id="upload-file-name"></span>
-+            <span class="upload-file-size" id="upload-file-size"></span>
-+          </div>
-+          <button type="button" class="btn btn-ghost btn-sm" id="clear-file">Clear</button>
-+        </div>
-+        <p class="form-hint upload-hint" id="upload-hint">CSV, JSON, or text files recommended.</p>
-         <button type="submit" class="btn" id="submit-btn" style="margin-top: 1rem;" disabled>Upload</button>
-       </form>
-       {{if .Error}}
 
 codex
-What I changed
-- Added an upload file preview with size plus a Clear action, and styled the new metadata panel for better upload UX (`web/templates/upload.html`, `web/static/upload.js`, `web/static/styles.css`).
+What you changed (short)
+- Added reduced-motion handling in `web/static/styles.css` to improve accessibility and UX by minimizing animations/transitions for users who prefer reduced motion.
 
 Tests run
 - `go test ./...`
 
-If you want, I can next improve another UX hotspot (e.g., results page copy feedback or verify list empty state).
+If you want a second polish pass, I can target input/validation feedback or wizard step clarity next.
 file update:
 diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 86da225cdb8d0188fb67b7ddfbe865e3d0688221..5ab3d22eb59ab1453340db58cb9fc91039485faa
+index 8bbb7187a7a6d33dac814417a6f72d82667c0f77..b373263d0f8abf71250cb7dc67106d3d92003433
 --- a/backend/web/static/styles.css
 +++ b/backend/web/static/styles.css
-@@ -385,6 +385,41 @@
-   color: var(--error);
+@@ -359,6 +359,20 @@
+   box-shadow: 0 0 0 3px var(--accent-glow);
  }
  
-+.upload-details {
-+  display: flex;
-+  align-items: center;
-+  justify-content: space-between;
-+  gap: 1rem;
-+  margin-top: 0.85rem;
-+  padding: 0.85rem 1rem;
-+  border-radius: 12px;
-+  border: 1px solid var(--border);
-+  background: rgba(0, 0, 0, 0.3);
++@media (prefers-reduced-motion: reduce) {
++  *,
++  *::before,
++  *::after {
++    animation-duration: 0.01ms !important;
++    animation-iteration-count: 1 !important;
++    transition-duration: 0.01ms !important;
++    scroll-behavior: auto !important;
++  }
++
++  .loading-state::before { animation: none !important; }
++  .btn:active { transform: none; }
 +}
 +
-+.upload-file {
-+  display: flex;
-+  flex-direction: column;
-+  gap: 0.25rem;
-+  min-width: 0;
-+}
-+
-+.upload-file-name {
-+  font-weight: 500;
-+  overflow: hidden;
-+  text-overflow: ellipsis;
-+  white-space: nowrap;
-+}
-+
-+.upload-file-size {
-+  font-size: 0.82rem;
-+  color: var(--text-muted);
-+}
-+
-+.upload-hint {
-+  margin-top: 0.65rem;
-+}
-+
- /* ===== Wizard ===== */
- .main-wizard {
+ /* ===== Dashboard ===== */
+ .main-dashboard {
    align-items: flex-start;
-diff --git a/backend/web/static/upload.js b/backend/web/static/upload.js
-index 1c9cac84b3150b21b99e54134ae72bddd8707606..0a3e470d2a62e2f3718bea1bda6b6d3476da9800
---- a/backend/web/static/upload.js
-+++ b/backend/web/static/upload.js
-@@ -3,18 +3,45 @@
-   var zone = document.getElementById('drop-zone');
-   var zoneText = document.getElementById('zone-text');
-   var submitBtn = document.getElementById('submit-btn');
-+  var details = document.getElementById('upload-details');
-+  var fileName = document.getElementById('upload-file-name');
-+  var fileSize = document.getElementById('upload-file-size');
-+  var clearBtn = document.getElementById('clear-file');
-+
-+  function formatBytes(bytes) {
-+    if (!bytes && bytes !== 0) return '';
-+    if (bytes < 1024) return bytes + ' B';
-+    var kb = bytes / 1024;
-+    if (kb < 1024) return kb.toFixed(1) + ' KB';
-+    var mb = kb / 1024;
-+    if (mb < 1024) return mb.toFixed(1) + ' MB';
-+    var gb = mb / 1024;
-+    return gb.toFixed(1) + ' GB';
-+  }
- 
-   function updateZone() {
-     if (input.files && input.files.length) {
--      zoneText.textContent = input.files[0].name;
-+      var file = input.files[0];
-+      zoneText.textContent = 'Drop another file to replace';
-+      if (fileName) fileName.textContent = file.name;
-+      if (fileSize) fileSize.textContent = formatBytes(file.size);
-+      if (details) details.style.display = 'flex';
-       submitBtn.disabled = false;
-     } else {
-       zoneText.textContent = 'Drag and drop a file here, or click to choose';
-+      if (details) details.style.display = 'none';
-       submitBtn.disabled = true;
-     }
-   }
- 
-   input.addEventListener('change', updateZone);
-+  if (clearBtn) {
-+    clearBtn.addEventListener('click', function() {
-+      input.value = '';
-+      zone.classList.remove('dragover');
-+      updateZone();
-+    });
-+  }
- 
-   zone.addEventListener('dragover', function(e) {
-     e.preventDefault();
-diff --git a/backend/web/templates/upload.html b/backend/web/templates/upload.html
-index e2494e6f168e66b789b59544bf181bdebf306e8a..955ed9b55e98c62f4f91f02661981e5dee8aaff9
---- a/backend/web/templates/upload.html
-+++ b/backend/web/templates/upload.html
-@@ -19,6 +19,14 @@
-           <input type="file" name="file" id="file-input" accept="*">
-           <span id="zone-text">Drag and drop a file here, or click to choose</span>
-         </label>
-+        <div class="upload-details" id="upload-details" aria-live="polite" style="display:none;">
-+          <div class="upload-file">
-+            <span class="upload-file-name" id="upload-file-name"></span>
-+            <span class="upload-file-size" id="upload-file-size"></span>
-+          </div>
-+          <button type="button" class="btn btn-ghost btn-sm" id="clear-file">Clear</button>
-+        </div>
-+        <p class="form-hint upload-hint" id="upload-hint">CSV, JSON, or text files recommended.</p>
-         <button type="submit" class="btn" id="submit-btn" style="margin-top: 1rem;" disabled>Upload</button>
-       </form>
-       {{if .Error}}
 
 tokens used
-25,021
-What I changed
-- Added an upload file preview with size plus a Clear action, and styled the new metadata panel for better upload UX (`web/templates/upload.html`, `web/static/upload.js`, `web/static/styles.css`).
+22,611
+What you changed (short)
+- Added reduced-motion handling in `web/static/styles.css` to improve accessibility and UX by minimizing animations/transitions for users who prefer reduced motion.
 
 Tests run
 - `go test ./...`
 
-If you want, I can next improve another UX hotspot (e.g., results page copy feedback or verify list empty state).
+If you want a second polish pass, I can target input/validation feedback or wizard step clarity next.
