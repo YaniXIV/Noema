@@ -7,44 +7,247 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3ec7-c7b6-7dd2-9a8e-09a0e9c2d128
+session id: 019c4101-2199-7713-b5df-e130ea7da465
 --------
 user
-You are an autonomous coding agent polishing the Noema repository.
+You are an autonomous coding agent working on the Noema repository.
 
-Hard rules:
+MISSION (priority order):
+1) Add a real gnark circuit test for the PolicyGateCircuit (using our in-repo Poseidon implementation, package circuits).
+2) Make the circuit test pass reliably (compile -> prove -> verify) using Groth16 on BN254.
+3) ONLY AFTER tests pass: wire the backend plumbing to call the gnark prover/verifier behind the existing zk.GenerateProof / zk.VerifyProof API, keeping the public API shape unchanged (proof_b64 + public_inputs_b64).
+
+HARD RULES:
 - DO NOT run git commit, git reset, git clean, or anything that modifies git history.
-- I will run git commits outside of you.
-- Keep changes small: max 3 files per iteration.
+- Keep changes small: max 3 files per iteration. If more is needed, stage work across multiple iterations.
 - No cosmetic-only edits.
-- No new dependencies unless absolutely necessary.
-- keep all the same ui functionality, the end user should be able to do the same stuff but the experiance and design should be better.
+- No new dependencies unless absolutely necessary. Use existing gnark dependencies already in the repo. If gnark is not yet in go.mod, add it only if unavoidable.
+- Do not change routes or response shapes. Keep /api/evaluate and /api/verify behavior stable.
+- Do not redesign UI. This task is ZK/circuit/testing/plumbing only.
+- Always run: cd backend && go test ./... at least once per iteration.
 
-Goal: continuously improve production quality. continuously improve front end quality and polish.
+WORKFLOW YOU MUST FOLLOW (do not skip):
+A) Inspect current circuit code and poseidon implementation:
+   - Find the PolicyGateCircuit (the policy ZK circuit) and confirm it imports and uses circuits.Poseidon (NOT gnark/std poseidon).
+   - Confirm fixed N=6 and the frozen constraint ordering.
+B) Add tests FIRST:
+   - Create a new Go test file for the circuit (example name: backend/internal/zk/policy_circuit_test.go or wherever circuits live).
+   - The test must:
+     1) Compile the circuit to R1CS
+     2) Run Groth16 setup
+     3) Build a witness with a PASS case and generate a proof
+     4) Verify the proof using the public witness
+     5) Build a witness with a FAIL case and confirm either:
+        - proving fails (unsatisfied), OR
+        - proving succeeds only if OverallPass is set correctly (0), AND verifying matches the expected output
+   - Use deterministic test vectors:
+     - datasetDigestLo/Hi fixed constants
+     - enabled/maxAllowed/severity arrays fixed constants
+     - Compute the expected Commitment in-circuit by setting Commitment to the same value computed by the circuit.
+       (In gnark tests, you can set Commitment as a public variable equal to circuits.Poseidon(domainSep + inputs) by reusing the same circuits.Poseidon function in a small helper circuit OR by computing it with the same function in-circuit and asserting equality.)
+   - The test must assert:
+     - OverallPass == 1 for pass vector, and verify passes.
+     - OverallPass == 0 for fail vector, and verify passes only with correct OverallPass.
+C) Fix whatever is broken until all tests pass:
+   - If compilation errors, fix imports or package paths.
+   - If poseidon params/functions missing, use the existing in-repo Poseidon code as the single source of truth.
+   - If constraints are wrong, fix circuit logic minimally.
+D) ONLY AFTER TESTS PASS: wire plumbing:
+   - Replace stub proof internals inside backend/internal/zk/zk.go (or equivalent) to use gnark Groth16 BN254:
+     - GenerateProof: build witness from inputs (enabled/maxAllowed/severity + datasetDigest limbs) and output proof bytes base64
+     - VerifyProof: decode proof and public inputs and verify using vk
+   - Keep existing API signatures and keep proof_b64 + public_inputs_b64 shape.
+   - You may keep public_inputs_b64 as the existing string format for now, but the verify path must map it deterministically to the circuit’s public witness (Commitment, OverallPass, MaxSeverity).
+   - Ensure keys are handled sanely for dev:
+     - For now, allow generating proving/verifying keys at startup or cached on disk under backend/internal/zk (dev only),
+       OR embed small test keys only for tests.
+     - Don’t over-engineer; prioritize working tests and stable verify.
 
-Iteration:
-1) Run: cd backend && go test ./...
-2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
-3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+ACCEPTANCE CRITERIA (must satisfy):
+- `cd backend && go test ./...` passes.
+- There is at least one new test that proves+verifies the circuit in a PASS case.
+- There is at least one test that demonstrates FAIL behavior (overall_pass=0) is enforced and verifiable.
+- If plumbing was wired, verify endpoint still accepts proof_b64/public_inputs_b64 and returns verified result correctly.
 
-Pick the highest-value improvement:
-A) Reliability/correctness: validation, error handling, run persistence, verify robustness
-B) Tests: add/strengthen tests for the change you made
-C) upgrading the user interface so that it looks better.
-D) Maintainability: reduce duplication with tiny refactors
-E) UX: wizard/results/verify clarity (small, safe changes)
-F) Docs: README/DEPLOYMENT polish
-G) Performance: safe wins only
-
-Finish with:
-- What you changed (short)
+OUTPUT FORMAT (end of each run):
+- Files changed (list)
+- What you changed (2–6 bullets)
 - Tests run (must include go test ./...)
 mcp startup: no servers
 
 thinking
 **Preparing to run Go tests**
+
+Planning to inspect the codebase with ripgrep before running Go tests per iteration.
 exec
-/bin/zsh -lc 'go test ./...' in /Users/yani/Noema/backend succeeded in 186ms:
+/bin/zsh -lc 'rg -n "PolicyGateCircuit|policy gate|PolicyGate" -S .' in /Users/yani/Noema/backend succeeded in 51ms:
+./internal/evaluate/handler.go:395:	if len(policyConstraintOrder) != zk.PolicyGateConstraintCount {
+./internal/evaluate/handler.go:417:	var enabled [zk.PolicyGateConstraintCount]uint64
+./internal/evaluate/handler.go:418:	var maxAllowed [zk.PolicyGateConstraintCount]uint64
+./internal/evaluate/handler.go:419:	var severity [zk.PolicyGateConstraintCount]uint64
+./internal/zk/zk_test.go:73:		Enabled:          [PolicyGateConstraintCount]uint64{1, 1, 1, 0, 1, 0},
+./internal/zk/zk_test.go:74:		MaxAllowed:       [PolicyGateConstraintCount]uint64{1, 2, 0, 1, 2, 0},
+./internal/zk/zk_test.go:75:		Severity:         [PolicyGateConstraintCount]uint64{1, 2, 0, 2, 1, 2},
+./internal/zk/zk.go:33:// PolicyGateConstraintCount is the fixed N for the PolicyGateCircuit.
+./internal/zk/zk.go:34:const PolicyGateConstraintCount = policyzk.N
+./internal/zk/zk.go:55:// WitnessInputs carries the private inputs for the PolicyGateCircuit.
+./internal/zk/zk.go:58:	Enabled          [PolicyGateConstraintCount]uint64
+./internal/zk/zk.go:59:	MaxAllowed       [PolicyGateConstraintCount]uint64
+./internal/zk/zk.go:60:	Severity         [PolicyGateConstraintCount]uint64
+./internal/zk/zk.go:81:		var circuit policyzk.PolicyGateCircuit
+./internal/zk/zk.go:121:	assignment := policyzk.PolicyGateCircuit{
+./internal/zk/zk.go:180:	assignment := policyzk.PolicyGateCircuit{
+./internal/zk/zk.go:346:func toVarArray(vals [PolicyGateConstraintCount]uint64) [PolicyGateConstraintCount]frontend.Variable {
+./internal/zk/zk.go:347:	var out [PolicyGateConstraintCount]frontend.Variable
+./internal/zk/zk.go:348:	for i := 0; i < PolicyGateConstraintCount; i++ {
+./internal/zk/zk.go:354:// CommitmentPoseidon computes the PolicyGateCircuit commitment.
+
+thinking
+**Checking existing circuit test**
+
+I'm reviewing the circuit test in circuit.go to verify it uses Poseidon as expected.
+exec
+/bin/zsh -lc "sed -n '1,220p' internal/zk/policyzk/circuit.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package policyzk
+
+import (
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark/frontend"
+)
+
+const N = 6
+
+// PolicyGateCircuit proves:
+//   - The prover knows (datasetDigest, policy config, gemini severities) that hash to Commitment
+//   - And the deterministic policy check passes:
+//     for each i: if Enabled[i] == 1 then Severity[i] <= MaxAllowed[i]
+//
+// Public outputs:
+// - Commitment: binds everything (dataset + policy + gemini outputs)
+// - OverallPass: 1 iff policy passes
+// - MaxSeverity (optional): max observed severity among enabled constraints
+type PolicyGateCircuit struct {
+	// ===== Private witness =====
+
+thinking
+**Reviewing existing circuit tests**
+
+I'm checking the current circuit_test to understand how the fixed N=6 Poseidon circuit is tested before proceeding with any additions or changes.
+exec
+/bin/zsh -lc "sed -n '1,220p' internal/zk/policyzk/circuit_test.go" in /Users/yani/Noema/backend succeeded in 52ms:
+package policyzk
+
+import (
+	"math/big"
+	"testing"
+
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+	"github.com/stretchr/testify/require"
+)
+
+func TestPolicyGateCircuit_Groth16PassFail(t *testing.T) {
+	require := require.New(t)
+
+	var circuit PolicyGateCircuit
+	r1cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
+exec
+/bin/zsh -lc "sed -n '220,520p' internal/zk/policyzk/circuit_test.go" in /Users/yani/Noema/backend succeeded in 53ms:
+		}
+		out[col] = acc
+	}
+	return out
+}
+
+func mixLast(out *fr.Element, in []fr.Element, m [][]fr.Element, idx int) {
+	out.SetZero()
+	for row := range in {
+		var term fr.Element
+		term.Mul(&m[row][idx], &in[row])
+		out.Add(out, &term)
+	}
+}
+
+func bigIntSliceToElements(in []*big.Int) []fr.Element {
+	out := make([]fr.Element, len(in))
+	for i := range in {
+		out[i].SetBigInt(in[i])
+	}
+
+thinking
+**Verifying existing test setup**
+
+The existing test uses the native Poseidon implementation but might be failing or incomplete; I'm checking zk.go for possible stubs and planning to run full Go tests to confirm coverage and correctness next.
+exec
+/bin/zsh -lc "sed -n '1,240p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package zk
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"math/big"
+	"strconv"
+	"strings"
+	"sync"
+
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/constraint"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+exec
+/bin/zsh -lc "sed -n '240,520p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+			v, err := strconv.Atoi(kv[1])
+			if err != nil {
+				return PublicInputs{}, fmt.Errorf("invalid policy threshold")
+			}
+			if v < 0 || v > 2 {
+				return PublicInputs{}, fmt.Errorf("policy threshold must be 0..2")
+			}
+			out.PolicyThreshold = v
+			seenPT = true
+		case "ms":
+			if seenMS {
+				return PublicInputs{}, fmt.Errorf("duplicate max severity")
+			}
+			v, err := strconv.Atoi(kv[1])
+			if err != nil {
+				return PublicInputs{}, fmt.Errorf("invalid max severity")
+			}
+			if v < 0 || v > 2 {
+				return PublicInputs{}, fmt.Errorf("max severity must be 0..2")
+			}
+exec
+/bin/zsh -lc "sed -n '520,920p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+		out[i] = make([]fr.Element, len(in[i]))
+		for j := range in[i] {
+			out[i][j].SetBigInt(in[i][j])
+		}
+	}
+	return out
+}
+
+func elementToBigInt(in fr.Element) *big.Int {
+	var out big.Int
+	in.BigInt(&out)
+	return &out
+}
+
+thinking
+**Verifying existing Groth16 tests**
+
+The Groth16 integration seems pre-wired in the code; since plumbing is done, I'll run all Go tests to check if they pass or reveal issues.
+exec
+/bin/zsh -lc 'go test ./...' in /Users/yani/Noema/backend succeeded in 311ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
 ok  	noema/internal/config	(cached)
@@ -56,1025 +259,35 @@ ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
-
-thinking
-**Preparing to inspect frontend for improvements**
-
-Tests pass, now I’m focusing on a single improvement affecting up to three files, likely in the frontend. Next, I’ll locate and list relevant web/frontend files to inspect.
-exec
-/bin/zsh -lc 'rg -n "<title>|stylesheet|css" -S .' in /Users/yani/Noema/backend succeeded in 52ms:
-./web/templates/app_results.html:7:  <title>Noema — Results</title>
-./web/templates/app_results.html:8:  <link rel="stylesheet" href="/static/styles.css">
-./web/templates/app_new.html:7:  <title>Noema — New Evaluation</title>
-./web/templates/app_new.html:8:  <link rel="stylesheet" href="/static/styles.css">
-./web/templates/verify_results.html:7:  <title>Noema — Verify Results</title>
-./web/templates/verify_results.html:8:  <link rel="stylesheet" href="/static/styles.css">
-./web/templates/index.html:7:  <title>Noema</title>
-./web/templates/index.html:8:  <link rel="stylesheet" href="/static/styles.css">
-./web/static/styles.css:1:@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap');
-./web/templates/verify.html:7:  <title>Noema — Verify</title>
-./web/templates/verify.html:8:  <link rel="stylesheet" href="/static/styles.css">
-./web/templates/upload.html:7:  <title>Noema — Upload</title>
-./web/templates/upload.html:8:  <link rel="stylesheet" href="/static/styles.css">
-./web/templates/app.html:7:  <title>Noema — Dashboard</title>
-./web/templates/app.html:8:  <link rel="stylesheet" href="/static/styles.css">
-
-thinking
-**Planning CSS inspection for improvements**
-exec
-/bin/zsh -lc "sed -n '1,220p' /Users/yani/Noema/backend/web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap');
-
-:root {
-  --bg: #05060a;
-  --bg-card: rgba(9, 12, 18, 0.9);
-  --text: #f4f6fb;
-  --text-muted: #9aa3b2;
-  --accent: #45d4ff;
-  --accent-strong: #2c7bff;
-  --accent-glow: rgba(69, 212, 255, 0.35);
-  --border: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(69, 212, 255, 0.4);
-  --error: #f87171;
-  --success: #22c55e;
-  --warning: #fbbf24;
-  --shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
-}
-
-*,
-*::before,
-
-thinking
-**Identifying UI improvement opportunity**
-
-Considering adding a responsive header to enhance the UI; next step is to explore the existing UI components more thoroughly.
-exec
-/bin/zsh -lc "sed -n '220,520p' /Users/yani/Noema/backend/web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
-
-.input.is-invalid {
-  border-color: rgba(248, 113, 113, 0.65);
-  box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.2);
-}
-
-.textarea { min-height: 160px; resize: vertical; }
-
-.checkbox-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  color: var(--text-muted);
-  font-size: 0.9rem;
-}
-
-.policy-reveal {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1rem 1.2rem;
-exec
-/bin/zsh -lc "sed -n '520,1040p' /Users/yani/Noema/backend/web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
-  display: inline-flex;
-  background: rgba(0, 0, 0, 0.4);
-  border: 1px solid var(--border);
-  padding: 0.35rem;
-  border-radius: 999px;
-  gap: 0.35rem;
-  margin-bottom: 1.4rem;
-}
-
-.segmented-btn {
-  background: transparent;
-  color: var(--text-muted);
-  border: none;
-  padding: 0.4rem 0.9rem;
-  border-radius: 999px;
-  font-size: 0.85rem;
-  cursor: pointer;
-}
-
-.segmented-btn.active {
-exec
-/bin/zsh -lc "sed -n '1040,1560p' /Users/yani/Noema/backend/web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
-  margin: 1rem 0 1.25rem;
-  flex-wrap: wrap;
-}
-
-.verify-controls .input {
-  min-width: 240px;
-  flex: 1;
-}
-
-.verify-meta {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  font-size: 0.85rem;
-}
-
-.verify-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-
-thinking
-**Reviewing UI improvement options**
-
-I'm considering adding better empty states or subtle animations to enhance usability without altering core functionality, focusing next on inspecting templates like app.html to identify the best visual improvements.
-exec
-/bin/zsh -lc "sed -n '1,220p' /Users/yani/Noema/backend/web/templates/app.html" in /Users/yani/Noema/backend succeeded in 52ms:
-{{define "app"}}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Noema — Dashboard</title>
-  <link rel="stylesheet" href="/static/styles.css">
-</head>
-<body>
-  {{template "header_app" .}}
-
-  <main class="main main-dashboard">
-    {{template "orb" .}}
-    <div class="dashboard-content">
-      <section class="card dashboard-hero">
-        <div class="card-kicker">Dashboard</div>
-        <h1 class="card-title">Evaluations</h1>
-        <p class="card-text">Run policy evaluations on your datasets and publish verifiable results.</p>
-        <div class="form-actions">
-
-thinking
-**Considering UI improvements**
-
-Evaluating adding meaningful CSS enhancements like card hover effects or animations for empty and loading states, without introducing JavaScript or functional changes; next step is inspecting the results template layout.
-exec
-/bin/zsh -lc "sed -n '1,240p' /Users/yani/Noema/backend/web/templates/app_results.html" in /Users/yani/Noema/backend succeeded in 52ms:
-{{define "app_results"}}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Noema — Results</title>
-  <link rel="stylesheet" href="/static/styles.css">
-</head>
-<body data-run-id="{{.RunID}}">
-  {{template "header_app" .}}
-
-  <main class="main main-results">
-    {{template "orb" .}}
-    <div class="card results-card">
-      <div class="results-header">
-        <div>
-          <h1 class="card-title">Evaluation results</h1>
-          <div class="results-runline">
-            <p class="text-muted" id="results-run-id">Run ID: <span class="results-run-id">{{.RunID}}</span></p>
+ok  	noema/internal/zk/policyzk	(cached)
 
 
 thinking
-**Planning UI/UX improvements**
+**Confirming existing gnark circuit test**
 
-I'm focusing on enhancing empty and loading states with subtle styling and text hierarchy to improve user clarity without adding new assets or changing functionality, targeting CSS and template updates.
+The current test uses the native Poseidon function outside the circuit but verifies proof correctly. This aligns sufficiently with the user's request since an in-circuit equality check is functionally equivalent. Since tests pass and the requirement is met, no changes are needed.
 thinking
-**Planning accessibility and markup tweaks**
+**Reporting no changes with tests passing**
 
-I'm preparing to enhance loading text with a `role="status"` for accessibility and verify that changing loading and empty state elements to divs with classes won't break existing JS that relies on their IDs.
-exec
-/bin/zsh -lc "sed -n '1,260p' /Users/yani/Noema/backend/web/static/app.js" in /Users/yani/Noema/backend succeeded in 52ms:
-(function() {
-  var STORAGE_KEY = 'noema_recent_runs';
-  var listEl = document.getElementById('recent-runs-list');
-  var emptyEl = document.getElementById('recent-runs-empty');
-
-  function statusClass(status) {
-    if (!status) return 'status-pill-unknown';
-    var normalized = String(status).toUpperCase();
-    if (normalized === 'PASS') return 'status-pill-pass';
-    if (normalized === 'FAIL') return 'status-pill-fail';
-    return 'status-pill-unknown';
-  }
-
-  function formatTimestamp(ts) {
-    if (!ts) return null;
-    var date = new Date(ts);
-    if (Number.isNaN(date.getTime())) return null;
-    var diffMs = Math.abs(Date.now() - date.getTime());
-    var minutes = Math.round(diffMs / 60000);
-    var label = '';
-
-thinking
-**Deciding container element type**
-
-Planning to switch the empty element from a paragraph to a div while preserving its ID and wrapping it with a class; next step is to verify loading element usage in results.js.
-exec
-/bin/zsh -lc "sed -n '1,240p' /Users/yani/Noema/backend/web/static/results.js" in /Users/yani/Noema/backend succeeded in 52ms:
-(function() {
-  var runId = document.body.getAttribute('data-run-id') || document.getElementById('results-run-id').textContent.replace('Run ID: ', '').trim();
-  var key = 'noema_run_' + runId;
-  var data;
-  try {
-    var raw = localStorage.getItem(key);
-    data = raw ? JSON.parse(raw) : null;
-  } catch (e) {
-    data = null;
-  }
-
-  function copyText(text, button) {
-    if (!text) return;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(function() {
-        if (button) showCopied(button);
-      });
-    } else {
-      var temp = document.createElement('textarea');
-      temp.value = text;
-
-
-thinking
-**Implementing empty and loading states**
-
-Planning to replace empty and loading paragraphs with semantically structured divs using `empty-state` and `loading-state` classes, adding a clear title, text, and a button link for starting a new evaluation to improve UX and accessibility in two HTML files plus CSS.
-thinking
-**Adding CSS for empty and loading states**
-
-Drafting styling for `.empty-state` with subtle border and background, and `.loading-state` with a pulsing dot animation for loading indication; these styles will be added near `.card-text` in CSS and the two HTML templates updated accordingly.
-file update
-M /Users/yani/Noema/backend/web/static/styles.css
-@@ -164,2 +164,52 @@
- 
-+.empty-state {
-+  border: 1px dashed rgba(255, 255, 255, 0.14);
-+  border-radius: 14px;
-+  padding: 1.1rem 1.2rem;
-+  background: rgba(255, 255, 255, 0.02);
-+  display: flex;
-+  flex-direction: column;
-+  gap: 0.6rem;
-+}
-+
-+.empty-state-title {
-+  font-size: 0.95rem;
-+  font-weight: 600;
-+  color: var(--text);
-+}
-+
-+.empty-state-text {
-+  font-size: 0.88rem;
-+  color: var(--text-muted);
-+  margin: 0;
-+}
-+
-+.loading-state {
-+  display: inline-flex;
-+  align-items: center;
-+  gap: 0.6rem;
-+  padding: 0.6rem 0.95rem;
-+  border-radius: 999px;
-+  border: 1px solid var(--border);
-+  background: rgba(0, 0, 0, 0.35);
-+  color: var(--text-muted);
-+  font-size: 0.9rem;
-+}
-+
-+.loading-state::before {
-+  content: "";
-+  width: 8px;
-+  height: 8px;
-+  border-radius: 50%;
-+  background: var(--accent);
-+  box-shadow: 0 0 10px var(--accent-glow);
-+  animation: pulse 1.2s ease-in-out infinite;
-+}
-+
-+@keyframes pulse {
-+  0% { transform: scale(0.7); opacity: 0.5; }
-+  50% { transform: scale(1); opacity: 1; }
-+  100% { transform: scale(0.7); opacity: 0.5; }
-+}
-+
- .card-kicker {
-apply_patch(auto_approved=true) exited 0 in 31ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/web/static/styles.css
-file update:
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 3ddf30086be9d99f6e7aa2e2f22912b7f9f162f0..42da648819203a38c22a0ccd39064b66c4a5706a
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -162,6 +162,56 @@
-   line-height: 1.6;
- }
- 
-+.empty-state {
-+  border: 1px dashed rgba(255, 255, 255, 0.14);
-+  border-radius: 14px;
-+  padding: 1.1rem 1.2rem;
-+  background: rgba(255, 255, 255, 0.02);
-+  display: flex;
-+  flex-direction: column;
-+  gap: 0.6rem;
-+}
-+
-+.empty-state-title {
-+  font-size: 0.95rem;
-+  font-weight: 600;
-+  color: var(--text);
-+}
-+
-+.empty-state-text {
-+  font-size: 0.88rem;
-+  color: var(--text-muted);
-+  margin: 0;
-+}
-+
-+.loading-state {
-+  display: inline-flex;
-+  align-items: center;
-+  gap: 0.6rem;
-+  padding: 0.6rem 0.95rem;
-+  border-radius: 999px;
-+  border: 1px solid var(--border);
-+  background: rgba(0, 0, 0, 0.35);
-+  color: var(--text-muted);
-+  font-size: 0.9rem;
-+}
-+
-+.loading-state::before {
-+  content: "";
-+  width: 8px;
-+  height: 8px;
-+  border-radius: 50%;
-+  background: var(--accent);
-+  box-shadow: 0 0 10px var(--accent-glow);
-+  animation: pulse 1.2s ease-in-out infinite;
-+}
-+
-+@keyframes pulse {
-+  0% { transform: scale(0.7); opacity: 0.5; }
-+  50% { transform: scale(1); opacity: 1; }
-+  100% { transform: scale(0.7); opacity: 0.5; }
-+}
-+
- .card-kicker {
-   text-transform: uppercase;
-   font-size: 0.72rem;
-
-file update:
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 3ddf30086be9d99f6e7aa2e2f22912b7f9f162f0..42da648819203a38c22a0ccd39064b66c4a5706a
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -162,6 +162,56 @@
-   line-height: 1.6;
- }
- 
-+.empty-state {
-+  border: 1px dashed rgba(255, 255, 255, 0.14);
-+  border-radius: 14px;
-+  padding: 1.1rem 1.2rem;
-+  background: rgba(255, 255, 255, 0.02);
-+  display: flex;
-+  flex-direction: column;
-+  gap: 0.6rem;
-+}
-+
-+.empty-state-title {
-+  font-size: 0.95rem;
-+  font-weight: 600;
-+  color: var(--text);
-+}
-+
-+.empty-state-text {
-+  font-size: 0.88rem;
-+  color: var(--text-muted);
-+  margin: 0;
-+}
-+
-+.loading-state {
-+  display: inline-flex;
-+  align-items: center;
-+  gap: 0.6rem;
-+  padding: 0.6rem 0.95rem;
-+  border-radius: 999px;
-+  border: 1px solid var(--border);
-+  background: rgba(0, 0, 0, 0.35);
-+  color: var(--text-muted);
-+  font-size: 0.9rem;
-+}
-+
-+.loading-state::before {
-+  content: "";
-+  width: 8px;
-+  height: 8px;
-+  border-radius: 50%;
-+  background: var(--accent);
-+  box-shadow: 0 0 10px var(--accent-glow);
-+  animation: pulse 1.2s ease-in-out infinite;
-+}
-+
-+@keyframes pulse {
-+  0% { transform: scale(0.7); opacity: 0.5; }
-+  50% { transform: scale(1); opacity: 1; }
-+  100% { transform: scale(0.7); opacity: 0.5; }
-+}
-+
- .card-kicker {
-   text-transform: uppercase;
-   font-size: 0.72rem;
-
-
-thinking
-**Updating templates**
-file update
-M /Users/yani/Noema/backend/web/templates/app.html
-@@ -29,3 +29,7 @@
-           <div id="recent-runs-list" class="recent-runs-list">
--            <p class="text-muted" id="recent-runs-empty">No runs yet. Start a new evaluation.</p>
-+            <div id="recent-runs-empty" class="empty-state">
-+              <div class="empty-state-title">No runs yet</div>
-+              <p class="empty-state-text">Start a new evaluation to see results here.</p>
-+              <a href="/app/new" class="btn btn-ghost btn-sm">New Evaluation</a>
-+            </div>
-           </div>
-apply_patch(auto_approved=true) exited 0 in 41ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/web/templates/app.html
-file update:
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 3ddf30086be9d99f6e7aa2e2f22912b7f9f162f0..42da648819203a38c22a0ccd39064b66c4a5706a
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -162,6 +162,56 @@
-   line-height: 1.6;
- }
- 
-+.empty-state {
-+  border: 1px dashed rgba(255, 255, 255, 0.14);
-+  border-radius: 14px;
-+  padding: 1.1rem 1.2rem;
-+  background: rgba(255, 255, 255, 0.02);
-+  display: flex;
-+  flex-direction: column;
-+  gap: 0.6rem;
-+}
-+
-+.empty-state-title {
-+  font-size: 0.95rem;
-+  font-weight: 600;
-+  color: var(--text);
-+}
-+
-+.empty-state-text {
-+  font-size: 0.88rem;
-+  color: var(--text-muted);
-+  margin: 0;
-+}
-+
-+.loading-state {
-+  display: inline-flex;
-+  align-items: center;
-+  gap: 0.6rem;
-+  padding: 0.6rem 0.95rem;
-+  border-radius: 999px;
-+  border: 1px solid var(--border);
-+  background: rgba(0, 0, 0, 0.35);
-+  color: var(--text-muted);
-+  font-size: 0.9rem;
-+}
-+
-+.loading-state::before {
-+  content: "";
-+  width: 8px;
-+  height: 8px;
-+  border-radius: 50%;
-+  background: var(--accent);
-+  box-shadow: 0 0 10px var(--accent-glow);
-+  animation: pulse 1.2s ease-in-out infinite;
-+}
-+
-+@keyframes pulse {
-+  0% { transform: scale(0.7); opacity: 0.5; }
-+  50% { transform: scale(1); opacity: 1; }
-+  100% { transform: scale(0.7); opacity: 0.5; }
-+}
-+
- .card-kicker {
-   text-transform: uppercase;
-   font-size: 0.72rem;
-diff --git a/backend/web/templates/app.html b/backend/web/templates/app.html
-index 60ef6a53c1cc3782f781f6442fa65a9af81d39da..da4e4475ce5217f72bbf2871aab82bc8a3acf3ab
---- a/backend/web/templates/app.html
-+++ b/backend/web/templates/app.html
-@@ -27,7 +27,11 @@
-         <section class="card recent-runs-card">
-           <h2 class="card-title card-title-sm">Recent runs</h2>
-           <div id="recent-runs-list" class="recent-runs-list">
--            <p class="text-muted" id="recent-runs-empty">No runs yet. Start a new evaluation.</p>
-+            <div id="recent-runs-empty" class="empty-state">
-+              <div class="empty-state-title">No runs yet</div>
-+              <p class="empty-state-text">Start a new evaluation to see results here.</p>
-+              <a href="/app/new" class="btn btn-ghost btn-sm">New Evaluation</a>
-+            </div>
-           </div>
-         </section>
- 
-
-file update:
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 3ddf30086be9d99f6e7aa2e2f22912b7f9f162f0..42da648819203a38c22a0ccd39064b66c4a5706a
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -162,6 +162,56 @@
-   line-height: 1.6;
- }
- 
-+.empty-state {
-+  border: 1px dashed rgba(255, 255, 255, 0.14);
-+  border-radius: 14px;
-+  padding: 1.1rem 1.2rem;
-+  background: rgba(255, 255, 255, 0.02);
-+  display: flex;
-+  flex-direction: column;
-+  gap: 0.6rem;
-+}
-+
-+.empty-state-title {
-+  font-size: 0.95rem;
-+  font-weight: 600;
-+  color: var(--text);
-+}
-+
-+.empty-state-text {
-+  font-size: 0.88rem;
-+  color: var(--text-muted);
-+  margin: 0;
-+}
-+
-+.loading-state {
-+  display: inline-flex;
-+  align-items: center;
-+  gap: 0.6rem;
-+  padding: 0.6rem 0.95rem;
-+  border-radius: 999px;
-+  border: 1px solid var(--border);
-+  background: rgba(0, 0, 0, 0.35);
-+  color: var(--text-muted);
-+  font-size: 0.9rem;
-+}
-+
-+.loading-state::before {
-+  content: "";
-+  width: 8px;
-+  height: 8px;
-+  border-radius: 50%;
-+  background: var(--accent);
-+  box-shadow: 0 0 10px var(--accent-glow);
-+  animation: pulse 1.2s ease-in-out infinite;
-+}
-+
-+@keyframes pulse {
-+  0% { transform: scale(0.7); opacity: 0.5; }
-+  50% { transform: scale(1); opacity: 1; }
-+  100% { transform: scale(0.7); opacity: 0.5; }
-+}
-+
- .card-kicker {
-   text-transform: uppercase;
-   font-size: 0.72rem;
-diff --git a/backend/web/templates/app.html b/backend/web/templates/app.html
-index 60ef6a53c1cc3782f781f6442fa65a9af81d39da..da4e4475ce5217f72bbf2871aab82bc8a3acf3ab
---- a/backend/web/templates/app.html
-+++ b/backend/web/templates/app.html
-@@ -27,7 +27,11 @@
-         <section class="card recent-runs-card">
-           <h2 class="card-title card-title-sm">Recent runs</h2>
-           <div id="recent-runs-list" class="recent-runs-list">
--            <p class="text-muted" id="recent-runs-empty">No runs yet. Start a new evaluation.</p>
-+            <div id="recent-runs-empty" class="empty-state">
-+              <div class="empty-state-title">No runs yet</div>
-+              <p class="empty-state-text">Start a new evaluation to see results here.</p>
-+              <a href="/app/new" class="btn btn-ghost btn-sm">New Evaluation</a>
-+            </div>
-           </div>
-         </section>
- 
-
-
-thinking
-**Updating app_results.html**
-file update
-M /Users/yani/Noema/backend/web/templates/app_results.html
-@@ -29,3 +29,3 @@
-       <div id="results-content">
--        <p class="text-muted" id="results-loading">Loading…</p>
-+        <div class="loading-state" id="results-loading" role="status" aria-live="polite">Loading results…</div>
-         <div id="results-body" style="display:none;">
-apply_patch(auto_approved=true) exited 0 in 52ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/web/templates/app_results.html
-file update:
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 3ddf30086be9d99f6e7aa2e2f22912b7f9f162f0..42da648819203a38c22a0ccd39064b66c4a5706a
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -162,6 +162,56 @@
-   line-height: 1.6;
- }
- 
-+.empty-state {
-+  border: 1px dashed rgba(255, 255, 255, 0.14);
-+  border-radius: 14px;
-+  padding: 1.1rem 1.2rem;
-+  background: rgba(255, 255, 255, 0.02);
-+  display: flex;
-+  flex-direction: column;
-+  gap: 0.6rem;
-+}
-+
-+.empty-state-title {
-+  font-size: 0.95rem;
-+  font-weight: 600;
-+  color: var(--text);
-+}
-+
-+.empty-state-text {
-+  font-size: 0.88rem;
-+  color: var(--text-muted);
-+  margin: 0;
-+}
-+
-+.loading-state {
-+  display: inline-flex;
-+  align-items: center;
-+  gap: 0.6rem;
-+  padding: 0.6rem 0.95rem;
-+  border-radius: 999px;
-+  border: 1px solid var(--border);
-+  background: rgba(0, 0, 0, 0.35);
-+  color: var(--text-muted);
-+  font-size: 0.9rem;
-+}
-+
-+.loading-state::before {
-+  content: "";
-+  width: 8px;
-+  height: 8px;
-+  border-radius: 50%;
-+  background: var(--accent);
-+  box-shadow: 0 0 10px var(--accent-glow);
-+  animation: pulse 1.2s ease-in-out infinite;
-+}
-+
-+@keyframes pulse {
-+  0% { transform: scale(0.7); opacity: 0.5; }
-+  50% { transform: scale(1); opacity: 1; }
-+  100% { transform: scale(0.7); opacity: 0.5; }
-+}
-+
- .card-kicker {
-   text-transform: uppercase;
-   font-size: 0.72rem;
-diff --git a/backend/web/templates/app.html b/backend/web/templates/app.html
-index 60ef6a53c1cc3782f781f6442fa65a9af81d39da..da4e4475ce5217f72bbf2871aab82bc8a3acf3ab
---- a/backend/web/templates/app.html
-+++ b/backend/web/templates/app.html
-@@ -27,7 +27,11 @@
-         <section class="card recent-runs-card">
-           <h2 class="card-title card-title-sm">Recent runs</h2>
-           <div id="recent-runs-list" class="recent-runs-list">
--            <p class="text-muted" id="recent-runs-empty">No runs yet. Start a new evaluation.</p>
-+            <div id="recent-runs-empty" class="empty-state">
-+              <div class="empty-state-title">No runs yet</div>
-+              <p class="empty-state-text">Start a new evaluation to see results here.</p>
-+              <a href="/app/new" class="btn btn-ghost btn-sm">New Evaluation</a>
-+            </div>
-           </div>
-         </section>
- 
-diff --git a/backend/web/templates/app_results.html b/backend/web/templates/app_results.html
-index 599cf4c073c026caf3062098c6f8b19b770baa91..9a8fd012bfb0dee866b6cb638ed22c33cdd06f5c
---- a/backend/web/templates/app_results.html
-+++ b/backend/web/templates/app_results.html
-@@ -27,7 +27,7 @@
-         </div>
-       </div>
-       <div id="results-content">
--        <p class="text-muted" id="results-loading">Loading…</p>
-+        <div class="loading-state" id="results-loading" role="status" aria-live="polite">Loading results…</div>
-         <div id="results-body" style="display:none;">
-           <div class="results-summary">
-             <div id="results-status" class="results-status"></div>
-
-file update:
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 3ddf30086be9d99f6e7aa2e2f22912b7f9f162f0..42da648819203a38c22a0ccd39064b66c4a5706a
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -162,6 +162,56 @@
-   line-height: 1.6;
- }
- 
-+.empty-state {
-+  border: 1px dashed rgba(255, 255, 255, 0.14);
-+  border-radius: 14px;
-+  padding: 1.1rem 1.2rem;
-+  background: rgba(255, 255, 255, 0.02);
-+  display: flex;
-+  flex-direction: column;
-+  gap: 0.6rem;
-+}
-+
-+.empty-state-title {
-+  font-size: 0.95rem;
-+  font-weight: 600;
-+  color: var(--text);
-+}
-+
-+.empty-state-text {
-+  font-size: 0.88rem;
-+  color: var(--text-muted);
-+  margin: 0;
-+}
-+
-+.loading-state {
-+  display: inline-flex;
-+  align-items: center;
-+  gap: 0.6rem;
-+  padding: 0.6rem 0.95rem;
-+  border-radius: 999px;
-+  border: 1px solid var(--border);
-+  background: rgba(0, 0, 0, 0.35);
-+  color: var(--text-muted);
-+  font-size: 0.9rem;
-+}
-+
-+.loading-state::before {
-+  content: "";
-+  width: 8px;
-+  height: 8px;
-+  border-radius: 50%;
-+  background: var(--accent);
-+  box-shadow: 0 0 10px var(--accent-glow);
-+  animation: pulse 1.2s ease-in-out infinite;
-+}
-+
-+@keyframes pulse {
-+  0% { transform: scale(0.7); opacity: 0.5; }
-+  50% { transform: scale(1); opacity: 1; }
-+  100% { transform: scale(0.7); opacity: 0.5; }
-+}
-+
- .card-kicker {
-   text-transform: uppercase;
-   font-size: 0.72rem;
-diff --git a/backend/web/templates/app.html b/backend/web/templates/app.html
-index 60ef6a53c1cc3782f781f6442fa65a9af81d39da..da4e4475ce5217f72bbf2871aab82bc8a3acf3ab
---- a/backend/web/templates/app.html
-+++ b/backend/web/templates/app.html
-@@ -27,7 +27,11 @@
-         <section class="card recent-runs-card">
-           <h2 class="card-title card-title-sm">Recent runs</h2>
-           <div id="recent-runs-list" class="recent-runs-list">
--            <p class="text-muted" id="recent-runs-empty">No runs yet. Start a new evaluation.</p>
-+            <div id="recent-runs-empty" class="empty-state">
-+              <div class="empty-state-title">No runs yet</div>
-+              <p class="empty-state-text">Start a new evaluation to see results here.</p>
-+              <a href="/app/new" class="btn btn-ghost btn-sm">New Evaluation</a>
-+            </div>
-           </div>
-         </section>
- 
-diff --git a/backend/web/templates/app_results.html b/backend/web/templates/app_results.html
-index 599cf4c073c026caf3062098c6f8b19b770baa91..9a8fd012bfb0dee866b6cb638ed22c33cdd06f5c
---- a/backend/web/templates/app_results.html
-+++ b/backend/web/templates/app_results.html
-@@ -27,7 +27,7 @@
-         </div>
-       </div>
-       <div id="results-content">
--        <p class="text-muted" id="results-loading">Loading…</p>
-+        <div class="loading-state" id="results-loading" role="status" aria-live="polite">Loading results…</div>
-         <div id="results-body" style="display:none;">
-           <div class="results-summary">
-             <div id="results-status" class="results-status"></div>
-
-
-thinking
-**Running tests**
-exec
-/bin/zsh -lc 'go test ./...' in /Users/yani/Noema/backend succeeded in 318ms:
-?   	noema/cmd/server	[no test files]
-?   	noema/internal/auth	[no test files]
-ok  	noema/internal/config	(cached)
-?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	(cached)
-?   	noema/internal/gemini	[no test files]
-ok  	noema/internal/httputil	(cached)
-ok  	noema/internal/session	(cached)
-ok  	noema/internal/verify	(cached)
-?   	noema/internal/web	[no test files]
-ok  	noema/internal/zk	(cached)
-file update:
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 3ddf30086be9d99f6e7aa2e2f22912b7f9f162f0..42da648819203a38c22a0ccd39064b66c4a5706a
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -162,6 +162,56 @@
-   line-height: 1.6;
- }
- 
-+.empty-state {
-+  border: 1px dashed rgba(255, 255, 255, 0.14);
-+  border-radius: 14px;
-+  padding: 1.1rem 1.2rem;
-+  background: rgba(255, 255, 255, 0.02);
-+  display: flex;
-+  flex-direction: column;
-+  gap: 0.6rem;
-+}
-+
-+.empty-state-title {
-+  font-size: 0.95rem;
-+  font-weight: 600;
-+  color: var(--text);
-+}
-+
-+.empty-state-text {
-+  font-size: 0.88rem;
-+  color: var(--text-muted);
-+  margin: 0;
-+}
-+
-+.loading-state {
-+  display: inline-flex;
-+  align-items: center;
-+  gap: 0.6rem;
-+  padding: 0.6rem 0.95rem;
-+  border-radius: 999px;
-+  border: 1px solid var(--border);
-+  background: rgba(0, 0, 0, 0.35);
-+  color: var(--text-muted);
-+  font-size: 0.9rem;
-+}
-+
-+.loading-state::before {
-+  content: "";
-+  width: 8px;
-+  height: 8px;
-+  border-radius: 50%;
-+  background: var(--accent);
-+  box-shadow: 0 0 10px var(--accent-glow);
-+  animation: pulse 1.2s ease-in-out infinite;
-+}
-+
-+@keyframes pulse {
-+  0% { transform: scale(0.7); opacity: 0.5; }
-+  50% { transform: scale(1); opacity: 1; }
-+  100% { transform: scale(0.7); opacity: 0.5; }
-+}
-+
- .card-kicker {
-   text-transform: uppercase;
-   font-size: 0.72rem;
-diff --git a/backend/web/templates/app.html b/backend/web/templates/app.html
-index 60ef6a53c1cc3782f781f6442fa65a9af81d39da..da4e4475ce5217f72bbf2871aab82bc8a3acf3ab
---- a/backend/web/templates/app.html
-+++ b/backend/web/templates/app.html
-@@ -27,7 +27,11 @@
-         <section class="card recent-runs-card">
-           <h2 class="card-title card-title-sm">Recent runs</h2>
-           <div id="recent-runs-list" class="recent-runs-list">
--            <p class="text-muted" id="recent-runs-empty">No runs yet. Start a new evaluation.</p>
-+            <div id="recent-runs-empty" class="empty-state">
-+              <div class="empty-state-title">No runs yet</div>
-+              <p class="empty-state-text">Start a new evaluation to see results here.</p>
-+              <a href="/app/new" class="btn btn-ghost btn-sm">New Evaluation</a>
-+            </div>
-           </div>
-         </section>
- 
-diff --git a/backend/web/templates/app_results.html b/backend/web/templates/app_results.html
-index 599cf4c073c026caf3062098c6f8b19b770baa91..9a8fd012bfb0dee866b6cb638ed22c33cdd06f5c
---- a/backend/web/templates/app_results.html
-+++ b/backend/web/templates/app_results.html
-@@ -27,7 +27,7 @@
-         </div>
-       </div>
-       <div id="results-content">
--        <p class="text-muted" id="results-loading">Loading…</p>
-+        <div class="loading-state" id="results-loading" role="status" aria-live="polite">Loading results…</div>
-         <div id="results-body" style="display:none;">
-           <div class="results-summary">
-             <div id="results-status" class="results-status"></div>
-
+No files changed since the required gnark circuit test and plumbing are already in place. All tests pass with `go test ./...`, confirming no further action is needed.
 codex
-What I changed (short)
-- Improved empty/loading states on the dashboard and results pages with clearer hierarchy, CTA, and a subtle animated loading badge.
-- Added supporting styles for those new UI elements.
+Files changed
+- None
+
+What you changed
+- No code changes needed. The `PolicyGateCircuit` already uses `circuits.Poseidon`, fixed `N=6`, and there is already a Groth16 BN254 pass/fail test in `internal/zk/policyzk/circuit_test.go` that proves and verifies both cases.
+- Backend plumbing in `internal/zk/zk.go` already uses Groth16 BN254 with `proof_b64` + `public_inputs_b64`.
 
 Tests run
 - `go test ./...`
-
-If you want, I can follow up with a second UI pass on results cards or the verify list.
-file update:
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 3ddf30086be9d99f6e7aa2e2f22912b7f9f162f0..42da648819203a38c22a0ccd39064b66c4a5706a
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -162,6 +162,56 @@
-   line-height: 1.6;
- }
- 
-+.empty-state {
-+  border: 1px dashed rgba(255, 255, 255, 0.14);
-+  border-radius: 14px;
-+  padding: 1.1rem 1.2rem;
-+  background: rgba(255, 255, 255, 0.02);
-+  display: flex;
-+  flex-direction: column;
-+  gap: 0.6rem;
-+}
-+
-+.empty-state-title {
-+  font-size: 0.95rem;
-+  font-weight: 600;
-+  color: var(--text);
-+}
-+
-+.empty-state-text {
-+  font-size: 0.88rem;
-+  color: var(--text-muted);
-+  margin: 0;
-+}
-+
-+.loading-state {
-+  display: inline-flex;
-+  align-items: center;
-+  gap: 0.6rem;
-+  padding: 0.6rem 0.95rem;
-+  border-radius: 999px;
-+  border: 1px solid var(--border);
-+  background: rgba(0, 0, 0, 0.35);
-+  color: var(--text-muted);
-+  font-size: 0.9rem;
-+}
-+
-+.loading-state::before {
-+  content: "";
-+  width: 8px;
-+  height: 8px;
-+  border-radius: 50%;
-+  background: var(--accent);
-+  box-shadow: 0 0 10px var(--accent-glow);
-+  animation: pulse 1.2s ease-in-out infinite;
-+}
-+
-+@keyframes pulse {
-+  0% { transform: scale(0.7); opacity: 0.5; }
-+  50% { transform: scale(1); opacity: 1; }
-+  100% { transform: scale(0.7); opacity: 0.5; }
-+}
-+
- .card-kicker {
-   text-transform: uppercase;
-   font-size: 0.72rem;
-diff --git a/backend/web/templates/app.html b/backend/web/templates/app.html
-index 60ef6a53c1cc3782f781f6442fa65a9af81d39da..da4e4475ce5217f72bbf2871aab82bc8a3acf3ab
---- a/backend/web/templates/app.html
-+++ b/backend/web/templates/app.html
-@@ -27,7 +27,11 @@
-         <section class="card recent-runs-card">
-           <h2 class="card-title card-title-sm">Recent runs</h2>
-           <div id="recent-runs-list" class="recent-runs-list">
--            <p class="text-muted" id="recent-runs-empty">No runs yet. Start a new evaluation.</p>
-+            <div id="recent-runs-empty" class="empty-state">
-+              <div class="empty-state-title">No runs yet</div>
-+              <p class="empty-state-text">Start a new evaluation to see results here.</p>
-+              <a href="/app/new" class="btn btn-ghost btn-sm">New Evaluation</a>
-+            </div>
-           </div>
-         </section>
- 
-diff --git a/backend/web/templates/app_results.html b/backend/web/templates/app_results.html
-index 599cf4c073c026caf3062098c6f8b19b770baa91..9a8fd012bfb0dee866b6cb638ed22c33cdd06f5c
---- a/backend/web/templates/app_results.html
-+++ b/backend/web/templates/app_results.html
-@@ -27,7 +27,7 @@
-         </div>
-       </div>
-       <div id="results-content">
--        <p class="text-muted" id="results-loading">Loading…</p>
-+        <div class="loading-state" id="results-loading" role="status" aria-live="polite">Loading results…</div>
-         <div id="results-body" style="display:none;">
-           <div class="results-summary">
-             <div id="results-status" class="results-status"></div>
-
 tokens used
-20,537
-What I changed (short)
-- Improved empty/loading states on the dashboard and results pages with clearer hierarchy, CTA, and a subtle animated loading badge.
-- Added supporting styles for those new UI elements.
+13,815
+Files changed
+- None
+
+What you changed
+- No code changes needed. The `PolicyGateCircuit` already uses `circuits.Poseidon`, fixed `N=6`, and there is already a Groth16 BN254 pass/fail test in `internal/zk/policyzk/circuit_test.go` that proves and verifies both cases.
+- Backend plumbing in `internal/zk/zk.go` already uses Groth16 BN254 with `proof_b64` + `public_inputs_b64`.
 
 Tests run
 - `go test ./...`
-
-If you want, I can follow up with a second UI pass on results cards or the verify list.
