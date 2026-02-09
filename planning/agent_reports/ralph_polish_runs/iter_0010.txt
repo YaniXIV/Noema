@@ -7,44 +7,228 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3eca-4e85-78f2-873f-936e2ae9bbf6
+session id: 019c4102-4b60-7642-bbe7-e2af3391a0c6
 --------
 user
-You are an autonomous coding agent polishing the Noema repository.
+You are an autonomous coding agent working on the Noema repository.
 
-Hard rules:
+MISSION (priority order):
+1) Add a real gnark circuit test for the PolicyGateCircuit (using our in-repo Poseidon implementation, package circuits).
+2) Make the circuit test pass reliably (compile -> prove -> verify) using Groth16 on BN254.
+3) ONLY AFTER tests pass: wire the backend plumbing to call the gnark prover/verifier behind the existing zk.GenerateProof / zk.VerifyProof API, keeping the public API shape unchanged (proof_b64 + public_inputs_b64).
+
+HARD RULES:
 - DO NOT run git commit, git reset, git clean, or anything that modifies git history.
-- I will run git commits outside of you.
-- Keep changes small: max 3 files per iteration.
+- Keep changes small: max 3 files per iteration. If more is needed, stage work across multiple iterations.
 - No cosmetic-only edits.
-- No new dependencies unless absolutely necessary.
-- keep all the same ui functionality, the end user should be able to do the same stuff but the experiance and design should be better.
+- No new dependencies unless absolutely necessary. Use existing gnark dependencies already in the repo. If gnark is not yet in go.mod, add it only if unavoidable.
+- Do not change routes or response shapes. Keep /api/evaluate and /api/verify behavior stable.
+- Do not redesign UI. This task is ZK/circuit/testing/plumbing only.
+- Always run: cd backend && go test ./... at least once per iteration.
 
-Goal: continuously improve production quality. continuously improve front end quality and polish.
+WORKFLOW YOU MUST FOLLOW (do not skip):
+A) Inspect current circuit code and poseidon implementation:
+   - Find the PolicyGateCircuit (the policy ZK circuit) and confirm it imports and uses circuits.Poseidon (NOT gnark/std poseidon).
+   - Confirm fixed N=6 and the frozen constraint ordering.
+B) Add tests FIRST:
+   - Create a new Go test file for the circuit (example name: backend/internal/zk/policy_circuit_test.go or wherever circuits live).
+   - The test must:
+     1) Compile the circuit to R1CS
+     2) Run Groth16 setup
+     3) Build a witness with a PASS case and generate a proof
+     4) Verify the proof using the public witness
+     5) Build a witness with a FAIL case and confirm either:
+        - proving fails (unsatisfied), OR
+        - proving succeeds only if OverallPass is set correctly (0), AND verifying matches the expected output
+   - Use deterministic test vectors:
+     - datasetDigestLo/Hi fixed constants
+     - enabled/maxAllowed/severity arrays fixed constants
+     - Compute the expected Commitment in-circuit by setting Commitment to the same value computed by the circuit.
+       (In gnark tests, you can set Commitment as a public variable equal to circuits.Poseidon(domainSep + inputs) by reusing the same circuits.Poseidon function in a small helper circuit OR by computing it with the same function in-circuit and asserting equality.)
+   - The test must assert:
+     - OverallPass == 1 for pass vector, and verify passes.
+     - OverallPass == 0 for fail vector, and verify passes only with correct OverallPass.
+C) Fix whatever is broken until all tests pass:
+   - If compilation errors, fix imports or package paths.
+   - If poseidon params/functions missing, use the existing in-repo Poseidon code as the single source of truth.
+   - If constraints are wrong, fix circuit logic minimally.
+D) ONLY AFTER TESTS PASS: wire plumbing:
+   - Replace stub proof internals inside backend/internal/zk/zk.go (or equivalent) to use gnark Groth16 BN254:
+     - GenerateProof: build witness from inputs (enabled/maxAllowed/severity + datasetDigest limbs) and output proof bytes base64
+     - VerifyProof: decode proof and public inputs and verify using vk
+   - Keep existing API signatures and keep proof_b64 + public_inputs_b64 shape.
+   - You may keep public_inputs_b64 as the existing string format for now, but the verify path must map it deterministically to the circuit’s public witness (Commitment, OverallPass, MaxSeverity).
+   - Ensure keys are handled sanely for dev:
+     - For now, allow generating proving/verifying keys at startup or cached on disk under backend/internal/zk (dev only),
+       OR embed small test keys only for tests.
+     - Don’t over-engineer; prioritize working tests and stable verify.
 
-Iteration:
-1) Run: cd backend && go test ./...
-2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
-3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+ACCEPTANCE CRITERIA (must satisfy):
+- `cd backend && go test ./...` passes.
+- There is at least one new test that proves+verifies the circuit in a PASS case.
+- There is at least one test that demonstrates FAIL behavior (overall_pass=0) is enforced and verifiable.
+- If plumbing was wired, verify endpoint still accepts proof_b64/public_inputs_b64 and returns verified result correctly.
 
-Pick the highest-value improvement:
-A) Reliability/correctness: validation, error handling, run persistence, verify robustness
-B) Tests: add/strengthen tests for the change you made
-C) upgrading the user interface so that it looks better.
-D) Maintainability: reduce duplication with tiny refactors
-E) UX: wizard/results/verify clarity (small, safe changes)
-F) Docs: README/DEPLOYMENT polish
-G) Performance: safe wins only
-
-Finish with:
-- What you changed (short)
+OUTPUT FORMAT (end of each run):
+- Files changed (list)
+- What you changed (2–6 bullets)
 - Tests run (must include go test ./...)
 mcp startup: no servers
 
 thinking
-**Running Go tests using exec_command**
+**Preparing file inspection**
+
+I'm setting up to inspect files using ripgrep to identify relevant content before proceeding.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 197ms:
+/bin/zsh -lc 'rg -n "PolicyGateCircuit|PolicyGate" -S .' in /Users/yani/Noema/backend succeeded in 53ms:
+./internal/evaluate/handler.go:395:	if len(policyConstraintOrder) != zk.PolicyGateConstraintCount {
+./internal/evaluate/handler.go:417:	var enabled [zk.PolicyGateConstraintCount]uint64
+./internal/evaluate/handler.go:418:	var maxAllowed [zk.PolicyGateConstraintCount]uint64
+./internal/evaluate/handler.go:419:	var severity [zk.PolicyGateConstraintCount]uint64
+./internal/zk/zk_test.go:73:		Enabled:          [PolicyGateConstraintCount]uint64{1, 1, 1, 0, 1, 0},
+./internal/zk/zk_test.go:74:		MaxAllowed:       [PolicyGateConstraintCount]uint64{1, 2, 0, 1, 2, 0},
+./internal/zk/zk_test.go:75:		Severity:         [PolicyGateConstraintCount]uint64{1, 2, 0, 2, 1, 2},
+./internal/zk/zk.go:33:// PolicyGateConstraintCount is the fixed N for the PolicyGateCircuit.
+./internal/zk/zk.go:34:const PolicyGateConstraintCount = policyzk.N
+./internal/zk/zk.go:55:// WitnessInputs carries the private inputs for the PolicyGateCircuit.
+./internal/zk/zk.go:58:	Enabled          [PolicyGateConstraintCount]uint64
+./internal/zk/zk.go:59:	MaxAllowed       [PolicyGateConstraintCount]uint64
+./internal/zk/zk.go:60:	Severity         [PolicyGateConstraintCount]uint64
+./internal/zk/zk.go:81:		var circuit policyzk.PolicyGateCircuit
+./internal/zk/zk.go:121:	assignment := policyzk.PolicyGateCircuit{
+./internal/zk/zk.go:180:	assignment := policyzk.PolicyGateCircuit{
+./internal/zk/zk.go:346:func toVarArray(vals [PolicyGateConstraintCount]uint64) [PolicyGateConstraintCount]frontend.Variable {
+./internal/zk/zk.go:347:	var out [PolicyGateConstraintCount]frontend.Variable
+./internal/zk/zk.go:348:	for i := 0; i < PolicyGateConstraintCount; i++ {
+./internal/zk/zk.go:354:// CommitmentPoseidon computes the PolicyGateCircuit commitment.
+
+thinking
+**Inspecting existing tests**
+
+I'm opening the relevant files to review the existing test instructions and understand what has already been covered.
+exec
+/bin/zsh -lc "sed -n '1,220p' internal/zk/policyzk/circuit.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package policyzk
+
+import (
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark/frontend"
+)
+
+const N = 6
+
+// PolicyGateCircuit proves:
+//   - The prover knows (datasetDigest, policy config, gemini severities) that hash to Commitment
+//   - And the deterministic policy check passes:
+//     for each i: if Enabled[i] == 1 then Severity[i] <= MaxAllowed[i]
+//
+// Public outputs:
+// - Commitment: binds everything (dataset + policy + gemini outputs)
+// - OverallPass: 1 iff policy passes
+// - MaxSeverity (optional): max observed severity among enabled constraints
+type PolicyGateCircuit struct {
+	// ===== Private witness =====
+
+thinking
+**Opening existing test**
+exec
+/bin/zsh -lc "sed -n '1,220p' internal/zk/policyzk/circuit_test.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package policyzk
+
+import (
+	"math/big"
+	"testing"
+
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+	"github.com/stretchr/testify/require"
+)
+
+func TestPolicyGateCircuit_Groth16PassFail(t *testing.T) {
+	require := require.New(t)
+
+	var circuit PolicyGateCircuit
+	r1cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
+exec
+/bin/zsh -lc "sed -n '220,440p' internal/zk/policyzk/circuit_test.go" in /Users/yani/Noema/backend succeeded in 53ms:
+		}
+		out[col] = acc
+	}
+	return out
+}
+
+func mixLast(out *fr.Element, in []fr.Element, m [][]fr.Element, idx int) {
+	out.SetZero()
+	for row := range in {
+		var term fr.Element
+		term.Mul(&m[row][idx], &in[row])
+		out.Add(out, &term)
+	}
+}
+
+func bigIntSliceToElements(in []*big.Int) []fr.Element {
+	out := make([]fr.Element, len(in))
+	for i := range in {
+		out[i].SetBigInt(in[i])
+	}
+
+thinking
+**Verifying Poseidon usage in tests**
+
+Tests use native Poseidon with circuits constants, so I'll ensure the implementation utilizes circuits.Poseidon and proceed to run go tests and review the zk.go stub next.
+exec
+/bin/zsh -lc "sed -n '1,260p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package zk
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"math/big"
+	"strconv"
+	"strings"
+	"sync"
+
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/constraint"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+exec
+/bin/zsh -lc "sed -n '260,640p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+			out.MaxSeverity = v
+			seenMS = true
+		case "op":
+			if seenOP {
+				return PublicInputs{}, fmt.Errorf("duplicate overall pass")
+			}
+			v, err := strconv.Atoi(kv[1])
+			if err != nil {
+				return PublicInputs{}, fmt.Errorf("invalid overall pass")
+			}
+			if v != 0 && v != 1 {
+				return PublicInputs{}, fmt.Errorf("overall pass must be 0 or 1")
+			}
+			out.OverallPass = v == 1
+			seenOP = true
+		case "c":
+			if seenC {
+				return PublicInputs{}, fmt.Errorf("duplicate commitment")
+			}
+			if kv[1] == "" {
+
+thinking
+**Running Go tests to verify proof generation**
+exec
+/bin/zsh -lc 'go test ./...' in /Users/yani/Noema/backend succeeded in 307ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
 ok  	noema/internal/config	(cached)
@@ -56,446 +240,32 @@ ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
+ok  	noema/internal/zk/policyzk	(cached)
 
 thinking
-**Planning frontend improvement**
+**Confirming no changes needed**
 
-I'm identifying the frontend area to target a meaningful improvement limited to three files by exploring the project structure and considering using searches or focusing on web-related directories.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
-cmd
-data
-go.mod
-go.sum
-internal
-main
-web
-
-thinking
-**Inspecting web folder structure**
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web' in /Users/yani/Noema/backend succeeded in 51ms:
-static
-templates
-
-thinking
-**Checking templates**
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/templates' in /Users/yani/Noema/backend succeeded in 52ms:
-app.html
-app_new.html
-app_results.html
-index.html
-partial_header_app.html
-partial_header_public.html
-partial_header_upload.html
-partial_orb.html
-upload.html
-verify.html
-verify_results.html
-
-thinking
-**Identifying UI improvement targets**
-
-I'm considering starting with the index or app components and inspecting CSS files under web/static to identify areas for UI enhancement.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/static' in /Users/yani/Noema/backend succeeded in 52ms:
-app.js
-constraints.js
-results.js
-styles.css
-upload.js
-verify.js
-wizard.js
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 51ms:
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap');
-
-:root {
-  --bg: #05060a;
-  --bg-card: rgba(9, 12, 18, 0.9);
-  --text: #f4f6fb;
-  --text-muted: #9aa3b2;
-  --accent: #45d4ff;
-  --accent-strong: #2c7bff;
-  --accent-glow: rgba(69, 212, 255, 0.35);
-  --border: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(69, 212, 255, 0.4);
-  --error: #f87171;
-  --success: #22c55e;
-  --warning: #fbbf24;
-  --shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
-}
-
-*,
-*::before,
-
-thinking
-**Planning UI improvements**
-
-I'm focusing on enhancing responsiveness, focus states, input styling, and buttons, with an emphasis on improving forms. Next, I'll review form-related styles for targeted upgrades.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "input|textarea|select|button" web/static/styles.css' in /Users/yani/Noema/backend succeeded in 52ms:
-253:.input {
-264:.input::placeholder { color: var(--text-muted); }
-265:.input:hover { border-color: rgba(255,255,255,0.18); }
-266:.input:focus {
-271:.input.is-invalid {
-276:.textarea { min-height: 160px; resize: vertical; }
-344:.input:focus-visible,
-463:.upload-zone input[type="file"] {
-682:.severity-select {
-747:.switch input {
-773:.switch input:checked + .switch-track {
-777:.switch input:checked + .switch-track::after {
-1094:.verify-controls .input {
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,380p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
-  margin-bottom: 0.75rem;
-}
-
-.text-muted { color: var(--text-muted); }
-
-.form { display: flex; flex-direction: column; gap: 1rem; }
-
-.form-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  align-items: center;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  margin-bottom: 1.2rem;
-}
-
-thinking
-**Considering accessibility improvements**
-
-I'm evaluating small UI changes to enhance button focus accessibility and checking for existing animations to add reduced motion support.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "animation|@keyframes" web/static/styles.css' in /Users/yani/Noema/backend succeeded in 52ms:
-206:  animation: pulse 1.2s ease-in-out infinite;
-209:@keyframes pulse {
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '180,230p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 51ms:
-
-.empty-state-text {
-  font-size: 0.88rem;
-  color: var(--text-muted);
-  margin: 0;
-}
-
-.loading-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.6rem 0.95rem;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: rgba(0, 0, 0, 0.35);
-  color: var(--text-muted);
-  font-size: 0.9rem;
-}
-
-.loading-state::before {
-
-thinking
-**Considering accessibility and mobile improvements**
-
-I'm evaluating adding reduced motion support for accessibility beyond just cosmetics and planning to review media queries to improve mobile navigation.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "@media" web/static/styles.css' in /Users/yani/Noema/backend succeeded in 52ms:
-1002:@media (max-width: 900px) {
-1029:@media (max-width: 720px) {
-1245:@media (max-width: 760px) {
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '980,1060p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
-  color: var(--text-muted);
-}
-
-.results-proof-meta {
-  margin-top: 0.75rem;
-  font-size: 0.85rem;
-  color: var(--text-muted);
-}
-
-.results-pre {
-  margin-top: 0.9rem;
-  padding: 1rem;
-  background: rgba(0, 0, 0, 0.45);
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  max-height: 320px;
-  overflow: auto;
-  font-size: 0.85rem;
-  line-height: 1.5;
-}
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1060,1320p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
-    word-break: break-word;
-  }
-}
-
-/* ===== Public Verify ===== */
-.main-verify {
-  align-items: flex-start;
-  justify-content: center;
-}
-
-.verify-card {
-  width: 100%;
-  max-width: 1040px;
-  margin: 0 auto;
-}
-
-.verify-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-
-thinking
-**Evaluating UI improvements**
-
-Considering adding skip-to-content and enhancing contrast for input focus, but those seem adequate; exploring the possibility of adding a copy button to results requires JS while preserving functionality, and checking upload zone CSS next for potential visual updates.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && rg -n "upload" web/static/styles.css' in /Users/yani/Noema/backend succeeded in 51ms:
-444:.upload-zone {
-458:.upload-zone:hover,
-459:.upload-zone.dragover {
-463:.upload-zone input[type="file"] {
-472:.upload-result {
-479:.upload-result.success {
-483:.upload-result.error {
-488:.upload-details {
-500:.upload-file {
-507:.upload-file-name {
-514:.upload-file-size {
-519:.upload-hint {
-1052:  .upload-details {
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '420,540p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
-}
-.status-pill-pass {
-  color: #86efac;
-  border-color: rgba(34, 197, 94, 0.5);
-  background: rgba(34, 197, 94, 0.12);
-}
-.status-pill-fail {
-  color: #fca5a5;
-  border-color: rgba(248, 113, 113, 0.5);
-  background: rgba(248, 113, 113, 0.12);
-}
-.status-pill-unknown {
-  color: var(--text-muted);
-  border-color: rgba(255, 255, 255, 0.14);
-}
-
-.demos-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 0.6rem;
-
-
-thinking
-**Planning UI accessibility improvements**
-
-I'm targeting three files to enhance UX without changing functionality, focusing on adding keyboard focus styles and a reduced motion media query to improve accessibility and maintainability.
-thinking
-**Implementing focused CSS accessibility improvements**
-
-I'm adding focused styles like `:focus-within` for the upload zone and `:focus-visible` for buttons to enhance keyboard navigation visibility, plus selectively reducing animations to respect reduced motion preferences—all scoped within styles.css for modest UX gains.
-file update
-M /Users/yani/Noema/backend/web/static/styles.css
-@@ -462,2 +462,7 @@
- }
-+.upload-zone:focus-within {
-+  border-color: var(--accent);
-+  background: rgba(59, 130, 246, 0.1);
-+  box-shadow: 0 0 0 3px var(--accent-glow);
-+}
- .upload-zone input[type="file"] {
-@@ -1248 +1253,12 @@
- }
-+
-+@media (prefers-reduced-motion: reduce) {
-+  *,
-+  *::before,
-+  *::after {
-+    animation-duration: 0.01ms !important;
-+    animation-iteration-count: 1 !important;
-+    transition-duration: 0.01ms !important;
-+    scroll-behavior: auto !important;
-+  }
-+}
-apply_patch(auto_approved=true) exited 0 in 31ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/web/static/styles.css
-file update:
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 42da648819203a38c22a0ccd39064b66c4a5706a..b4398821905c29c555e265725408d45087175614
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -460,6 +460,11 @@
-   border-color: var(--accent);
-   background: rgba(59, 130, 246, 0.06);
- }
-+.upload-zone:focus-within {
-+  border-color: var(--accent);
-+  background: rgba(59, 130, 246, 0.1);
-+  box-shadow: 0 0 0 3px var(--accent-glow);
-+}
- .upload-zone input[type="file"] {
-   position: absolute;
-   inset: 0;
-@@ -1246,3 +1251,14 @@
-   .verify-row { grid-template-columns: 1fr; }
-   .verify-actions { justify-content: flex-start; }
- }
-+
-+@media (prefers-reduced-motion: reduce) {
-+  *,
-+  *::before,
-+  *::after {
-+    animation-duration: 0.01ms !important;
-+    animation-iteration-count: 1 !important;
-+    transition-duration: 0.01ms !important;
-+    scroll-behavior: auto !important;
-+  }
-+}
-
-file update:
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 42da648819203a38c22a0ccd39064b66c4a5706a..b4398821905c29c555e265725408d45087175614
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -460,6 +460,11 @@
-   border-color: var(--accent);
-   background: rgba(59, 130, 246, 0.06);
- }
-+.upload-zone:focus-within {
-+  border-color: var(--accent);
-+  background: rgba(59, 130, 246, 0.1);
-+  box-shadow: 0 0 0 3px var(--accent-glow);
-+}
- .upload-zone input[type="file"] {
-   position: absolute;
-   inset: 0;
-@@ -1246,3 +1251,14 @@
-   .verify-row { grid-template-columns: 1fr; }
-   .verify-actions { justify-content: flex-start; }
- }
-+
-+@media (prefers-reduced-motion: reduce) {
-+  *,
-+  *::before,
-+  *::after {
-+    animation-duration: 0.01ms !important;
-+    animation-iteration-count: 1 !important;
-+    transition-duration: 0.01ms !important;
-+    scroll-behavior: auto !important;
-+  }
-+}
-
-
-thinking
-**Rerunning full Go tests**
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 208ms:
-?   	noema/cmd/server	[no test files]
-?   	noema/internal/auth	[no test files]
-ok  	noema/internal/config	(cached)
-?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	(cached)
-?   	noema/internal/gemini	[no test files]
-ok  	noema/internal/httputil	(cached)
-ok  	noema/internal/session	(cached)
-ok  	noema/internal/verify	(cached)
-?   	noema/internal/web	[no test files]
-ok  	noema/internal/zk	(cached)
-file update:
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 42da648819203a38c22a0ccd39064b66c4a5706a..b4398821905c29c555e265725408d45087175614
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -460,6 +460,11 @@
-   border-color: var(--accent);
-   background: rgba(59, 130, 246, 0.06);
- }
-+.upload-zone:focus-within {
-+  border-color: var(--accent);
-+  background: rgba(59, 130, 246, 0.1);
-+  box-shadow: 0 0 0 3px var(--accent-glow);
-+}
- .upload-zone input[type="file"] {
-   position: absolute;
-   inset: 0;
-@@ -1246,3 +1251,14 @@
-   .verify-row { grid-template-columns: 1fr; }
-   .verify-actions { justify-content: flex-start; }
- }
-+
-+@media (prefers-reduced-motion: reduce) {
-+  *,
-+  *::before,
-+  *::after {
-+    animation-duration: 0.01ms !important;
-+    animation-iteration-count: 1 !important;
-+    transition-duration: 0.01ms !important;
-+    scroll-behavior: auto !important;
-+  }
-+}
-
+No code changes or tests were required since the mission already included adding tests. All existing requirements appear met with no further action.
 codex
-What you changed (short)
-- Improved keyboard accessibility for the upload dropzone with a clear focus state and added a reduced-motion mode for users who prefer less animation in `web/static/styles.css`.
+Files changed
+- None
 
-Tests run (must include go test ./…)
+What you changed
+- No changes needed; the PolicyGateCircuit already has a Groth16 pass/fail test using the in-repo Poseidon, and the zk plumbing is already wired to gnark.
+
+Tests run
 - `go test ./...`
 
-If you want another iteration, tell me which area to prioritize next (reliability, tests, UI, UX, etc.).
-file update:
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index 42da648819203a38c22a0ccd39064b66c4a5706a..b4398821905c29c555e265725408d45087175614
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -460,6 +460,11 @@
-   border-color: var(--accent);
-   background: rgba(59, 130, 246, 0.06);
- }
-+.upload-zone:focus-within {
-+  border-color: var(--accent);
-+  background: rgba(59, 130, 246, 0.1);
-+  box-shadow: 0 0 0 3px var(--accent-glow);
-+}
- .upload-zone input[type="file"] {
-   position: absolute;
-   inset: 0;
-@@ -1246,3 +1251,14 @@
-   .verify-row { grid-template-columns: 1fr; }
-   .verify-actions { justify-content: flex-start; }
- }
-+
-+@media (prefers-reduced-motion: reduce) {
-+  *,
-+  *::before,
-+  *::after {
-+    animation-duration: 0.01ms !important;
-+    animation-iteration-count: 1 !important;
-+    transition-duration: 0.01ms !important;
-+    scroll-behavior: auto !important;
-+  }
-+}
-
+If you want me to proceed anyway, say which part to modify and I’ll take the next iteration (max 3 files).
 tokens used
-19,910
-What you changed (short)
-- Improved keyboard accessibility for the upload dropzone with a clear focus state and added a reduced-motion mode for users who prefer less animation in `web/static/styles.css`.
+11,339
+Files changed
+- None
 
-Tests run (must include go test ./…)
+What you changed
+- No changes needed; the PolicyGateCircuit already has a Groth16 pass/fail test using the in-repo Poseidon, and the zk plumbing is already wired to gnark.
+
+Tests run
 - `go test ./...`
 
-If you want another iteration, tell me which area to prioritize next (reliability, tests, UI, UX, etc.).
+If you want me to proceed anyway, say which part to modify and I’ll take the next iteration (max 3 files).
