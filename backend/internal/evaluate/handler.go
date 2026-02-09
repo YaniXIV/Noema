@@ -144,15 +144,22 @@ func Handler(runsDir string, maxRuns int) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode evaluation result"})
 			return
 		}
-		datasetID := strings.TrimSpace(formValue(form, "dataset_id"))
-		if datasetID == "" {
-			if digest, err := datasetDigestHex(datasetFile); err == nil && digest != "" {
-				datasetID = "digest:" + digest
-			} else {
-				datasetID = "unknown"
-			}
+		datasetDigest, err := datasetDigestHex(datasetFile)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to compute dataset digest"})
+			return
 		}
-		commitment := zk.CommitmentSHA256(policyJSON, evalJSON, []byte(datasetID))
+		witness, err := buildPolicyWitness(policyConfig, evalOut)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "proof generation failed"})
+			return
+		}
+		witness.DatasetDigestHex = datasetDigest
+		commitment, err := zk.CommitmentPoseidon(datasetDigest, witness.Enabled, witness.MaxAllowed, witness.Severity)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "proof generation failed"})
+			return
+		}
 
 		log.Printf("policy_config=%s", string(policyJSON))
 		log.Printf("evaluation_result=%s", string(evalJSON))
@@ -161,6 +168,7 @@ func Handler(runsDir string, maxRuns int) gin.HandlerFunc {
 			MaxSeverity:     maxSeverity,
 			OverallPass:     overallPass,
 			Commitment:      commitment,
+			Witness:         witness,
 		})
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "proof generation failed"})
@@ -372,4 +380,68 @@ func formValue(form *multipart.Form, key string) string {
 		return ""
 	}
 	return form.Value[key][0]
+}
+
+var policyConstraintOrder = []string{
+	"pii_exposure_risk",
+	"regulated_sensitive_data_presence",
+	"data_provenance_or_consent_violation_risk",
+	"safety_critical_advisory_presence",
+	"harm_enabling_content_risk",
+	"dataset_intended_use_mismatch",
+}
+
+func buildPolicyWitness(cfg PolicyConfig, out EvaluationResult) (*zk.WitnessInputs, error) {
+	if len(policyConstraintOrder) != zk.PolicyGateConstraintCount {
+		return nil, fmt.Errorf("policy constraint ordering mismatch")
+	}
+	cfgByID := make(map[string]PolicyConstraint, len(cfg.Constraints))
+	for _, c := range cfg.Constraints {
+		cfgByID[c.ID] = c
+	}
+	resultsByID := make(map[string]EvalResultItem, len(out.Results))
+	for _, r := range out.Results {
+		resultsByID[r.ID] = r
+	}
+
+	known := make(map[string]struct{}, len(policyConstraintOrder))
+	for _, id := range policyConstraintOrder {
+		known[id] = struct{}{}
+	}
+	for id := range cfgByID {
+		if _, ok := known[id]; !ok {
+			return nil, fmt.Errorf("unsupported constraint id: %s", id)
+		}
+	}
+
+	var enabled [zk.PolicyGateConstraintCount]uint64
+	var maxAllowed [zk.PolicyGateConstraintCount]uint64
+	var severity [zk.PolicyGateConstraintCount]uint64
+
+	for i, id := range policyConstraintOrder {
+		c, ok := cfgByID[id]
+		if !ok {
+			enabled[i] = 0
+			maxAllowed[i] = 0
+			severity[i] = 0
+			continue
+		}
+		if c.Enabled {
+			enabled[i] = 1
+		} else {
+			enabled[i] = 0
+		}
+		maxAllowed[i] = uint64(c.MaxAllowed)
+		r, ok := resultsByID[id]
+		if !ok {
+			return nil, fmt.Errorf("missing evaluation result for %s", id)
+		}
+		severity[i] = uint64(r.Severity)
+	}
+
+	return &zk.WitnessInputs{
+		Enabled:    enabled,
+		MaxAllowed: maxAllowed,
+		Severity:   severity,
+	}, nil
 }
