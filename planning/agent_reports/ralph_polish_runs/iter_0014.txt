@@ -7,762 +7,185 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3ece-3c17-7c82-a227-c571b7f246ca
+session id: 019c4104-502a-7f33-a73b-c43eabfcbb10
 --------
 user
-You are an autonomous coding agent polishing the Noema repository.
+You are an autonomous coding agent working on the Noema repository.
 
-Hard rules:
+MISSION (priority order):
+1) Add a real gnark circuit test for the PolicyGateCircuit (using our in-repo Poseidon implementation, package circuits).
+2) Make the circuit test pass reliably (compile -> prove -> verify) using Groth16 on BN254.
+3) ONLY AFTER tests pass: wire the backend plumbing to call the gnark prover/verifier behind the existing zk.GenerateProof / zk.VerifyProof API, keeping the public API shape unchanged (proof_b64 + public_inputs_b64).
+
+HARD RULES:
 - DO NOT run git commit, git reset, git clean, or anything that modifies git history.
-- I will run git commits outside of you.
-- Keep changes small: max 3 files per iteration.
+- Keep changes small: max 3 files per iteration. If more is needed, stage work across multiple iterations.
 - No cosmetic-only edits.
-- No new dependencies unless absolutely necessary.
-- keep all the same ui functionality, the end user should be able to do the same stuff but the experiance and design should be better.
+- No new dependencies unless absolutely necessary. Use existing gnark dependencies already in the repo. If gnark is not yet in go.mod, add it only if unavoidable.
+- Do not change routes or response shapes. Keep /api/evaluate and /api/verify behavior stable.
+- Do not redesign UI. This task is ZK/circuit/testing/plumbing only.
+- Always run: cd backend && go test ./... at least once per iteration.
 
-Goal: continuously improve production quality. continuously improve front end quality and polish.
+WORKFLOW YOU MUST FOLLOW (do not skip):
+A) Inspect current circuit code and poseidon implementation:
+   - Find the PolicyGateCircuit (the policy ZK circuit) and confirm it imports and uses circuits.Poseidon (NOT gnark/std poseidon).
+   - Confirm fixed N=6 and the frozen constraint ordering.
+B) Add tests FIRST:
+   - Create a new Go test file for the circuit (example name: backend/internal/zk/policy_circuit_test.go or wherever circuits live).
+   - The test must:
+     1) Compile the circuit to R1CS
+     2) Run Groth16 setup
+     3) Build a witness with a PASS case and generate a proof
+     4) Verify the proof using the public witness
+     5) Build a witness with a FAIL case and confirm either:
+        - proving fails (unsatisfied), OR
+        - proving succeeds only if OverallPass is set correctly (0), AND verifying matches the expected output
+   - Use deterministic test vectors:
+     - datasetDigestLo/Hi fixed constants
+     - enabled/maxAllowed/severity arrays fixed constants
+     - Compute the expected Commitment in-circuit by setting Commitment to the same value computed by the circuit.
+       (In gnark tests, you can set Commitment as a public variable equal to circuits.Poseidon(domainSep + inputs) by reusing the same circuits.Poseidon function in a small helper circuit OR by computing it with the same function in-circuit and asserting equality.)
+   - The test must assert:
+     - OverallPass == 1 for pass vector, and verify passes.
+     - OverallPass == 0 for fail vector, and verify passes only with correct OverallPass.
+C) Fix whatever is broken until all tests pass:
+   - If compilation errors, fix imports or package paths.
+   - If poseidon params/functions missing, use the existing in-repo Poseidon code as the single source of truth.
+   - If constraints are wrong, fix circuit logic minimally.
+D) ONLY AFTER TESTS PASS: wire plumbing:
+   - Replace stub proof internals inside backend/internal/zk/zk.go (or equivalent) to use gnark Groth16 BN254:
+     - GenerateProof: build witness from inputs (enabled/maxAllowed/severity + datasetDigest limbs) and output proof bytes base64
+     - VerifyProof: decode proof and public inputs and verify using vk
+   - Keep existing API signatures and keep proof_b64 + public_inputs_b64 shape.
+   - You may keep public_inputs_b64 as the existing string format for now, but the verify path must map it deterministically to the circuit’s public witness (Commitment, OverallPass, MaxSeverity).
+   - Ensure keys are handled sanely for dev:
+     - For now, allow generating proving/verifying keys at startup or cached on disk under backend/internal/zk (dev only),
+       OR embed small test keys only for tests.
+     - Don’t over-engineer; prioritize working tests and stable verify.
 
-Iteration:
-1) Run: cd backend && go test ./...
-2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
-3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+ACCEPTANCE CRITERIA (must satisfy):
+- `cd backend && go test ./...` passes.
+- There is at least one new test that proves+verifies the circuit in a PASS case.
+- There is at least one test that demonstrates FAIL behavior (overall_pass=0) is enforced and verifiable.
+- If plumbing was wired, verify endpoint still accepts proof_b64/public_inputs_b64 and returns verified result correctly.
 
-Pick the highest-value improvement:
-A) Reliability/correctness: validation, error handling, run persistence, verify robustness
-B) Tests: add/strengthen tests for the change you made
-C) upgrading the user interface so that it looks better.
-D) Maintainability: reduce duplication with tiny refactors
-E) UX: wizard/results/verify clarity (small, safe changes)
-F) Docs: README/DEPLOYMENT polish
-G) Performance: safe wins only
-
-Finish with:
-- What you changed (short)
+OUTPUT FORMAT (end of each run):
+- Files changed (list)
+- What you changed (2–6 bullets)
 - Tests run (must include go test ./...)
 mcp startup: no servers
 
 thinking
-**Running tests**
+**Preparing to inspect files**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 190ms:
-?   	noema/cmd/server	[no test files]
-?   	noema/internal/auth	[no test files]
-ok  	noema/internal/config	(cached)
-?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	(cached)
-?   	noema/internal/gemini	[no test files]
-ok  	noema/internal/httputil	(cached)
-ok  	noema/internal/session	(cached)
-ok  	noema/internal/verify	(cached)
-?   	noema/internal/web	[no test files]
-ok  	noema/internal/zk	(cached)
-
-thinking
-**Identifying frontend components**
-
-I'm checking where frontend code lives to evaluate and improve it next. I'll list frontend-related directories or files to locate the relevant code.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls' in /Users/yani/Noema/backend succeeded in 52ms:
+/bin/zsh -lc ls in /Users/yani/Noema/backend succeeded in 53ms:
 cmd
 data
 go.mod
 go.sum
 internal
-main
 web
+exec
+/bin/zsh -lc 'rg -n "PolicyGateCircuit|PolicyGate" internal' in /Users/yani/Noema/backend succeeded in 53ms:
+internal/evaluate/handler.go:395:	if len(policyConstraintOrder) != zk.PolicyGateConstraintCount {
+internal/evaluate/handler.go:417:	var enabled [zk.PolicyGateConstraintCount]uint64
+internal/evaluate/handler.go:418:	var maxAllowed [zk.PolicyGateConstraintCount]uint64
+internal/evaluate/handler.go:419:	var severity [zk.PolicyGateConstraintCount]uint64
+internal/zk/zk_test.go:73:		Enabled:          [PolicyGateConstraintCount]uint64{1, 1, 1, 0, 1, 0},
+internal/zk/zk_test.go:74:		MaxAllowed:       [PolicyGateConstraintCount]uint64{1, 2, 0, 1, 2, 0},
+internal/zk/zk_test.go:75:		Severity:         [PolicyGateConstraintCount]uint64{1, 2, 0, 2, 1, 2},
+internal/zk/zk.go:33:// PolicyGateConstraintCount is the fixed N for the PolicyGateCircuit.
+internal/zk/zk.go:34:const PolicyGateConstraintCount = policyzk.N
+internal/zk/zk.go:55:// WitnessInputs carries the private inputs for the PolicyGateCircuit.
+internal/zk/zk.go:58:	Enabled          [PolicyGateConstraintCount]uint64
+internal/zk/zk.go:59:	MaxAllowed       [PolicyGateConstraintCount]uint64
+internal/zk/zk.go:60:	Severity         [PolicyGateConstraintCount]uint64
+internal/zk/zk.go:81:		var circuit policyzk.PolicyGateCircuit
+internal/zk/zk.go:121:	assignment := policyzk.PolicyGateCircuit{
+internal/zk/zk.go:180:	assignment := policyzk.PolicyGateCircuit{
+internal/zk/zk.go:346:func toVarArray(vals [PolicyGateConstraintCount]uint64) [PolicyGateConstraintCount]frontend.Variable {
+internal/zk/zk.go:347:	var out [PolicyGateConstraintCount]frontend.Variable
+internal/zk/zk.go:348:	for i := 0; i < PolicyGateConstraintCount; i++ {
+internal/zk/zk.go:354:// CommitmentPoseidon computes the PolicyGateCircuit commitment.
 
 thinking
-**Identifying frontend technology**
-
-I'm checking the project to confirm that the frontend is implemented as a web application.
+**Inspecting existing circuit test**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web' in /Users/yani/Noema/backend succeeded in 52ms:
-static
-templates
+/bin/zsh -lc "sed -n '1,220p' internal/zk/policyzk/circuit.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package policyzk
+
+import (
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark/frontend"
+)
+
+const N = 6
+
+// PolicyGateCircuit proves:
+//   - The prover knows (datasetDigest, policy config, gemini severities) that hash to Commitment
+//   - And the deterministic policy check passes:
+//     for each i: if Enabled[i] == 1 then Severity[i] <= MaxAllowed[i]
+//
+// Public outputs:
+// - Commitment: binds everything (dataset + policy + gemini outputs)
+// - OverallPass: 1 iff policy passes
+// - MaxSeverity (optional): max observed severity among enabled constraints
+type PolicyGateCircuit struct {
+	// ===== Private witness =====
 
 thinking
-**Identifying candidate files**
-
-I'm looking for up to three files likely related to page rendering or templates that could list or display content, to focus the exploration efficiently.
+**Inspecting existing test in policyzk**
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/templates' in /Users/yani/Noema/backend succeeded in 52ms:
-app.html
-app_new.html
-app_results.html
-index.html
-partial_header_app.html
-partial_header_public.html
-partial_header_upload.html
-partial_orb.html
-upload.html
-verify.html
-verify_results.html
+/bin/zsh -lc "sed -n '1,200p' internal/zk/policyzk/circuit_test.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package policyzk
 
-thinking
-**Listing CSS files**
+import (
+	"math/big"
+	"testing"
 
-I'm exploring the web/static directory to list CSS files for assessing styling on the index or app page.
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+	"github.com/stretchr/testify/require"
+)
+
+func TestPolicyGateCircuit_Groth16PassFail(t *testing.T) {
+	require := require.New(t)
+
+	var circuit PolicyGateCircuit
+	r1cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && ls web/static' in /Users/yani/Noema/backend succeeded in 52ms:
-app.js
-constraints.js
-results.js
-styles.css
-upload.js
-verify.js
-wizard.js
-
-thinking
-**Planning functional UI improvements**
-
-I'm aiming to enhance the UI by updating styles.css and templates/index.html with better layout, clarity, and accessibility while avoiding purely cosmetic changes or new dependencies. Next, I'll review styles.css to identify key improvement areas.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap');
-
-:root {
-  --bg: #05060a;
-  --bg-card: rgba(9, 12, 18, 0.9);
-  --text: #f4f6fb;
-  --text-muted: #9aa3b2;
-  --accent: #45d4ff;
-  --accent-strong: #2c7bff;
-  --accent-glow: rgba(69, 212, 255, 0.35);
-  --border: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(69, 212, 255, 0.4);
-  --error: #f87171;
-  --success: #22c55e;
-  --warning: #fbbf24;
-  --shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
+/bin/zsh -lc "sed -n '200,400p' internal/zk/policyzk/circuit_test.go" in /Users/yani/Noema/backend succeeded in 53ms:
+	var x4 fr.Element
+	x4.Square(&x2)
+	x.Mul(&x4, x)
 }
 
-*,
-*::before,
-
-thinking
-**Planning to review forms for focus and help improvements**
-
-I'll scroll more to find the form components and assess their focus states and input help for potential enhancements.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '220,520p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
-  margin-bottom: 0.75rem;
+func ark(state *[]fr.Element, c []fr.Element, r int) {
+	s := *state
+	for i := range s {
+		s[i].Add(&s[i], &c[i+r])
+	}
 }
 
-.text-muted { color: var(--text-muted); }
+func mix(in []fr.Element, m [][]fr.Element) []fr.Element {
+	out := make([]fr.Element, len(in))
+	for col := range in {
+		var acc fr.Element
+		for row := range in {
+			var term fr.Element
+			term.Mul(&m[row][col], &in[row])
+			acc.Add(&acc, &term)
 
-.form { display: flex; flex-direction: column; gap: 1rem; }
+thinking
+**Confirming Poseidon constants usage**
 
-.form-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  align-items: center;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  margin-bottom: 1.2rem;
-}
+The test already uses Poseidon circuit constants from the circuits package, matching the in-repo implementation. I'll run all Go tests to verify existing gnark circuit tests and identify any failures.
 exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '520,1040p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
-  min-width: 0;
-}
-
-.upload-file-name {
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.upload-file-size {
-  font-size: 0.82rem;
-  color: var(--text-muted);
-}
-
-.upload-hint {
-  margin-top: 0.65rem;
-}
-
-/* ===== Wizard ===== */
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1040,1320p' web/static/styles.css" in /Users/yani/Noema/backend succeeded in 52ms:
-    flex-direction: column;
-    align-items: flex-start;
-  }
-}
-
-@media (max-width: 720px) {
-  .card {
-    padding: 2rem 1.6rem;
-  }
-
-  .stepper {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .stepper-sep {
-    width: 100%;
-  }
-
-  .constraint-row {
-
-thinking
-**Planning UX improvements**
-
-I'm focusing on meaningful UI enhancements like adding helpful empty states or improving readability without introducing new dependencies, starting by inspecting templates such as index.html and verify for suitable spots.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' web/templates/index.html" in /Users/yani/Noema/backend succeeded in 52ms:
-{{define "index"}}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Noema</title>
-  <link rel="stylesheet" href="/static/styles.css">
-</head>
-<body>
-  {{template "header_public" .}}
-
-  <main class="main">
-    {{template "orb" .}}
-    <div class="card">
-      <div class="card-kicker">Secure access</div>
-      <h1 class="card-title">Judge Key</h1>
-      <p class="card-text">Evaluation and uploads are gated. Public verification is always open.</p>
-      <form action="/auth" method="post" class="form">
-        <input type="password" name="judge_key" id="judge_key" class="input" placeholder="Enter judge key" autocomplete="off" value="{{.JudgeKeyVal}}" autofocus>
-
-thinking
-**Planning accessibility improvements**
-
-Considering adding labels, hints, and `role="alert"` attributes in forms to improve accessibility without cosmetic-only edits; focusing on updating markup in a few key HTML files while reusing existing CSS classes.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' web/templates/verify.html" in /Users/yani/Noema/backend succeeded in 52ms:
-{{define "verify"}}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Noema — Verify</title>
-  <link rel="stylesheet" href="/static/styles.css">
-</head>
-<body>
-  {{template "header_public" .}}
-
-  <main class="main main-verify">
-    {{template "orb" .}}
-    <div class="card verify-card">
-      <div class="verify-header">
-        <div>
-          <div class="card-kicker">Public</div>
-          <h1 class="card-title">Public verification</h1>
-          <p class="card-text">Verify recent proofs without revealing datasets. Recent runs are loaded from this browser.</p>
-
-
-thinking
-**Planning meaningful verify page improvements**
-
-I'm focusing on improving the verify page's UX by adding a structured empty state with the existing `.empty-state` class and enhancing the filter input with a label and hint for clarity. This will be one meaningful update without cosmetic-only changes or new CSS.
-thinking
-**Adding label, hint, and structured empty state with CSS update**
-
-I'm planning to update verify.html to wrap the filter input in a `.form-group` with label and hint, add a structured `.empty-state` for no proofs, and adjust `.verify-controls` CSS to align items flex-start for better layout. This involves two files: HTML and CSS. Next, I'll verify JS compatibility with the new empty state markup.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' web/static/verify.js" in /Users/yani/Noema/backend succeeded in 51ms:
-(function() {
-  var STORAGE_KEY = 'noema_recent_runs';
-  var MAX_RECENT = 20;
-  var listEl = document.getElementById('verify-list');
-  var emptyEl = document.getElementById('verify-empty');
-  var filterInput = document.getElementById('verify-filter');
-  var countEl = document.getElementById('verify-count');
-  var progressEl = document.getElementById('verify-progress');
-  var verifyAllBtn = document.getElementById('verify-all');
-  var clearBtn = document.getElementById('verify-clear');
-
-  function loadRecentRuns() {
-    try {
-      var raw = localStorage.getItem(STORAGE_KEY);
-      var runs = raw ? JSON.parse(raw) : [];
-      if (!Array.isArray(runs)) return [];
-      return runs.slice().sort(function(a, b) {
-        return (b.ts || 0) - (a.ts || 0);
-      });
-    } catch (e) {
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '260,520p' web/static/verify.js" in /Users/yani/Noema/backend succeeded in 52ms:
-    if (verifyAllBtn) verifyAllBtn.disabled = filtered.length === 0;
-    if (clearBtn) clearBtn.disabled = runs.length === 0;
-  }
-
-  function verifyAllVisible() {
-    var rows = Array.prototype.slice.call(listEl.querySelectorAll('.verify-row'));
-    if (rows.length === 0) return;
-
-    verifyAllBtn.disabled = true;
-    var total = rows.length;
-    var done = 0;
-
-    function updateProgress() {
-      progressEl.textContent = 'Verifying ' + done + '/' + total + '…';
-    }
-
-    updateProgress();
-
-    var chain = Promise.resolve();
-    rows.forEach(function(row) {
-
-
-thinking
-**Planning filter enhancement**
-
-I'm planning to extend the filter to match runs by name as well as run_id, updating verify.js, verify.html, and styles.css accordingly for a meaningful UX and functionality improvement. I'll also adjust empty states to mention local storage and tweak styling for better layout and readability.
-thinking
-**Updating filter logic and accessibility**
-
-I'm enhancing the filter to match both run ID and name with case-insensitive checks, adding an accessible label with aria-describedby pointing to a hint, and confirming the empty state element stays inside the list container for consistent behavior.
-file update
-M /Users/yani/Noema/backend/web/templates/verify.html
-@@ -28,3 +28,7 @@
-       <div class="verify-controls">
--        <input type="text" id="verify-filter" class="input" placeholder="Filter by run id">
-+        <div class="form-group">
-+          <label class="label" for="verify-filter">Filter runs</label>
-+          <input type="text" id="verify-filter" class="input" placeholder="Filter by run id" aria-describedby="verify-filter-hint">
-+          <p class="form-hint" id="verify-filter-hint">Matches run IDs saved in this browser.</p>
-+        </div>
-         <div class="verify-meta">
-@@ -36,3 +40,6 @@
-       <div class="verify-list" id="verify-list">
--        <p class="verify-muted" id="verify-empty">No proofs yet. Run an evaluation to generate a proof.</p>
-+        <div class="empty-state" id="verify-empty">
-+          <div class="empty-state-title">No proofs yet</div>
-+          <p class="empty-state-text">Run an evaluation to generate a proof. This list only shows runs saved in this browser.</p>
-+        </div>
-       </div>
-apply_patch(auto_approved=true) exited 0 in 28ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/web/templates/verify.html
-file update:
-diff --git a/backend/web/templates/verify.html b/backend/web/templates/verify.html
-index 1e715eca9f5c546595f88e2e7acd18fc1e82862d..75bddd7ffa03e97b698527881a1b94fbfd5253a5
---- a/backend/web/templates/verify.html
-+++ b/backend/web/templates/verify.html
-@@ -26,7 +26,11 @@
-       </div>
- 
-       <div class="verify-controls">
--        <input type="text" id="verify-filter" class="input" placeholder="Filter by run id">
-+        <div class="form-group">
-+          <label class="label" for="verify-filter">Filter runs</label>
-+          <input type="text" id="verify-filter" class="input" placeholder="Filter by run id" aria-describedby="verify-filter-hint">
-+          <p class="form-hint" id="verify-filter-hint">Matches run IDs saved in this browser.</p>
-+        </div>
-         <div class="verify-meta">
-           <span class="verify-muted" id="verify-count"></span>
-           <span class="verify-muted" id="verify-progress"></span>
-@@ -34,7 +38,10 @@
-       </div>
- 
-       <div class="verify-list" id="verify-list">
--        <p class="verify-muted" id="verify-empty">No proofs yet. Run an evaluation to generate a proof.</p>
-+        <div class="empty-state" id="verify-empty">
-+          <div class="empty-state-title">No proofs yet</div>
-+          <p class="empty-state-text">Run an evaluation to generate a proof. This list only shows runs saved in this browser.</p>
-+        </div>
-       </div>
-     </div>
-   </main>
-
-file update:
-diff --git a/backend/web/templates/verify.html b/backend/web/templates/verify.html
-index 1e715eca9f5c546595f88e2e7acd18fc1e82862d..75bddd7ffa03e97b698527881a1b94fbfd5253a5
---- a/backend/web/templates/verify.html
-+++ b/backend/web/templates/verify.html
-@@ -26,7 +26,11 @@
-       </div>
- 
-       <div class="verify-controls">
--        <input type="text" id="verify-filter" class="input" placeholder="Filter by run id">
-+        <div class="form-group">
-+          <label class="label" for="verify-filter">Filter runs</label>
-+          <input type="text" id="verify-filter" class="input" placeholder="Filter by run id" aria-describedby="verify-filter-hint">
-+          <p class="form-hint" id="verify-filter-hint">Matches run IDs saved in this browser.</p>
-+        </div>
-         <div class="verify-meta">
-           <span class="verify-muted" id="verify-count"></span>
-           <span class="verify-muted" id="verify-progress"></span>
-@@ -34,7 +38,10 @@
-       </div>
- 
-       <div class="verify-list" id="verify-list">
--        <p class="verify-muted" id="verify-empty">No proofs yet. Run an evaluation to generate a proof.</p>
-+        <div class="empty-state" id="verify-empty">
-+          <div class="empty-state-title">No proofs yet</div>
-+          <p class="empty-state-text">Run an evaluation to generate a proof. This list only shows runs saved in this browser.</p>
-+        </div>
-       </div>
-     </div>
-   </main>
-
-
-thinking
-**Updating filter hint text**
-
-The hint text will change to "run IDs or names" to reflect filtering by name, and the placeholder will be updated accordingly. I'll check that run names are stored locally or accessible in recent runs before patching verify.html.
-file update
-M /Users/yani/Noema/backend/web/templates/verify.html
-@@ -30,4 +30,4 @@
-           <label class="label" for="verify-filter">Filter runs</label>
--          <input type="text" id="verify-filter" class="input" placeholder="Filter by run id" aria-describedby="verify-filter-hint">
--          <p class="form-hint" id="verify-filter-hint">Matches run IDs saved in this browser.</p>
-+          <input type="text" id="verify-filter" class="input" placeholder="Filter by run id or name" aria-describedby="verify-filter-hint">
-+          <p class="form-hint" id="verify-filter-hint">Matches run IDs or names saved in this browser.</p>
-         </div>
-apply_patch(auto_approved=true) exited 0 in 39ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/web/templates/verify.html
-file update:
-diff --git a/backend/web/templates/verify.html b/backend/web/templates/verify.html
-index 1e715eca9f5c546595f88e2e7acd18fc1e82862d..d61ad03eba94842f341a66920529f5f6219c0b09
---- a/backend/web/templates/verify.html
-+++ b/backend/web/templates/verify.html
-@@ -26,7 +26,11 @@
-       </div>
- 
-       <div class="verify-controls">
--        <input type="text" id="verify-filter" class="input" placeholder="Filter by run id">
-+        <div class="form-group">
-+          <label class="label" for="verify-filter">Filter runs</label>
-+          <input type="text" id="verify-filter" class="input" placeholder="Filter by run id or name" aria-describedby="verify-filter-hint">
-+          <p class="form-hint" id="verify-filter-hint">Matches run IDs or names saved in this browser.</p>
-+        </div>
-         <div class="verify-meta">
-           <span class="verify-muted" id="verify-count"></span>
-           <span class="verify-muted" id="verify-progress"></span>
-@@ -34,7 +38,10 @@
-       </div>
- 
-       <div class="verify-list" id="verify-list">
--        <p class="verify-muted" id="verify-empty">No proofs yet. Run an evaluation to generate a proof.</p>
-+        <div class="empty-state" id="verify-empty">
-+          <div class="empty-state-title">No proofs yet</div>
-+          <p class="empty-state-text">Run an evaluation to generate a proof. This list only shows runs saved in this browser.</p>
-+        </div>
-       </div>
-     </div>
-   </main>
-
-file update:
-diff --git a/backend/web/templates/verify.html b/backend/web/templates/verify.html
-index 1e715eca9f5c546595f88e2e7acd18fc1e82862d..d61ad03eba94842f341a66920529f5f6219c0b09
---- a/backend/web/templates/verify.html
-+++ b/backend/web/templates/verify.html
-@@ -26,7 +26,11 @@
-       </div>
- 
-       <div class="verify-controls">
--        <input type="text" id="verify-filter" class="input" placeholder="Filter by run id">
-+        <div class="form-group">
-+          <label class="label" for="verify-filter">Filter runs</label>
-+          <input type="text" id="verify-filter" class="input" placeholder="Filter by run id or name" aria-describedby="verify-filter-hint">
-+          <p class="form-hint" id="verify-filter-hint">Matches run IDs or names saved in this browser.</p>
-+        </div>
-         <div class="verify-meta">
-           <span class="verify-muted" id="verify-count"></span>
-           <span class="verify-muted" id="verify-progress"></span>
-@@ -34,7 +38,10 @@
-       </div>
- 
-       <div class="verify-list" id="verify-list">
--        <p class="verify-muted" id="verify-empty">No proofs yet. Run an evaluation to generate a proof.</p>
-+        <div class="empty-state" id="verify-empty">
-+          <div class="empty-state-title">No proofs yet</div>
-+          <p class="empty-state-text">Run an evaluation to generate a proof. This list only shows runs saved in this browser.</p>
-+        </div>
-       </div>
-     </div>
-   </main>
-
-
-
-thinking
-**Adjusting CSS flex alignment**
-
-I'm updating `.verify-controls` to use `align-items: flex-start` with `.verify-meta` getting a top margin to better align with input fields, balancing cosmetic improvement and responsiveness.
-thinking
-**Refining CSS spacing with minimal changes**
-
-I'm opting to keep `.verify-controls` aligned center and add `.verify-controls .form-group` with `flex: 1` and `margin-bottom: 0` to tighten layout while accepting that `.verify-meta` remains vertically centered relative to the group for simplicity.
-file update
-M /Users/yani/Noema/backend/web/static/styles.css
-@@ -1119,2 +1119,8 @@
- 
-+.verify-controls .form-group {
-+  flex: 1;
-+  min-width: 240px;
-+  margin-bottom: 0;
-+}
-+
- .verify-controls .input {
-apply_patch(auto_approved=true) exited 0 in 38ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/web/static/styles.css
-file update:
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index dc8f3c9acfe5d85820d2bab4503941f7f52db1d8..a617332ab3bfd84a62c185d75806b800d1c993cf
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -1117,6 +1117,12 @@
-   flex-wrap: wrap;
- }
- 
-+.verify-controls .form-group {
-+  flex: 1;
-+  min-width: 240px;
-+  margin-bottom: 0;
-+}
-+
- .verify-controls .input {
-   min-width: 240px;
-   flex: 1;
-diff --git a/backend/web/templates/verify.html b/backend/web/templates/verify.html
-index 1e715eca9f5c546595f88e2e7acd18fc1e82862d..d61ad03eba94842f341a66920529f5f6219c0b09
---- a/backend/web/templates/verify.html
-+++ b/backend/web/templates/verify.html
-@@ -26,7 +26,11 @@
-       </div>
- 
-       <div class="verify-controls">
--        <input type="text" id="verify-filter" class="input" placeholder="Filter by run id">
-+        <div class="form-group">
-+          <label class="label" for="verify-filter">Filter runs</label>
-+          <input type="text" id="verify-filter" class="input" placeholder="Filter by run id or name" aria-describedby="verify-filter-hint">
-+          <p class="form-hint" id="verify-filter-hint">Matches run IDs or names saved in this browser.</p>
-+        </div>
-         <div class="verify-meta">
-           <span class="verify-muted" id="verify-count"></span>
-           <span class="verify-muted" id="verify-progress"></span>
-@@ -34,7 +38,10 @@
-       </div>
- 
-       <div class="verify-list" id="verify-list">
--        <p class="verify-muted" id="verify-empty">No proofs yet. Run an evaluation to generate a proof.</p>
-+        <div class="empty-state" id="verify-empty">
-+          <div class="empty-state-title">No proofs yet</div>
-+          <p class="empty-state-text">Run an evaluation to generate a proof. This list only shows runs saved in this browser.</p>
-+        </div>
-       </div>
-     </div>
-   </main>
-
-file update:
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index dc8f3c9acfe5d85820d2bab4503941f7f52db1d8..a617332ab3bfd84a62c185d75806b800d1c993cf
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -1117,6 +1117,12 @@
-   flex-wrap: wrap;
- }
- 
-+.verify-controls .form-group {
-+  flex: 1;
-+  min-width: 240px;
-+  margin-bottom: 0;
-+}
-+
- .verify-controls .input {
-   min-width: 240px;
-   flex: 1;
-diff --git a/backend/web/templates/verify.html b/backend/web/templates/verify.html
-index 1e715eca9f5c546595f88e2e7acd18fc1e82862d..d61ad03eba94842f341a66920529f5f6219c0b09
---- a/backend/web/templates/verify.html
-+++ b/backend/web/templates/verify.html
-@@ -26,7 +26,11 @@
-       </div>
- 
-       <div class="verify-controls">
--        <input type="text" id="verify-filter" class="input" placeholder="Filter by run id">
-+        <div class="form-group">
-+          <label class="label" for="verify-filter">Filter runs</label>
-+          <input type="text" id="verify-filter" class="input" placeholder="Filter by run id or name" aria-describedby="verify-filter-hint">
-+          <p class="form-hint" id="verify-filter-hint">Matches run IDs or names saved in this browser.</p>
-+        </div>
-         <div class="verify-meta">
-           <span class="verify-muted" id="verify-count"></span>
-           <span class="verify-muted" id="verify-progress"></span>
-@@ -34,7 +38,10 @@
-       </div>
- 
-       <div class="verify-list" id="verify-list">
--        <p class="verify-muted" id="verify-empty">No proofs yet. Run an evaluation to generate a proof.</p>
-+        <div class="empty-state" id="verify-empty">
-+          <div class="empty-state-title">No proofs yet</div>
-+          <p class="empty-state-text">Run an evaluation to generate a proof. This list only shows runs saved in this browser.</p>
-+        </div>
-       </div>
-     </div>
-   </main>
-
-
-thinking
-**Adjusting filter logic in verify.js**
-
-Planning to update the filter logic in verify.js next and will patch afterward; considering if the .input min-width in verify-controls is now redundant but acceptable.
-file update
-M /Users/yani/Noema/backend/web/static/verify.js
-@@ -240,3 +240,6 @@
-     var filtered = runs.filter(function(r) {
--      return !q || (r.run_id && r.run_id.toLowerCase().indexOf(q) !== -1);
-+      if (!q) return true;
-+      var runId = (r.run_id || '').toLowerCase();
-+      var runName = (r.name || '').toLowerCase();
-+      return runId.indexOf(q) !== -1 || runName.indexOf(q) !== -1;
-     });
-apply_patch(auto_approved=true) exited 0 in 46ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/web/static/verify.js
-file update:
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index dc8f3c9acfe5d85820d2bab4503941f7f52db1d8..a617332ab3bfd84a62c185d75806b800d1c993cf
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -1117,6 +1117,12 @@
-   flex-wrap: wrap;
- }
- 
-+.verify-controls .form-group {
-+  flex: 1;
-+  min-width: 240px;
-+  margin-bottom: 0;
-+}
-+
- .verify-controls .input {
-   min-width: 240px;
-   flex: 1;
-diff --git a/backend/web/static/verify.js b/backend/web/static/verify.js
-index d4560b3e966d6aeb8bc2dfdae4d54d622b8779e2..763e2c223cb7cf01373aa4de600125d8f5cef2eb
---- a/backend/web/static/verify.js
-+++ b/backend/web/static/verify.js
-@@ -238,7 +238,10 @@
-     var runs = loadRecentRuns();
-     var q = (filterInput.value || '').trim().toLowerCase();
-     var filtered = runs.filter(function(r) {
--      return !q || (r.run_id && r.run_id.toLowerCase().indexOf(q) !== -1);
-+      if (!q) return true;
-+      var runId = (r.run_id || '').toLowerCase();
-+      var runName = (r.name || '').toLowerCase();
-+      return runId.indexOf(q) !== -1 || runName.indexOf(q) !== -1;
-     });
- 
-     listEl.innerHTML = '';
-diff --git a/backend/web/templates/verify.html b/backend/web/templates/verify.html
-index 1e715eca9f5c546595f88e2e7acd18fc1e82862d..d61ad03eba94842f341a66920529f5f6219c0b09
---- a/backend/web/templates/verify.html
-+++ b/backend/web/templates/verify.html
-@@ -26,7 +26,11 @@
-       </div>
- 
-       <div class="verify-controls">
--        <input type="text" id="verify-filter" class="input" placeholder="Filter by run id">
-+        <div class="form-group">
-+          <label class="label" for="verify-filter">Filter runs</label>
-+          <input type="text" id="verify-filter" class="input" placeholder="Filter by run id or name" aria-describedby="verify-filter-hint">
-+          <p class="form-hint" id="verify-filter-hint">Matches run IDs or names saved in this browser.</p>
-+        </div>
-         <div class="verify-meta">
-           <span class="verify-muted" id="verify-count"></span>
-           <span class="verify-muted" id="verify-progress"></span>
-@@ -34,7 +38,10 @@
-       </div>
- 
-       <div class="verify-list" id="verify-list">
--        <p class="verify-muted" id="verify-empty">No proofs yet. Run an evaluation to generate a proof.</p>
-+        <div class="empty-state" id="verify-empty">
-+          <div class="empty-state-title">No proofs yet</div>
-+          <p class="empty-state-text">Run an evaluation to generate a proof. This list only shows runs saved in this browser.</p>
-+        </div>
-       </div>
-     </div>
-   </main>
-
-file update:
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index dc8f3c9acfe5d85820d2bab4503941f7f52db1d8..a617332ab3bfd84a62c185d75806b800d1c993cf
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -1117,6 +1117,12 @@
-   flex-wrap: wrap;
- }
- 
-+.verify-controls .form-group {
-+  flex: 1;
-+  min-width: 240px;
-+  margin-bottom: 0;
-+}
-+
- .verify-controls .input {
-   min-width: 240px;
-   flex: 1;
-diff --git a/backend/web/static/verify.js b/backend/web/static/verify.js
-index d4560b3e966d6aeb8bc2dfdae4d54d622b8779e2..763e2c223cb7cf01373aa4de600125d8f5cef2eb
---- a/backend/web/static/verify.js
-+++ b/backend/web/static/verify.js
-@@ -238,7 +238,10 @@
-     var runs = loadRecentRuns();
-     var q = (filterInput.value || '').trim().toLowerCase();
-     var filtered = runs.filter(function(r) {
--      return !q || (r.run_id && r.run_id.toLowerCase().indexOf(q) !== -1);
-+      if (!q) return true;
-+      var runId = (r.run_id || '').toLowerCase();
-+      var runName = (r.name || '').toLowerCase();
-+      return runId.indexOf(q) !== -1 || runName.indexOf(q) !== -1;
-     });
- 
-     listEl.innerHTML = '';
-diff --git a/backend/web/templates/verify.html b/backend/web/templates/verify.html
-index 1e715eca9f5c546595f88e2e7acd18fc1e82862d..d61ad03eba94842f341a66920529f5f6219c0b09
---- a/backend/web/templates/verify.html
-+++ b/backend/web/templates/verify.html
-@@ -26,7 +26,11 @@
-       </div>
- 
-       <div class="verify-controls">
--        <input type="text" id="verify-filter" class="input" placeholder="Filter by run id">
-+        <div class="form-group">
-+          <label class="label" for="verify-filter">Filter runs</label>
-+          <input type="text" id="verify-filter" class="input" placeholder="Filter by run id or name" aria-describedby="verify-filter-hint">
-+          <p class="form-hint" id="verify-filter-hint">Matches run IDs or names saved in this browser.</p>
-+        </div>
-         <div class="verify-meta">
-           <span class="verify-muted" id="verify-count"></span>
-           <span class="verify-muted" id="verify-progress"></span>
-@@ -34,7 +38,10 @@
-       </div>
- 
-       <div class="verify-list" id="verify-list">
--        <p class="verify-muted" id="verify-empty">No proofs yet. Run an evaluation to generate a proof.</p>
-+        <div class="empty-state" id="verify-empty">
-+          <div class="empty-state-title">No proofs yet</div>
-+          <p class="empty-state-text">Run an evaluation to generate a proof. This list only shows runs saved in this browser.</p>
-+        </div>
-       </div>
-     </div>
-   </main>
-
-
-thinking
-**Clarifying hint text**
-
-I'll update the hint to specify whether it refers to IDs or names, then run all tests with `go test ./...` to verify.
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 248ms:
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 311ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
 ok  	noema/internal/config	(cached)
@@ -774,160 +197,119 @@ ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
-file update:
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index dc8f3c9acfe5d85820d2bab4503941f7f52db1d8..a617332ab3bfd84a62c185d75806b800d1c993cf
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -1117,6 +1117,12 @@
-   flex-wrap: wrap;
- }
- 
-+.verify-controls .form-group {
-+  flex: 1;
-+  min-width: 240px;
-+  margin-bottom: 0;
-+}
-+
- .verify-controls .input {
-   min-width: 240px;
-   flex: 1;
-diff --git a/backend/web/static/verify.js b/backend/web/static/verify.js
-index d4560b3e966d6aeb8bc2dfdae4d54d622b8779e2..763e2c223cb7cf01373aa4de600125d8f5cef2eb
---- a/backend/web/static/verify.js
-+++ b/backend/web/static/verify.js
-@@ -238,7 +238,10 @@
-     var runs = loadRecentRuns();
-     var q = (filterInput.value || '').trim().toLowerCase();
-     var filtered = runs.filter(function(r) {
--      return !q || (r.run_id && r.run_id.toLowerCase().indexOf(q) !== -1);
-+      if (!q) return true;
-+      var runId = (r.run_id || '').toLowerCase();
-+      var runName = (r.name || '').toLowerCase();
-+      return runId.indexOf(q) !== -1 || runName.indexOf(q) !== -1;
-     });
- 
-     listEl.innerHTML = '';
-diff --git a/backend/web/templates/verify.html b/backend/web/templates/verify.html
-index 1e715eca9f5c546595f88e2e7acd18fc1e82862d..d61ad03eba94842f341a66920529f5f6219c0b09
---- a/backend/web/templates/verify.html
-+++ b/backend/web/templates/verify.html
-@@ -26,7 +26,11 @@
-       </div>
- 
-       <div class="verify-controls">
--        <input type="text" id="verify-filter" class="input" placeholder="Filter by run id">
-+        <div class="form-group">
-+          <label class="label" for="verify-filter">Filter runs</label>
-+          <input type="text" id="verify-filter" class="input" placeholder="Filter by run id or name" aria-describedby="verify-filter-hint">
-+          <p class="form-hint" id="verify-filter-hint">Matches run IDs or names saved in this browser.</p>
-+        </div>
-         <div class="verify-meta">
-           <span class="verify-muted" id="verify-count"></span>
-           <span class="verify-muted" id="verify-progress"></span>
-@@ -34,7 +38,10 @@
-       </div>
- 
-       <div class="verify-list" id="verify-list">
--        <p class="verify-muted" id="verify-empty">No proofs yet. Run an evaluation to generate a proof.</p>
-+        <div class="empty-state" id="verify-empty">
-+          <div class="empty-state-title">No proofs yet</div>
-+          <p class="empty-state-text">Run an evaluation to generate a proof. This list only shows runs saved in this browser.</p>
-+        </div>
-       </div>
-     </div>
-   </main>
+ok  	noema/internal/zk/policyzk	(cached)
 
+thinking
+**Reviewing plumbing and test strategy**
+
+Tests are already passing, so I need to inspect the plumbing in zk.go to confirm if it’s a stub or needs wiring before adding new tests.
+exec
+/bin/zsh -lc "sed -n '1,260p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package zk
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"math/big"
+	"strconv"
+	"strings"
+	"sync"
+
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/constraint"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+exec
+/bin/zsh -lc "sed -n '260,520p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 52ms:
+			out.MaxSeverity = v
+			seenMS = true
+		case "op":
+			if seenOP {
+				return PublicInputs{}, fmt.Errorf("duplicate overall pass")
+			}
+			v, err := strconv.Atoi(kv[1])
+			if err != nil {
+				return PublicInputs{}, fmt.Errorf("invalid overall pass")
+			}
+			if v != 0 && v != 1 {
+				return PublicInputs{}, fmt.Errorf("overall pass must be 0 or 1")
+			}
+			out.OverallPass = v == 1
+			seenOP = true
+		case "c":
+			if seenC {
+				return PublicInputs{}, fmt.Errorf("duplicate commitment")
+			}
+			if kv[1] == "" {
+exec
+/bin/zsh -lc "sed -n '520,780p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+		out[i] = make([]fr.Element, len(in[i]))
+		for j := range in[i] {
+			out[i][j].SetBigInt(in[i][j])
+		}
+	}
+	return out
+}
+
+func elementToBigInt(in fr.Element) *big.Int {
+	var out big.Int
+	in.BigInt(&out)
+	return &out
+}
+
+thinking
+**Verifying existing circuit test coverage**
+
+Existing tests use the in-repo Poseidon and fixed parameters as required, so no code changes seem needed; next, I’ll verify the test execution output to confirm everything passes.
+exec
+/bin/zsh -lc "sed -n '1,200p' internal/zk/zk_test.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package zk
+
+import (
+	"encoding/base64"
+	"testing"
+)
+
+func TestProofRoundTrip(t *testing.T) {
+	witness := testWitnessInputs()
+	commitment, err := CommitmentPoseidon(witness.DatasetDigestHex, witness.Enabled, witness.MaxAllowed, witness.Severity)
+	if err != nil {
+		t.Fatalf("CommitmentPoseidon error: %v", err)
+	}
+	pi := PublicInputs{
+		PolicyThreshold: 0,
+		MaxSeverity:     2,
+		OverallPass:     true,
+		Commitment:      commitment,
+		Witness:         witness,
+	}
+
+thinking
+**Confirming task completion**
+
+The wiring and tests are already done with no file changes needed; next, I'll provide a summary of the completed work.
 codex
-What you changed (short)
-- Improved the verify page UX with labeled filtering, clearer empty-state messaging, and filter-by-name support for recent runs.
-- Tightened layout for the new filter block in the verify controls.
+Files changed
+- None
 
-Files touched (max 3)
-- `web/templates/verify.html`
-- `web/static/styles.css`
-- `web/static/verify.js`
+What you changed
+- No changes required; the repository already has a Groth16 BN254 circuit test for `PolicyGateCircuit` using `circuits` Poseidon, and `GenerateProof`/`VerifyProof` are already wired to gnark with cached keys.
 
 Tests run
-- `go test ./...`
-
-If you want another iteration, tell me which area to target next (e.g., upload flow, results page clarity, wizard readability).
-file update:
-diff --git a/backend/web/static/styles.css b/backend/web/static/styles.css
-index dc8f3c9acfe5d85820d2bab4503941f7f52db1d8..a617332ab3bfd84a62c185d75806b800d1c993cf
---- a/backend/web/static/styles.css
-+++ b/backend/web/static/styles.css
-@@ -1117,6 +1117,12 @@
-   flex-wrap: wrap;
- }
- 
-+.verify-controls .form-group {
-+  flex: 1;
-+  min-width: 240px;
-+  margin-bottom: 0;
-+}
-+
- .verify-controls .input {
-   min-width: 240px;
-   flex: 1;
-diff --git a/backend/web/static/verify.js b/backend/web/static/verify.js
-index d4560b3e966d6aeb8bc2dfdae4d54d622b8779e2..763e2c223cb7cf01373aa4de600125d8f5cef2eb
---- a/backend/web/static/verify.js
-+++ b/backend/web/static/verify.js
-@@ -238,7 +238,10 @@
-     var runs = loadRecentRuns();
-     var q = (filterInput.value || '').trim().toLowerCase();
-     var filtered = runs.filter(function(r) {
--      return !q || (r.run_id && r.run_id.toLowerCase().indexOf(q) !== -1);
-+      if (!q) return true;
-+      var runId = (r.run_id || '').toLowerCase();
-+      var runName = (r.name || '').toLowerCase();
-+      return runId.indexOf(q) !== -1 || runName.indexOf(q) !== -1;
-     });
- 
-     listEl.innerHTML = '';
-diff --git a/backend/web/templates/verify.html b/backend/web/templates/verify.html
-index 1e715eca9f5c546595f88e2e7acd18fc1e82862d..d61ad03eba94842f341a66920529f5f6219c0b09
---- a/backend/web/templates/verify.html
-+++ b/backend/web/templates/verify.html
-@@ -26,7 +26,11 @@
-       </div>
- 
-       <div class="verify-controls">
--        <input type="text" id="verify-filter" class="input" placeholder="Filter by run id">
-+        <div class="form-group">
-+          <label class="label" for="verify-filter">Filter runs</label>
-+          <input type="text" id="verify-filter" class="input" placeholder="Filter by run id or name" aria-describedby="verify-filter-hint">
-+          <p class="form-hint" id="verify-filter-hint">Matches run IDs or names saved in this browser.</p>
-+        </div>
-         <div class="verify-meta">
-           <span class="verify-muted" id="verify-count"></span>
-           <span class="verify-muted" id="verify-progress"></span>
-@@ -34,7 +38,10 @@
-       </div>
- 
-       <div class="verify-list" id="verify-list">
--        <p class="verify-muted" id="verify-empty">No proofs yet. Run an evaluation to generate a proof.</p>
-+        <div class="empty-state" id="verify-empty">
-+          <div class="empty-state-title">No proofs yet</div>
-+          <p class="empty-state-text">Run an evaluation to generate a proof. This list only shows runs saved in this browser.</p>
-+        </div>
-       </div>
-     </div>
-   </main>
-
+- `cd /Users/yani/Noema/backend && go test ./...`
 tokens used
-24,249
-What you changed (short)
-- Improved the verify page UX with labeled filtering, clearer empty-state messaging, and filter-by-name support for recent runs.
-- Tightened layout for the new filter block in the verify controls.
+14,651
+Files changed
+- None
 
-Files touched (max 3)
-- `web/templates/verify.html`
-- `web/static/styles.css`
-- `web/static/verify.js`
+What you changed
+- No changes required; the repository already has a Groth16 BN254 circuit test for `PolicyGateCircuit` using `circuits` Poseidon, and `GenerateProof`/`VerifyProof` are already wired to gnark with cached keys.
 
 Tests run
-- `go test ./...`
-
-If you want another iteration, tell me which area to target next (e.g., upload flow, results page clarity, wizard readability).
+- `cd /Users/yani/Noema/backend && go test ./...`
