@@ -7,40 +7,242 @@ approval: never
 sandbox: workspace-write [workdir, /tmp, $TMPDIR]
 reasoning effort: none
 reasoning summaries: auto
-session id: 019c3cac-82e5-7940-9014-d80eba6bc697
+session id: 019c411c-61e4-7901-bc92-b50e2b1972cc
 --------
 user
-You are an autonomous coding agent polishing the Noema repository.
+You are an autonomous coding agent working on the Noema repository.
 
-Hard rules:
+MISSION (priority order):
+1) Add a real gnark circuit test for the PolicyGateCircuit (using our in-repo Poseidon implementation, package circuits).
+2) Make the circuit test pass reliably (compile -> prove -> verify) using Groth16 on BN254.
+3) ONLY AFTER tests pass: wire the backend plumbing to call the gnark prover/verifier behind the existing zk.GenerateProof / zk.VerifyProof API, keeping the public API shape unchanged (proof_b64 + public_inputs_b64).
+
+HARD RULES:
 - DO NOT run git commit, git reset, git clean, or anything that modifies git history.
-- I will run git commits outside of you.
-- Keep changes small: max 3 files per iteration.
+- Keep changes small: max 3 files per iteration. If more is needed, stage work across multiple iterations.
 - No cosmetic-only edits.
-- No new dependencies unless absolutely necessary.
+- No new dependencies unless absolutely necessary. Use existing gnark dependencies already in the repo. If gnark is not yet in go.mod, add it only if unavoidable.
+- Do not change routes or response shapes. Keep /api/evaluate and /api/verify behavior stable.
+- Do not redesign UI. This task is ZK/circuit/testing/plumbing only.
+- Always run: cd backend && go test ./... at least once per iteration.
 
-Goal: continuously improve production quality.
+WORKFLOW YOU MUST FOLLOW (do not skip):
+A) Inspect current circuit code and poseidon implementation:
+   - Find the PolicyGateCircuit (the policy ZK circuit) and confirm it imports and uses circuits.Poseidon (NOT gnark/std poseidon).
+   - Confirm fixed N=6 and the frozen constraint ordering.
+B) Add tests FIRST:
+   - Create a new Go test file for the circuit (example name: backend/internal/zk/policy_circuit_test.go or wherever circuits live).
+   - The test must:
+     1) Compile the circuit to R1CS
+     2) Run Groth16 setup
+     3) Build a witness with a PASS case and generate a proof
+     4) Verify the proof using the public witness
+     5) Build a witness with a FAIL case and confirm either:
+        - proving fails (unsatisfied), OR
+        - proving succeeds only if OverallPass is set correctly (0), AND verifying matches the expected output
+   - Use deterministic test vectors:
+     - datasetDigestLo/Hi fixed constants
+     - enabled/maxAllowed/severity arrays fixed constants
+     - Compute the expected Commitment in-circuit by setting Commitment to the same value computed by the circuit.
+       (In gnark tests, you can set Commitment as a public variable equal to circuits.Poseidon(domainSep + inputs) by reusing the same circuits.Poseidon function in a small helper circuit OR by computing it with the same function in-circuit and asserting equality.)
+   - The test must assert:
+     - OverallPass == 1 for pass vector, and verify passes.
+     - OverallPass == 0 for fail vector, and verify passes only with correct OverallPass.
+C) Fix whatever is broken until all tests pass:
+   - If compilation errors, fix imports or package paths.
+   - If poseidon params/functions missing, use the existing in-repo Poseidon code as the single source of truth.
+   - If constraints are wrong, fix circuit logic minimally.
+D) ONLY AFTER TESTS PASS: wire plumbing:
+   - Replace stub proof internals inside backend/internal/zk/zk.go (or equivalent) to use gnark Groth16 BN254:
+     - GenerateProof: build witness from inputs (enabled/maxAllowed/severity + datasetDigest limbs) and output proof bytes base64
+     - VerifyProof: decode proof and public inputs and verify using vk
+   - Keep existing API signatures and keep proof_b64 + public_inputs_b64 shape.
+   - You may keep public_inputs_b64 as the existing string format for now, but the verify path must map it deterministically to the circuit’s public witness (Commitment, OverallPass, MaxSeverity).
+   - Ensure keys are handled sanely for dev:
+     - For now, allow generating proving/verifying keys at startup or cached on disk under backend/internal/zk (dev only),
+       OR embed small test keys only for tests.
+     - Don’t over-engineer; prioritize working tests and stable verify.
 
-Iteration:
-1) Run: cd backend && go test ./...
-2) If failing: fix the smallest root cause (max 3 files), rerun tests until passing.
-3) If passing: make ONE meaningful improvement (max 3 files), then rerun tests until passing.
+ACCEPTANCE CRITERIA (must satisfy):
+- `cd backend && go test ./...` passes.
+- There is at least one new test that proves+verifies the circuit in a PASS case.
+- There is at least one test that demonstrates FAIL behavior (overall_pass=0) is enforced and verifiable.
+- If plumbing was wired, verify endpoint still accepts proof_b64/public_inputs_b64 and returns verified result correctly.
 
-Pick the highest-value improvement:
-A) Reliability/correctness: validation, error handling, run persistence, verify robustness
-B) Tests: add/strengthen tests for the change you made
-C) Gemini integration correctness (only when eval_output missing) with deterministic fallback
-D) Maintainability: reduce duplication with tiny refactors
-E) UX: wizard/results/verify clarity (small, safe changes)
-F) Docs: README/DEPLOYMENT polish
-G) Performance: safe wins only
-
-Finish with:
-- What you changed (short)
+OUTPUT FORMAT (end of each run):
+- Files changed (list)
+- What you changed (2–6 bullets)
 - Tests run (must include go test ./...)
 mcp startup: no servers
+
+thinking
+**Starting code inspection**
+
+I'm running ripgrep to locate relevant files and understand the code structure for the next steps.
 exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 270ms:
+/bin/zsh -lc 'rg -n "PolicyGateCircuit|Poseidon" internal -S' in /Users/yani/Noema/backend succeeded in 52ms:
+internal/evaluate/handler.go:158:		commitment, err := zk.CommitmentPoseidon(datasetDigest, witness.Enabled, witness.MaxAllowed, witness.Severity)
+internal/zk/policy_circuit_groth16_test.go:14:func TestPolicyGateCircuit_Groth16PassFail(t *testing.T) {
+internal/zk/policy_circuit_groth16_test.go:15:	var circuit policyzk.PolicyGateCircuit
+internal/zk/policy_circuit_groth16_test.go:31:	passCommitment, err := CommitmentPoseidon(datasetDigestHex, enabled, maxAllowed, passSeverity)
+internal/zk/policy_circuit_groth16_test.go:47:	passAssignment := policyzk.PolicyGateCircuit{
+internal/zk/policy_circuit_groth16_test.go:75:	failCommitment, err := CommitmentPoseidon(datasetDigestHex, enabled, maxAllowed, failSeverity)
+internal/zk/policy_circuit_groth16_test.go:86:	failAssignment := policyzk.PolicyGateCircuit{
+internal/zk/zk_test.go:10:	commitment, err := CommitmentPoseidon(witness.DatasetDigestHex, witness.Enabled, witness.MaxAllowed, witness.Severity)
+internal/zk/zk_test.go:12:		t.Fatalf("CommitmentPoseidon error: %v", err)
+internal/zk/zk_test.go:36:	commitment, err := CommitmentPoseidon(witness.DatasetDigestHex, witness.Enabled, witness.MaxAllowed, witness.Severity)
+internal/zk/zk_test.go:38:		t.Fatalf("CommitmentPoseidon error: %v", err)
+internal/zk/zk.go:33:// PolicyGateConstraintCount is the fixed N for the PolicyGateCircuit.
+internal/zk/zk.go:55:// WitnessInputs carries the private inputs for the PolicyGateCircuit.
+internal/zk/zk.go:81:		var circuit policyzk.PolicyGateCircuit
+internal/zk/zk.go:108:	computedCommitment, err := CommitmentPoseidon(pi.Witness.DatasetDigestHex, pi.Witness.Enabled, pi.Witness.MaxAllowed, pi.Witness.Severity)
+internal/zk/zk.go:121:	assignment := policyzk.PolicyGateCircuit{
+internal/zk/zk.go:180:	assignment := policyzk.PolicyGateCircuit{
+internal/zk/zk.go:354:// CommitmentPoseidon computes the PolicyGateCircuit commitment.
+internal/zk/zk.go:355:func CommitmentPoseidon(datasetDigestHex string, enabled, maxAllowed, severity [PolicyGateConstraintCount]uint64) (string, error) {
+internal/zk/policyzk/circuit.go:10:// PolicyGateCircuit proves:
+
+thinking
+**Identifying existing tests to inspect**
+
+The codebase already contains tests related to the circuit in two locations; next, I'll inspect those files to understand the current coverage and testing approach.
+exec
+/bin/zsh -lc "sed -n '1,240p' internal/zk/policyzk/circuit.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package policyzk
+
+import (
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark/frontend"
+)
+
+const N = 6
+
+// PolicyGateCircuit proves:
+//   - The prover knows (datasetDigest, policy config, gemini severities) that hash to Commitment
+//   - And the deterministic policy check passes:
+//     for each i: if Enabled[i] == 1 then Severity[i] <= MaxAllowed[i]
+//
+// Public outputs:
+// - Commitment: binds everything (dataset + policy + gemini outputs)
+// - OverallPass: 1 iff policy passes
+// - MaxSeverity (optional): max observed severity among enabled constraints
+type PolicyGateCircuit struct {
+	// ===== Private witness =====
+
+thinking
+**Inspecting existing tests**
+
+I'm reviewing the current test file for the circuit implementation using circuits.Poseidon with N=6 to understand test coverage and identify potential gaps.
+exec
+/bin/zsh -lc "sed -n '1,220p' internal/zk/policy_circuit_groth16_test.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package zk
+
+import (
+	"testing"
+
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+
+	"noema/internal/zk/policyzk"
+)
+
+func TestPolicyGateCircuit_Groth16PassFail(t *testing.T) {
+	var circuit policyzk.PolicyGateCircuit
+	r1cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
+	if err != nil {
+		t.Fatalf("compile circuit: %v", err)
+	}
+
+
+thinking
+**Verifying Poseidon usage in tests**
+
+I'm checking whether the tests use the circuit-based Poseidon or the non-circuit CommitmentPoseidon from zk.go, since CommitmentPoseidon likely runs outside circuits and may not cover the intended logic.
+exec
+/bin/zsh -lc "sed -n '330,430p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+	return new(big.Int).SetBytes(b), nil
+}
+
+func datasetDigestLimbs(digestHex string) (*big.Int, *big.Int, error) {
+	b, err := hex.DecodeString(digestHex)
+	if err != nil {
+		return nil, nil, fmt.Errorf("dataset digest must be hex")
+	}
+	if len(b) != 32 {
+		return nil, nil, fmt.Errorf("dataset digest must be 32 bytes")
+	}
+	hi := new(big.Int).SetBytes(b[:16])
+	lo := new(big.Int).SetBytes(b[16:])
+	return lo, hi, nil
+}
+
+func toVarArray(vals [PolicyGateConstraintCount]uint64) [PolicyGateConstraintCount]frontend.Variable {
+	var out [PolicyGateConstraintCount]frontend.Variable
+	for i := 0; i < PolicyGateConstraintCount; i++ {
+		out[i] = vals[i]
+
+thinking
+**Noticing existing gnark circuit tests**
+
+The policyzk/circuit_test.go file contains the requested gnark circuit tests, so I'll verify if they're passing or require fixing.
+exec
+/bin/zsh -lc "sed -n '1,200p' internal/zk/policyzk/circuit_test.go" in /Users/yani/Noema/backend succeeded in 51ms:
+package policyzk
+
+import (
+	"math/big"
+	"testing"
+
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+	"github.com/stretchr/testify/require"
+)
+
+func TestPolicyGateCircuit_Groth16PassFail(t *testing.T) {
+	require := require.New(t)
+
+	var circuit PolicyGateCircuit
+	r1cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
+
+thinking
+**Reviewing existing tests and Poseidon usage**
+
+I’m comparing native versus circuits-based Poseidon uses in tests and code, noting some duplication and possible test failures. Next, I’ll inspect the zk.go stub and run tests to verify current status before adding new tests.
+exec
+/bin/zsh -lc "sed -n '1,260p' internal/zk/zk.go" in /Users/yani/Noema/backend succeeded in 53ms:
+package zk
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"math/big"
+	"strconv"
+	"strings"
+	"sync"
+
+	"github.com/AlpinYukseloglu/poseidon-gnark/circuits"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/constraint"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/frontend/cs/r1cs"
+
+thinking
+**Preparing to run existing tests**
+
+I'm checking for existing test coverage and planning to run all tests before making modifications to identify any current failures.
+exec
+/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 313ms:
 ?   	noema/cmd/server	[no test files]
 ?   	noema/internal/auth	[no test files]
 ok  	noema/internal/config	(cached)
@@ -52,552 +254,37 @@ ok  	noema/internal/session	(cached)
 ok  	noema/internal/verify	(cached)
 ?   	noema/internal/web	[no test files]
 ok  	noema/internal/zk	(cached)
-
-thinking
-**Planning improvement by inspecting repo**
-
-I'm running a search to identify candidate files for a meaningful improvement limited to three files based on recent test success.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && rg -n \"TODO|FIXME|panic|errorf\\(|fmt\\.Errorf|log\\.Printf\" internal" in /Users/yani/Noema/backend succeeded in 51ms:
-internal/evaluate/parse.go:17:		return Spec{}, fmt.Errorf("missing field: spec")
-internal/evaluate/parse.go:20:		return Spec{}, fmt.Errorf("only one spec value allowed")
-internal/evaluate/parse.go:26:		return Spec{}, fmt.Errorf("invalid spec JSON")
-internal/evaluate/parse.go:29:		return Spec{}, fmt.Errorf("invalid spec JSON")
-internal/evaluate/parse.go:36:		return fmt.Errorf("unsupported schema_version")
-internal/evaluate/parse.go:42:			return fmt.Errorf("constraint id must be non-empty")
-internal/evaluate/parse.go:45:			return fmt.Errorf("constraint id must not include leading/trailing whitespace")
-internal/evaluate/parse.go:48:			return fmt.Errorf("duplicate constraint id: %s", id)
-internal/evaluate/parse.go:52:			return fmt.Errorf("constraint allowed_max_severity must be 0, 1, or 2")
-internal/evaluate/parse.go:58:			return fmt.Errorf("custom_constraint id must be non-empty")
-internal/evaluate/parse.go:61:			return fmt.Errorf("custom_constraint id must not include leading/trailing whitespace")
-internal/evaluate/parse.go:64:			return fmt.Errorf("duplicate constraint id: %s", id)
-internal/evaluate/parse.go:68:			return fmt.Errorf("custom_constraint allowed_max_severity must be 0, 1, or 2")
-internal/evaluate/parse.go:77:		return nil, nil, fmt.Errorf("missing required file: dataset")
-internal/evaluate/parse.go:80:		return nil, nil, fmt.Errorf("only one dataset file allowed")
-internal/evaluate/parse.go:84:		return nil, nil, fmt.Errorf("dataset exceeds limit of %s", formatBytes(int64(config.MaxDatasetBytes)))
-internal/evaluate/parse.go:88:		return nil, nil, fmt.Errorf("maximum %d images allowed", config.MaxImages)
-internal/evaluate/parse.go:94:			return nil, nil, fmt.Errorf("image filename must be non-empty")
-internal/evaluate/parse.go:97:			return nil, nil, fmt.Errorf("image filename must not include leading/trailing whitespace")
-internal/evaluate/parse.go:100:			return nil, nil, fmt.Errorf("image filename must not include path separators")
-
-thinking
-**Inspecting image handling for improvements**
-
-I'm reviewing image handling code to ensure files are properly closed and consider enhancing dataset size checks or logging error handling.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/images.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"fmt"
-	"io"
-	"mime"
-	"mime/multipart"
-	"path/filepath"
-	"strings"
-)
-
-type ImageInfo struct {
-	Filename string
-	MIMEType string
-	Data     []byte
-}
-
-func readImages(files []*multipart.FileHeader) ([]ImageInfo, error) {
-	out := make([]ImageInfo, 0, len(files))
-	for _, fh := range files {
-
-thinking
-**Noticing potential improvements in data handling**
-
-I'm considering verifying size limits and Content-Type validation more thoroughly and will check if datasets in evaluate/parse.go are correctly closed after reading.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/parse.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package evaluate
-
-import (
-	"encoding/json"
-	"fmt"
-	"io"
-	"mime/multipart"
-	"path/filepath"
-	"strings"
-
-	"noema/internal/config"
-)
-
-func parseSpec(form *multipart.Form) (Spec, error) {
-	specStrs := form.Value["spec"]
-	if len(specStrs) == 0 || specStrs[0] == "" {
-		return Spec{}, fmt.Errorf("missing field: spec")
-	}
-	if len(specStrs) > 1 {
-		return Spec{}, fmt.Errorf("only one spec value allowed")
-
-thinking
-**Assessing error handling and validation limits**
-
-The code handles read errors and closures properly, but dataset validation lacks file size checks beyond the header. Improving error message detail or adding full file size validation could add meaningful robustness; next, I'll inspect evaluate/storage.go for better opportunities.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,220p' internal/evaluate/storage.go" in /Users/yani/Noema/backend succeeded in 52ms:
-package evaluate
-
-import (
-	"crypto/rand"
-	"encoding/json"
-	"fmt"
-	"io"
-	"math/big"
-	"mime/multipart"
-	"os"
-	"path/filepath"
-	"strconv"
-	"sync/atomic"
-	"time"
-)
-
-var runIDCounter uint64
-
-func genRunID() string {
-	n, err := rand.Int(rand.Reader, big.NewInt(1e9))
-
-thinking
-**Reviewing error handling and resource management**
-
-Noted that saveUpload may not enforce size, but file size is in the header; updateRunsIndex can lose saveJSON errors if corruptedErr is returned first. Also confirmed file handles close properly on read errors in readImages. Planning to examine evaluate/handler.go, focusing on run index update logic for possible behavior bugs and missing context.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,260p' internal/evaluate/handler.go" in /Users/yani/Noema/backend succeeded in 53ms:
-package evaluate
-
-import (
-	"encoding/json"
-	"fmt"
-	"log"
-	"mime/multipart"
-	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
-	"time"
-
-	"noema/internal/config"
-	"noema/internal/httputil"
-	"noema/internal/zk"
-
-	"github.com/gin-gonic/gin"
-)
-
-thinking
-**Planning size limit enforcement**
-
-I identified that relying on file header sizes can be unreliable for multipart uploads, risking oversized reads. Adding enforced max byte limits using io.LimitReader when reading images and datasets will improve robustness and prevent memory issues. Next, I'll verify dataset reading uses and update parse functions accordingly.
-exec
-/bin/zsh -lc "cd /Users/yani/Noema/backend && sed -n '1,200p' internal/evaluate/dataset.go" in /Users/yani/Noema/backend succeeded in 51ms:
-package evaluate
-
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io"
-	"mime/multipart"
-	"strings"
-)
-
-type Dataset struct {
-	Items []DatasetItem `json:"items"`
-}
-
-type DatasetItem struct {
-	ID       string         `json:"id"`
-	Text     string         `json:"text"`
-	Metadata map[string]any `json:"metadata,omitempty"`
-	ImageRef string         `json:"image_ref,omitempty"`
+ok  	noema/internal/zk/policyzk	(cached)
 
 
 thinking
-**Planning to enforce read size limits**
+**Assessing Poseidon usage in tests**
 
-I'm preparing to add size limits for reading dataset and image files by wrapping readers with limits and checking exceeded sizes to improve reliability, requiring new config imports without increasing dependencies.
+The current tests compute commitments with native Poseidon hashing using in-repo constants but not the gnark circuit function. The request to add a real gnark circuit test likely means integrating the circuits.Poseidon function within the circuit or helper circuits to compute commitments in-circuit, ensuring consistency with the native computations.
 thinking
-**Aligning error messages and reusing formatting**
+**Confirming existing real gnark circuit tests**
 
-I'm ensuring read limit errors match existing parseUploads wording by reusing the unexported formatBytes within the package and returning consistent messages for dataset and image size excesses while avoiding adding new files.
-file update
-M /Users/yani/Noema/backend/internal/evaluate/dataset.go
-@@ -9,2 +9,4 @@
- 	"strings"
-+
-+	"noema/internal/config"
- )
-@@ -29,3 +31,3 @@
- 
--	raw, err := io.ReadAll(src)
-+	raw, err := io.ReadAll(io.LimitReader(src, int64(config.MaxDatasetBytes)+1))
- 	if err != nil {
-@@ -33,2 +35,5 @@
- 	}
-+	if len(raw) > config.MaxDatasetBytes {
-+		return nil, Dataset{}, fmt.Errorf("dataset exceeds limit of %s", formatBytes(int64(config.MaxDatasetBytes)))
-+	}
- 	if len(raw) == 0 {
-apply_patch(auto_approved=true) exited 0 in 31ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/dataset.go
-file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 52f2a3b7bc8ca6358a68728234fa70ed3ecf5873..d2680e9cf89837817c3842782349649f702668c4
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -7,6 +7,8 @@
- 	"io"
- 	"mime/multipart"
- 	"strings"
-+
-+	"noema/internal/config"
- )
- 
- type Dataset struct {
-@@ -27,10 +29,13 @@
- 	}
- 	defer src.Close()
- 
--	raw, err := io.ReadAll(src)
-+	raw, err := io.ReadAll(io.LimitReader(src, int64(config.MaxDatasetBytes)+1))
- 	if err != nil {
- 		return nil, Dataset{}, fmt.Errorf("could not read dataset")
- 	}
-+	if len(raw) > config.MaxDatasetBytes {
-+		return nil, Dataset{}, fmt.Errorf("dataset exceeds limit of %s", formatBytes(int64(config.MaxDatasetBytes)))
-+	}
- 	if len(raw) == 0 {
- 		return nil, Dataset{}, fmt.Errorf("dataset file is empty")
- 	}
-
-file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 52f2a3b7bc8ca6358a68728234fa70ed3ecf5873..d2680e9cf89837817c3842782349649f702668c4
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -7,6 +7,8 @@
- 	"io"
- 	"mime/multipart"
- 	"strings"
-+
-+	"noema/internal/config"
- )
- 
- type Dataset struct {
-@@ -27,10 +29,13 @@
- 	}
- 	defer src.Close()
- 
--	raw, err := io.ReadAll(src)
-+	raw, err := io.ReadAll(io.LimitReader(src, int64(config.MaxDatasetBytes)+1))
- 	if err != nil {
- 		return nil, Dataset{}, fmt.Errorf("could not read dataset")
- 	}
-+	if len(raw) > config.MaxDatasetBytes {
-+		return nil, Dataset{}, fmt.Errorf("dataset exceeds limit of %s", formatBytes(int64(config.MaxDatasetBytes)))
-+	}
- 	if len(raw) == 0 {
- 		return nil, Dataset{}, fmt.Errorf("dataset file is empty")
- 	}
-
-
-thinking
-**Adding limit to image-related code**
-file update
-M /Users/yani/Noema/backend/internal/evaluate/images.go
-@@ -9,2 +9,4 @@
- 	"strings"
-+
-+	"noema/internal/config"
- )
-@@ -24,3 +26,3 @@
- 		}
--		data, err := io.ReadAll(src)
-+		data, err := io.ReadAll(io.LimitReader(src, int64(config.MaxImageBytes)+1))
- 		closeErr := src.Close()
-@@ -29,2 +31,5 @@
- 		}
-+		if len(data) > config.MaxImageBytes {
-+			return nil, fmt.Errorf("image %q exceeds limit of %s", fh.Filename, formatBytes(int64(config.MaxImageBytes)))
-+		}
- 		if closeErr != nil {
-apply_patch(auto_approved=true) exited 0 in 34ms:
-Success. Updated the following files:
-M /Users/yani/Noema/backend/internal/evaluate/images.go
-file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 52f2a3b7bc8ca6358a68728234fa70ed3ecf5873..d2680e9cf89837817c3842782349649f702668c4
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -7,6 +7,8 @@
- 	"io"
- 	"mime/multipart"
- 	"strings"
-+
-+	"noema/internal/config"
- )
- 
- type Dataset struct {
-@@ -27,10 +29,13 @@
- 	}
- 	defer src.Close()
- 
--	raw, err := io.ReadAll(src)
-+	raw, err := io.ReadAll(io.LimitReader(src, int64(config.MaxDatasetBytes)+1))
- 	if err != nil {
- 		return nil, Dataset{}, fmt.Errorf("could not read dataset")
- 	}
-+	if len(raw) > config.MaxDatasetBytes {
-+		return nil, Dataset{}, fmt.Errorf("dataset exceeds limit of %s", formatBytes(int64(config.MaxDatasetBytes)))
-+	}
- 	if len(raw) == 0 {
- 		return nil, Dataset{}, fmt.Errorf("dataset file is empty")
- 	}
-diff --git a/backend/internal/evaluate/images.go b/backend/internal/evaluate/images.go
-index 1c9706fdebf109f60bf25c120327a0b407bba25b..433603c6ebfdb258db93017f3b0914d1fbf1f7e8
---- a/backend/internal/evaluate/images.go
-+++ b/backend/internal/evaluate/images.go
-@@ -7,6 +7,8 @@
- 	"mime/multipart"
- 	"path/filepath"
- 	"strings"
-+
-+	"noema/internal/config"
- )
- 
- type ImageInfo struct {
-@@ -22,11 +24,14 @@
- 		if err != nil {
- 			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
- 		}
--		data, err := io.ReadAll(src)
-+		data, err := io.ReadAll(io.LimitReader(src, int64(config.MaxImageBytes)+1))
- 		closeErr := src.Close()
- 		if err != nil {
- 			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
- 		}
-+		if len(data) > config.MaxImageBytes {
-+			return nil, fmt.Errorf("image %q exceeds limit of %s", fh.Filename, formatBytes(int64(config.MaxImageBytes)))
-+		}
- 		if closeErr != nil {
- 			return nil, fmt.Errorf("could not close image %q: %w", fh.Filename, closeErr)
- 		}
-
-file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 52f2a3b7bc8ca6358a68728234fa70ed3ecf5873..d2680e9cf89837817c3842782349649f702668c4
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -7,6 +7,8 @@
- 	"io"
- 	"mime/multipart"
- 	"strings"
-+
-+	"noema/internal/config"
- )
- 
- type Dataset struct {
-@@ -27,10 +29,13 @@
- 	}
- 	defer src.Close()
- 
--	raw, err := io.ReadAll(src)
-+	raw, err := io.ReadAll(io.LimitReader(src, int64(config.MaxDatasetBytes)+1))
- 	if err != nil {
- 		return nil, Dataset{}, fmt.Errorf("could not read dataset")
- 	}
-+	if len(raw) > config.MaxDatasetBytes {
-+		return nil, Dataset{}, fmt.Errorf("dataset exceeds limit of %s", formatBytes(int64(config.MaxDatasetBytes)))
-+	}
- 	if len(raw) == 0 {
- 		return nil, Dataset{}, fmt.Errorf("dataset file is empty")
- 	}
-diff --git a/backend/internal/evaluate/images.go b/backend/internal/evaluate/images.go
-index 1c9706fdebf109f60bf25c120327a0b407bba25b..433603c6ebfdb258db93017f3b0914d1fbf1f7e8
---- a/backend/internal/evaluate/images.go
-+++ b/backend/internal/evaluate/images.go
-@@ -7,6 +7,8 @@
- 	"mime/multipart"
- 	"path/filepath"
- 	"strings"
-+
-+	"noema/internal/config"
- )
- 
- type ImageInfo struct {
-@@ -22,11 +24,14 @@
- 		if err != nil {
- 			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
- 		}
--		data, err := io.ReadAll(src)
-+		data, err := io.ReadAll(io.LimitReader(src, int64(config.MaxImageBytes)+1))
- 		closeErr := src.Close()
- 		if err != nil {
- 			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
- 		}
-+		if len(data) > config.MaxImageBytes {
-+			return nil, fmt.Errorf("image %q exceeds limit of %s", fh.Filename, formatBytes(int64(config.MaxImageBytes)))
-+		}
- 		if closeErr != nil {
- 			return nil, fmt.Errorf("could not close image %q: %w", fh.Filename, closeErr)
- 		}
-
-
-thinking
-**Running all tests**
-exec
-/bin/zsh -lc 'cd /Users/yani/Noema/backend && go test ./...' in /Users/yani/Noema/backend succeeded in 612ms:
-?   	noema/cmd/server	[no test files]
-?   	noema/internal/auth	[no test files]
-ok  	noema/internal/config	(cached)
-?   	noema/internal/crypto	[no test files]
-ok  	noema/internal/evaluate	0.106s
-?   	noema/internal/gemini	[no test files]
-ok  	noema/internal/httputil	(cached)
-ok  	noema/internal/session	(cached)
-ok  	noema/internal/verify	(cached)
-?   	noema/internal/web	[no test files]
-ok  	noema/internal/zk	(cached)
-file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 52f2a3b7bc8ca6358a68728234fa70ed3ecf5873..d2680e9cf89837817c3842782349649f702668c4
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -7,6 +7,8 @@
- 	"io"
- 	"mime/multipart"
- 	"strings"
-+
-+	"noema/internal/config"
- )
- 
- type Dataset struct {
-@@ -27,10 +29,13 @@
- 	}
- 	defer src.Close()
- 
--	raw, err := io.ReadAll(src)
-+	raw, err := io.ReadAll(io.LimitReader(src, int64(config.MaxDatasetBytes)+1))
- 	if err != nil {
- 		return nil, Dataset{}, fmt.Errorf("could not read dataset")
- 	}
-+	if len(raw) > config.MaxDatasetBytes {
-+		return nil, Dataset{}, fmt.Errorf("dataset exceeds limit of %s", formatBytes(int64(config.MaxDatasetBytes)))
-+	}
- 	if len(raw) == 0 {
- 		return nil, Dataset{}, fmt.Errorf("dataset file is empty")
- 	}
-diff --git a/backend/internal/evaluate/images.go b/backend/internal/evaluate/images.go
-index 1c9706fdebf109f60bf25c120327a0b407bba25b..433603c6ebfdb258db93017f3b0914d1fbf1f7e8
---- a/backend/internal/evaluate/images.go
-+++ b/backend/internal/evaluate/images.go
-@@ -7,6 +7,8 @@
- 	"mime/multipart"
- 	"path/filepath"
- 	"strings"
-+
-+	"noema/internal/config"
- )
- 
- type ImageInfo struct {
-@@ -22,11 +24,14 @@
- 		if err != nil {
- 			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
- 		}
--		data, err := io.ReadAll(src)
-+		data, err := io.ReadAll(io.LimitReader(src, int64(config.MaxImageBytes)+1))
- 		closeErr := src.Close()
- 		if err != nil {
- 			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
- 		}
-+		if len(data) > config.MaxImageBytes {
-+			return nil, fmt.Errorf("image %q exceeds limit of %s", fh.Filename, formatBytes(int64(config.MaxImageBytes)))
-+		}
- 		if closeErr != nil {
- 			return nil, fmt.Errorf("could not close image %q: %w", fh.Filename, closeErr)
- 		}
-
-
-thinking
-**Preparing final summary and test details**
-
-I'm consolidating a clear summary that mentions two changed files along with a concise note on tests run. The response will include "What you changed" and "Tests run" sections without nested instructions.
+Two real gnark circuit tests already exist using in-repo Poseidon constants and circuits, including full groth16 tests that pass. The commitment is computed consistently, satisfying the requirement, so no code changes are needed. I'll report no files changed and note tests run successfully.
 codex
-**What You Changed**
-- Enforced dataset size limits while reading, guarding against mismatched multipart sizes (`internal/evaluate/dataset.go`).
-- Enforced image size limits during read with clearer error context (`internal/evaluate/images.go`).
+Files changed
+- None
 
-**Tests Run**
-- `go test ./...`
-file update:
-diff --git a/backend/internal/evaluate/dataset.go b/backend/internal/evaluate/dataset.go
-index 52f2a3b7bc8ca6358a68728234fa70ed3ecf5873..d2680e9cf89837817c3842782349649f702668c4
---- a/backend/internal/evaluate/dataset.go
-+++ b/backend/internal/evaluate/dataset.go
-@@ -7,6 +7,8 @@
- 	"io"
- 	"mime/multipart"
- 	"strings"
-+
-+	"noema/internal/config"
- )
- 
- type Dataset struct {
-@@ -27,10 +29,13 @@
- 	}
- 	defer src.Close()
- 
--	raw, err := io.ReadAll(src)
-+	raw, err := io.ReadAll(io.LimitReader(src, int64(config.MaxDatasetBytes)+1))
- 	if err != nil {
- 		return nil, Dataset{}, fmt.Errorf("could not read dataset")
- 	}
-+	if len(raw) > config.MaxDatasetBytes {
-+		return nil, Dataset{}, fmt.Errorf("dataset exceeds limit of %s", formatBytes(int64(config.MaxDatasetBytes)))
-+	}
- 	if len(raw) == 0 {
- 		return nil, Dataset{}, fmt.Errorf("dataset file is empty")
- 	}
-diff --git a/backend/internal/evaluate/images.go b/backend/internal/evaluate/images.go
-index 1c9706fdebf109f60bf25c120327a0b407bba25b..433603c6ebfdb258db93017f3b0914d1fbf1f7e8
---- a/backend/internal/evaluate/images.go
-+++ b/backend/internal/evaluate/images.go
-@@ -7,6 +7,8 @@
- 	"mime/multipart"
- 	"path/filepath"
- 	"strings"
-+
-+	"noema/internal/config"
- )
- 
- type ImageInfo struct {
-@@ -22,11 +24,14 @@
- 		if err != nil {
- 			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
- 		}
--		data, err := io.ReadAll(src)
-+		data, err := io.ReadAll(io.LimitReader(src, int64(config.MaxImageBytes)+1))
- 		closeErr := src.Close()
- 		if err != nil {
- 			return nil, fmt.Errorf("could not read image %q: %w", fh.Filename, err)
- 		}
-+		if len(data) > config.MaxImageBytes {
-+			return nil, fmt.Errorf("image %q exceeds limit of %s", fh.Filename, formatBytes(int64(config.MaxImageBytes)))
-+		}
- 		if closeErr != nil {
- 			return nil, fmt.Errorf("could not close image %q: %w", fh.Filename, closeErr)
- 		}
+What you changed
+- No code changes needed. The repo already includes Groth16 pass/fail tests for `PolicyGateCircuit` (both `internal/zk/policy_circuit_groth16_test.go` and `internal/zk/policyzk/circuit_test.go`) using the in-repo Poseidon implementation, and `zk.GenerateProof`/`zk.VerifyProof` are already wired to gnark Groth16 BN254.
 
+Tests run
+- `cd /Users/yani/Noema/backend && go test ./...`
+
+If you want, I can consolidate or tighten the duplicate circuit tests in a follow-up iteration, but it’s not necessary for the acceptance criteria.
 tokens used
-23,185
-**What You Changed**
-- Enforced dataset size limits while reading, guarding against mismatched multipart sizes (`internal/evaluate/dataset.go`).
-- Enforced image size limits during read with clearer error context (`internal/evaluate/images.go`).
+29,504
+Files changed
+- None
 
-**Tests Run**
-- `go test ./...`
+What you changed
+- No code changes needed. The repo already includes Groth16 pass/fail tests for `PolicyGateCircuit` (both `internal/zk/policy_circuit_groth16_test.go` and `internal/zk/policyzk/circuit_test.go`) using the in-repo Poseidon implementation, and `zk.GenerateProof`/`zk.VerifyProof` are already wired to gnark Groth16 BN254.
+
+Tests run
+- `cd /Users/yani/Noema/backend && go test ./...`
+
+If you want, I can consolidate or tighten the duplicate circuit tests in a follow-up iteration, but it’s not necessary for the acceptance criteria.
