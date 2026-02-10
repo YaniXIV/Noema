@@ -62,11 +62,14 @@ cd noema/backend
 # create a .env file in Noema/backend and set required variables 
 go build cmd/server/main.go
 ./main
+```
 
-🙏 Acknowledgments
+## 🙏 Acknowledgments
 
+```bash
 Google Gemini & Google Deepmind teams
 
 The Google Gemini 3 Hackathon for the challenge and motivation
 
 Everyone exploring real-world privacy applications in ZK and AI applications
+```
