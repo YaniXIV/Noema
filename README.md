@@ -45,8 +45,7 @@ The system proves that the policy decision was computed correctly from the decla
 | AI evaluation |   Gemini API    |
 | ZK proofs     | gnark (Groth16) |
 | Backend       |    Go (Gin)     |
-| Frontend      | Server-rendered |
-                      web ui
+| Frontend      | Server-rendered web interface|
 ---
 
 ## Setup & Run
