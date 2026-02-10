@@ -31,7 +31,11 @@ Organizations often need to demonstrate dataset compliance without exposing prop
 The system proves that the policy decision was computed correctly from the declared evaluation outputs. It does **not** prove that the AI evaluation itself is correct.
 
 ---
+## Prototype note
 
+Noema is an early-stage research prototype demonstrating the architecture for combining AI-assisted dataset evaluation with zero-knowledge policy verification. Core components of the evaluation, policy computation, and proof-generation workflow are implemented, while portions of the UI flow and end-to-end automation are still being refined for demonstration purposes.
+
+---
 ## Features
 
 - ZK compliance proofs for policy decision verification
