@@ -1,77 +1,67 @@
 # Noema
 
-Verifiable dataset compliance using Gemini reasoning and zero-knowledge proofs.
+**Verifiable dataset compliance using Gemini reasoning and zero-knowledge proofs.**
 
-Noema enables organizations to evaluate private datasets against governance policies (privacy, safety, regulatory constraints) and generate a publicly verifiable proof that the policy decision was computed correctly—without ever revealing the sensitive dataset itself.
-📸 Demo Video
+Noema is a proof-of-concept system that enables organizations to evaluate private datasets against governance policies (privacy, safety, regulatory constraints) and generate a **publicly verifiable proof that the policy decision was computed correctly**, without revealing the underlying dataset.
 
-Watch the 3-minute walkthrough
-✨ Features
+📸 Demo Video  
+https://www.youtube.com/watch?v=VvV0VkkP7tY
 
-    🔒 ZK Compliance Proofs — Verify policy adherence without exposing raw data.
+---
 
-    🧠 Gemini-Powered Reasoning — High-level AI evaluation of complex datasets and images.
+## Features
 
-    ⚙️ Gnark Integration — Uses the gnark ZK-SNARK library for circuit generation.
+- 🔒 **ZK compliance proofs** — verify policy decision correctness without exposing raw data  
+- 🧠 **Gemini-assisted dataset evaluation** — structured reasoning over datasets (and optional images)  
+- ⚙️ **gnark integration** — Groth16 policy gate circuit for proof generation  
+- 🖥️ **Go backend** — orchestration of evaluation, policy computation, and proof generation  
+- 📊 **Web dashboard** — interface for dataset upload, constraint configuration, and proof verification  
 
-    🖥️ Go Backend — High-performance orchestration of AI and ZK pipelines.
+---
 
-    📊 Web Dashboard — Clean UI for dataset evaluation and proof verification.
+## Inspiration
 
-💡 Inspiration
+Modern compliance workflows often require organizations to reveal sensitive datasets to auditors in order to demonstrate adherence to safety or regulatory standards. This creates a fundamental trade-off between **verification** and **privacy**.
 
-Modern compliance requires a trade-off: share your private data with auditors, or skip verification. Noema flips this narrative. By combining LLM reasoning (to understand data) with Zero-Knowledge Proofs (to prove the result), we create a "Trust, but Verify" layer for private data.
-🚀 How It Works
+Noema explores an alternative approach: using AI systems to evaluate datasets and zero-knowledge proofs to verify that the resulting policy decision was computed honestly, enabling **trust without disclosure**.
 
-    Evaluation: Gemini analyzes the dataset (or images) against specific governance constraints.
+---
 
-    Aggregation: Policy results (pass/fail/severity) are converted into structured constraints.
+## How it works
 
-    ZK Proof: A gnark circuit generates a proof that the final policy decision was derived correctly from the evaluation outputs.
+1. A dataset owner uploads a dataset and selects governance constraints.
+2. Gemini evaluates the dataset and produces structured severity assessments for each constraint.
+3. Policy aggregation computes the final policy decision (PASS / FAIL).
+4. A gnark zero-knowledge circuit generates a proof verifying that the policy decision was computed correctly from the declared inputs.
+5. Anyone can verify the proof without accessing the underlying dataset.
 
-    Verification: The proof is verified publicly. The verifier knows the policy was followed, but never sees the source data.
+**Important:**  
+The system proves that the policy decision was computed correctly from the declared evaluation outputs. It does not prove that the AI evaluation itself is correct.
 
-🛠 Tech Stack
-Layer	Description
-AI Engine	Gemini Pro / Flash for dataset reasoning
-ZK Library	gnark (Groth16/PlonK) for circuit logic
-Backend	Go (Golang) server
-Frontend	React-based dashboard
-📦 Setup & Run
+---
 
-Requirements
+## Tech stack
 
-    Go 1.21+
+| Layer | Technology |
+|------|-----------|
+| AI evaluation | Gemini API |
+| ZK proofs | gnark (Groth16) |
+| Backend | Go (Gin) |
+| Frontend | Server-rendered web interface |
 
-    Gemini API Key
+---
 
-Quickstart
-Bash
+## Setup & Run
 
-# Clone and enter backend
+Requirements:
+- Go 1.21+
+- (Optional) Gemini API key
+
+```bash
 git clone https://github.com/your-repo/noema.git
 cd noema/backend
 
-# Configure environment
 cp .env.example .env
-# Edit .env and set JUDGE_KEY & GEMINI_API_KEY
+# Set JUDGE_KEY and GEMINI_API_KEY
 
-# Run server
 go run ./cmd/server
-
-Server runs on: http://localhost:8080
-🔒 API Summary
-
-    POST /api/evaluate — (Gated) Processes dataset and generates ZK proof.
-
-    POST /api/verify — (Public) Verifies a generated proof.
-
-    GET /app — (Gated) Accesses the visual management dashboard.
-
-🧠 What's Next
-
-    ✅ On-chain Verification — Exporting proofs to EVM/Aleo smart contracts.
-
-    📱 Edge Processing — Local evaluation to further minimize data transit.
-
-    🌍 Multi-Model Consensus — Using multiple LLMs to reach a "verifiable consensus" on data safety.
