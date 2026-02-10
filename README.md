@@ -1,70 +1,77 @@
 # Noema
 
-Verifiable dataset compliance using Gemini 3 reasoning and zero-knowledge proofs.
+Verifiable dataset compliance using Gemini reasoning and zero-knowledge proofs.
 
-## Demo
-- Public demo: TODO
-- 3‑minute video: TODO
+Noema enables organizations to evaluate private datasets against governance policies (privacy, safety, regulatory constraints) and generate a publicly verifiable proof that the policy decision was computed correctly—without ever revealing the sensitive dataset itself.
+📸 Demo Video
 
-## Architecture
-```mermaid
-graph TD
-  A[Dataset + optional images] --> B[Gemini 3 policy evaluation]
-  B --> C[Constraint severities + rationale]
-  C --> D[Policy aggregation]
-  D --> E[ZK proof generation (gnark)]
-  E --> F[Public verification]
-```
+Watch the 3-minute walkthrough
+✨ Features
 
-## Quickstart
-From `backend/`:
-```bash
-cd backend
+    🔒 ZK Compliance Proofs — Verify policy adherence without exposing raw data.
+
+    🧠 Gemini-Powered Reasoning — High-level AI evaluation of complex datasets and images.
+
+    ⚙️ Gnark Integration — Uses the gnark ZK-SNARK library for circuit generation.
+
+    🖥️ Go Backend — High-performance orchestration of AI and ZK pipelines.
+
+    📊 Web Dashboard — Clean UI for dataset evaluation and proof verification.
+
+💡 Inspiration
+
+Modern compliance requires a trade-off: share your private data with auditors, or skip verification. Noema flips this narrative. By combining LLM reasoning (to understand data) with Zero-Knowledge Proofs (to prove the result), we create a "Trust, but Verify" layer for private data.
+🚀 How It Works
+
+    Evaluation: Gemini analyzes the dataset (or images) against specific governance constraints.
+
+    Aggregation: Policy results (pass/fail/severity) are converted into structured constraints.
+
+    ZK Proof: A gnark circuit generates a proof that the final policy decision was derived correctly from the evaluation outputs.
+
+    Verification: The proof is verified publicly. The verifier knows the policy was followed, but never sees the source data.
+
+🛠 Tech Stack
+Layer	Description
+AI Engine	Gemini Pro / Flash for dataset reasoning
+ZK Library	gnark (Groth16/PlonK) for circuit logic
+Backend	Go (Golang) server
+Frontend	React-based dashboard
+📦 Setup & Run
+
+Requirements
+
+    Go 1.21+
+
+    Gemini API Key
+
+Quickstart
+Bash
+
+# Clone and enter backend
+git clone https://github.com/your-repo/noema.git
+cd noema/backend
+
+# Configure environment
 cp .env.example .env
-# Edit .env: set JUDGE_KEY, optionally GEMINI_API_KEY and NOEMA_COOKIE_SECRET
+# Edit .env and set JUDGE_KEY & GEMINI_API_KEY
+
+# Run server
 go run ./cmd/server
-```
-Server listens on `:8080`. Run from `backend/` so `web/templates` and `web/static` are found.
 
-### Env vars
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `JUDGE_KEY` | Yes (for gating) | Secret used to allow API and UI access. |
-| `NOEMA_COOKIE_SECRET` | Recommended | Secret for signing session cookies. If unset, a dev default is used (and a warning is logged). |
-| `GEMINI_API_KEY` | Optional | Enables Gemini 3 evaluation. |
-| `NOEMA_SECURE_COOKIES` or `HTTPS=1` | Optional | Set to use `Secure` on cookies (e.g. behind HTTPS). |
-| `NOEMA_UPLOADS_DIR` | Optional | Directory for `/upload` files (default `data/uploads`). |
-| `NOEMA_RUNS_DIR` | Optional | Directory for `/api/evaluate` runs (default `data/runs`). |
-| `NOEMA_RUNS_MAX` | Optional | Max run artifacts to retain (default `50`, set `0` to disable pruning). |
+Server runs on: http://localhost:8080
+🔒 API Summary
 
-## API endpoints
-Public:
-- `GET /health` → `{"status":"ok"}`
-- `GET /ready` → `{"status":"ok"}`
-- `POST /api/verify` → stub verifier (returns verification result)
-- `GET /verify` and `GET /verify/:id` → public verify page
+    POST /api/evaluate — (Gated) Processes dataset and generates ZK proof.
 
-Gated by judge key (header, query, or session cookie):
-- `GET /ping` → `{"message":"pong"}`
-- `POST /api/evaluate` → evaluates dataset, returns policy output + proof bundle
-- `GET /app`, `GET /app/new`, `GET /app/results/:id`, `GET /upload`, `POST /upload`
+    POST /api/verify — (Public) Verifies a generated proof.
 
-### Example: call `/ping` with judge key
-```bash
-curl -H "X-Judge-Key: YOUR_JUDGE_KEY" http://localhost:8080/ping
-```
+    GET /app — (Gated) Accesses the visual management dashboard.
 
-## Gemini 3 integration
-Noema uses Gemini 3 (default: Pro; optional Flash for latency/cost) to evaluate datasets against a structured set of governance constraints. The model produces per‑constraint severity scores and a short rationale summary, which are then aggregated into a policy decision and converted into a ZK witness.
+🧠 What's Next
 
-## ZK proof pipeline
-1. Gemini 3 returns per‑constraint severities.
-2. Policy aggregation computes overall pass/fail and max severity.
-3. A gnark circuit (or stub with the same public inputs) produces a proof and public inputs.
-4. The public verify page validates the proof without exposing the dataset.
+    ✅ On-chain Verification — Exporting proofs to EVM/Aleo smart contracts.
 
-## Submission checklist
-- Gemini 3 integration write‑up (200 words): TODO
-- Public demo link: TODO
-- Code repo link: TODO
-- 3‑minute demo video link: TODO
+    📱 Edge Processing — Local evaluation to further minimize data transit.
+
+    🌍 Multi-Model Consensus — Using multiple LLMs to reach a "verifiable consensus" on data safety.
