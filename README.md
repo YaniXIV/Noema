@@ -1,5 +1,9 @@
 # Noema
 
+<p align="center">
+  <img src="images/Thumbnail.png" alt="Noema banner" width="1000">
+</p>
+
 **Verifiable dataset compliance using Gemini reasoning and zero-knowledge proofs.**
 
 Noema is a proof-of-concept system that enables organizations to evaluate private datasets against governance policies (privacy, safety, regulatory constraints) and generate a **publicly verifiable proof that the policy decision was computed correctly from declared evaluation outputs**, without revealing the underlying dataset.
