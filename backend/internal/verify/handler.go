@@ -1,8 +1,6 @@
 package verify
 
 import (
-	"encoding/base64"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -27,7 +25,7 @@ type VerifyResponse struct {
 	Message  string `json:"message,omitempty"`
 }
 
-// Handler handles POST /api/verify. Stub verifier for now.
+// Handler handles POST /api/verify.
 func Handler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.MaxVerifyBytes)
@@ -59,56 +57,10 @@ func Handler() gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 			return
 		}
-		if verified || !shouldTryLegacy(msg) {
-			c.JSON(http.StatusOK, VerifyResponse{
-				RunID:    runID,
-				Verified: verified,
-				Message:  msg,
-			})
-			return
-		}
-
-		verified, msg, err = verifyLegacyStub(runID, proofB64, publicInputsB64)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
-			return
-		}
 		c.JSON(http.StatusOK, VerifyResponse{
 			RunID:    runID,
 			Verified: verified,
 			Message:  msg,
 		})
 	}
-}
-
-func shouldTryLegacy(msg string) bool {
-	switch msg {
-	case "invalid public inputs format", "invalid proof format":
-		return true
-	default:
-		return false
-	}
-}
-
-func verifyLegacyStub(runID, proofB64, publicInputsB64 string) (bool, string, error) {
-	if runID == "" {
-		return false, "missing run_id", fmt.Errorf("missing run_id")
-	}
-	proofRaw, err := base64.StdEncoding.DecodeString(proofB64)
-	if err != nil {
-		return false, "invalid proof encoding", fmt.Errorf("invalid proof encoding")
-	}
-	pubRaw, err := base64.StdEncoding.DecodeString(publicInputsB64)
-	if err != nil {
-		return false, "invalid public inputs encoding", fmt.Errorf("invalid public inputs encoding")
-	}
-	expectedProof := "stub_proof_" + runID
-	expectedPub := "stub_inputs_" + runID
-	if strings.HasPrefix(string(proofRaw), "noema_stub_proof_v1|") {
-		return false, "unexpected proof format", nil
-	}
-	if string(proofRaw) != expectedProof || string(pubRaw) != expectedPub {
-		return false, "legacy stub proof mismatch", nil
-	}
-	return true, "legacy stub verifier", nil
 }

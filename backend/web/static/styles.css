@@ -1243,7 +1243,7 @@ pre,
 
 .verify-row {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 1rem;
   padding: 0.9rem 1rem;
   border: 1px solid var(--border);
@@ -1371,7 +1371,13 @@ pre,
   justify-content: flex-end;
 }
 .verify-actions .btn {
+  flex: 1 1 150px;
   white-space: nowrap;
+}
+
+@media (max-width: 1100px) {
+  .verify-row { grid-template-columns: 1fr; }
+  .verify-actions { justify-content: flex-start; }
 }
 
 @media (max-width: 760px) {
